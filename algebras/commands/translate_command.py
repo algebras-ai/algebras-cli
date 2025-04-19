@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional
 from algebras.config import Config
 from algebras.services.translator import Translator
 from algebras.services.file_scanner import FileScanner
+from algebras.utils.path_utils import determine_target_path
 
 
 def execute(language: Optional[str] = None, force: bool = False) -> None:
@@ -87,17 +88,19 @@ def execute(language: Optional[str] = None, force: bool = False) -> None:
                     
                     # Check if the base already contains language marker
                     if f".{source_language}" in base or f"-{source_language}" in base or f"_{source_language}" in base:
-                        base = base.replace(f".{source_language}", f".{target_lang}")
-                        base = base.replace(f"-{source_language}", f"-{target_lang}")
-                        base = base.replace(f"_{source_language}", f"_{target_lang}")
-                    else:
-                        base = f"{base}.{target_lang}"
+                        base = base.replace(f".{source_language}", "")
+                        base = base.replace(f"-{source_language}", "")
+                        base = base.replace(f"_{source_language}", "")
                     
                     target_basename = f"{base}.{ext}"
                 else:
-                    target_basename = f"{source_basename}.{target_lang}"
+                    target_basename = source_basename
                 
-                target_file = os.path.join(source_dirname, target_basename)
+                # Determine the target directory path
+                target_dirname = os.path.dirname(determine_target_path(source_file, source_language, target_lang))
+                os.makedirs(target_dirname, exist_ok=True)
+                
+                target_file = os.path.join(target_dirname, target_basename)
                 
                 # Check if target file already exists and is up to date
                 if not force and os.path.exists(target_file):
