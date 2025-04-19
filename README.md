@@ -78,6 +78,41 @@ The `.algebras.config` file is used to configure the Algebras CLI. It contains t
 
 Contributions are welcome! Please open an issue or submit a pull request.
 
+### Development Setup
+
+1. Clone the repository
+2. Install the package in development mode:
+
+```bash
+pip install -e .
+```
+
+3. Install development dependencies:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+### Running Tests
+
+To run the tests:
+
+```bash
+python tests/run_tests.py
+```
+
+Or use pytest directly:
+
+```bash
+pytest
+```
+
+For test coverage reports:
+
+```bash
+pytest --cov=algebras --cov-report=term --cov-report=html
+```
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

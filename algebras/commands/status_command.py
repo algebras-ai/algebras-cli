@@ -4,7 +4,6 @@ Check the status of your translations
 
 import os
 import click
-from colorama import Fore
 from typing import Optional, Dict, List
 
 from algebras.config import Config
@@ -21,7 +20,7 @@ def execute(language: Optional[str] = None) -> None:
     config = Config()
     
     if not config.exists():
-        click.echo(f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.{Fore.RESET}")
+        click.echo(click.style("No Algebras configuration found. Run 'algebras init' first.", fg='red'))
         return
     
     # Load configuration
@@ -33,7 +32,7 @@ def execute(language: Optional[str] = None) -> None:
     # Filter languages if specified
     if language:
         if language not in all_languages:
-            click.echo(f"{Fore.RED}Language '{language}' is not configured in your project.{Fore.RESET}")
+            click.echo(click.style(f"Language '{language}' is not configured in your project.", fg='red'))
             return
         languages = [language]
     else:
@@ -50,14 +49,14 @@ def execute(language: Optional[str] = None) -> None:
         # Get source files
         source_files = files_by_language.get(source_language, [])
         if not source_files:
-            click.echo(f"{Fore.YELLOW}No source files found for language '{source_language}'.{Fore.RESET}")
+            click.echo(click.style(f"No source files found for language '{source_language}'.", fg='yellow'))
             return
         
         # Print status header
-        click.echo(f"\n{Fore.BLUE}Translation Status{Fore.RESET}")
-        click.echo(f"{Fore.BLUE}{'=' * 80}{Fore.RESET}")
+        click.echo(f"\n{click.style('Translation Status', fg='blue')}")
+        click.echo(click.style('=' * 80, fg='blue'))
         click.echo(f"Source language: {source_language} ({len(source_files)} files)")
-        click.echo(f"{Fore.BLUE}{'-' * 80}{Fore.RESET}")
+        click.echo(click.style('-' * 80, fg='blue'))
         
         # Calculate expected file count for each language
         expected_file_counts = {lang: len(source_files) for lang in languages}
@@ -78,14 +77,14 @@ def execute(language: Optional[str] = None) -> None:
             
             # Set color based on completion percentage
             if percentage >= 90:
-                color = Fore.GREEN
+                color = 'green'
             elif percentage >= 50:
-                color = Fore.YELLOW
+                color = 'yellow'
             else:
-                color = Fore.RED
+                color = 'red'
             
             # Print status
-            click.echo(f"{lang}: {color}{file_count}/{expected_file_counts[lang]} files ({percentage:.1f}%){Fore.RESET}")
+            click.echo(f"{lang}: {click.style(f'{file_count}/{expected_file_counts[lang]} files ({percentage:.1f}%)', fg=color)}")
             
             # Check for outdated files
             outdated_count = 0
@@ -130,17 +129,17 @@ def execute(language: Optional[str] = None) -> None:
             
             # Print outdated file count
             if outdated_count > 0:
-                click.echo(f"  {Fore.YELLOW}Warning: {outdated_count} files are outdated{Fore.RESET}")
+                click.echo(f"  {click.style(f'Warning: {outdated_count} files are outdated', fg='yellow')}")
         
-        click.echo(f"{Fore.BLUE}{'-' * 80}{Fore.RESET}")
+        click.echo(click.style('-' * 80, fg='blue'))
         
         # Print summary
         if len(languages) > 1:
-            click.echo(f"\n{Fore.GREEN}Summary:{Fore.RESET}")
-            click.echo(f"- To add a new language: {Fore.BLUE}algebras add <language>{Fore.RESET}")
-            click.echo(f"- To translate your application: {Fore.BLUE}algebras translate{Fore.RESET}")
-            click.echo(f"- To update outdated translations: {Fore.BLUE}algebras update{Fore.RESET}")
-            click.echo(f"- To review translations: {Fore.BLUE}algebras review{Fore.RESET}")
+            click.echo(f"\n{click.style('Summary:', fg='green')}")
+            click.echo(f"- To add a new language: {click.style('algebras add <language>', fg='blue')}")
+            click.echo(f"- To translate your application: {click.style('algebras translate', fg='blue')}")
+            click.echo(f"- To update outdated translations: {click.style('algebras update', fg='blue')}")
+            click.echo(f"- To review translations: {click.style('algebras review', fg='blue')}")
     
     except Exception as e:
-        click.echo(f"{Fore.RED}Error: {str(e)}{Fore.RESET}") 
+        click.echo(click.style(f"Error: {str(e)}", fg='red')) 
