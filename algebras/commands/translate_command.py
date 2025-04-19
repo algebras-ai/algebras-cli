@@ -25,7 +25,7 @@ def execute(language: Optional[str] = None, force: bool = False) -> None:
     config = Config()
     
     if not config.exists():
-        click.echo(f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.{Fore.RESET}")
+        click.echo(f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.\x1b[0m")
         return
     
     # Load configuration
@@ -34,13 +34,13 @@ def execute(language: Optional[str] = None, force: bool = False) -> None:
     # Get languages
     languages = config.get_languages()
     if len(languages) < 2:
-        click.echo(f"{Fore.YELLOW}Only one language ({languages[0]}) is configured. Add more languages with 'algebras add <language>'.{Fore.RESET}")
+        click.echo(f"{Fore.YELLOW}Only one language ({languages[0]}) is configured. Add more languages with 'algebras add <language>'.\x1b[0m")
         return
     
     # Filter languages if specified
     if language:
         if language not in languages:
-            click.echo(f"{Fore.RED}Language '{language}' is not configured in your project.{Fore.RESET}")
+            click.echo(f"{Fore.RED}Language '{language}' is not configured in your project.\x1b[0m")
             return
         target_languages = [language]
     else:
@@ -58,17 +58,17 @@ def execute(language: Optional[str] = None, force: bool = False) -> None:
         # Get source files
         source_files = files_by_language.get(source_language, [])
         if not source_files:
-            click.echo(f"{Fore.YELLOW}No source files found for language '{source_language}'.{Fore.RESET}")
+            click.echo(f"{Fore.YELLOW}No source files found for language '{source_language}'.\x1b[0m")
             return
         
-        click.echo(f"{Fore.GREEN}Found {len(source_files)} source files for language '{source_language}'.{Fore.RESET}")
+        click.echo(f"{Fore.GREEN}Found {len(source_files)} source files for language '{source_language}'.\x1b[0m")
         
         # Initialize translator
         translator = Translator()
         
         # Translate each target language
         for target_lang in target_languages:
-            click.echo(f"\n{Fore.BLUE}Translating to {target_lang}...{Fore.RESET}")
+            click.echo(f"\n{Fore.BLUE}Translating to {target_lang}...\x1b[0m")
             
             # Get existing files for this language
             existing_files = files_by_language.get(target_lang, [])
@@ -105,11 +105,11 @@ def execute(language: Optional[str] = None, force: bool = False) -> None:
                     target_mtime = os.path.getmtime(target_file)
                     
                     if target_mtime > source_mtime:
-                        click.echo(f"  {Fore.YELLOW}Skipping {target_basename} (already up to date){Fore.RESET}")
+                        click.echo(f"  {Fore.YELLOW}Skipping {target_basename} (already up to date)\x1b[0m")
                         continue
                 
                 # Translate the file
-                click.echo(f"  {Fore.GREEN}Translating {source_basename} to {target_basename}...{Fore.RESET}")
+                click.echo(f"  {Fore.GREEN}Translating {source_basename} to {target_basename}...\x1b[0m")
                 try:
                     translated_content = translator.translate_file(source_file, target_lang)
                     
@@ -121,12 +121,12 @@ def execute(language: Optional[str] = None, force: bool = False) -> None:
                         with open(target_file, "w", encoding="utf-8") as f:
                             yaml.dump(translated_content, f, default_flow_style=False, allow_unicode=True)
                     
-                    click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}{Fore.RESET}")
+                    click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                 except Exception as e:
-                    click.echo(f"  {Fore.RED}Error translating {source_basename}: {str(e)}{Fore.RESET}")
+                    click.echo(f"  {Fore.RED}Error translating {source_basename}: {str(e)}\x1b[0m")
         
-        click.echo(f"\n{Fore.GREEN}Translation completed.{Fore.RESET}")
-        click.echo(f"To check the status of your translations, run: {Fore.BLUE}algebras status{Fore.RESET}")
+        click.echo(f"\n{Fore.GREEN}Translation completed.\x1b[0m")
+        click.echo(f"To check the status of your translations, run: {Fore.BLUE}algebras status\x1b[0m")
     
     except Exception as e:
-        click.echo(f"{Fore.RED}Error: {str(e)}{Fore.RESET}") 
+        click.echo(f"{Fore.RED}Error: {str(e)}\x1b[0m") 

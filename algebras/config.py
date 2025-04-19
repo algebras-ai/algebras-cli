@@ -59,6 +59,8 @@ class Config:
     def get_languages(self) -> List[str]:
         """Get the list of languages."""
         if not self.data:
+            if not self.exists():
+                return []
             self.load()
         
         return self.data.get("languages", [])
@@ -79,6 +81,8 @@ class Config:
     def get_path_rules(self) -> List[str]:
         """Get the list of path rules."""
         if not self.data:
+            if not self.exists():
+                return []
             self.load()
         
         return self.data.get("path_rules", [])
@@ -86,6 +90,8 @@ class Config:
     def get_api_config(self) -> Dict[str, str]:
         """Get the API configuration."""
         if not self.data:
+            if not self.exists():
+                return {}
             self.load()
         
         return self.data.get("api", {}) 

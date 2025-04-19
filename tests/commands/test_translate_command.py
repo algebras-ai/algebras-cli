@@ -169,8 +169,12 @@ class TestTranslateCommand:
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.config_path = "/path/to/.algebras.config"
+        # Make sure load() doesn't actually try to load anything
+        mock_config.load.return_value = {"languages": ["en", "fr"]}
+        mock_config.data = {"languages": ["en", "fr"]}
         
-        # Mock FileScanner
+        # Mock FileScanner to avoid it trying to instantiate a real Config
         mock_scanner = MagicMock(spec=FileScanner)
         mock_scanner.group_files_by_language.return_value = {
             "en": ["messages.en.json"],
@@ -182,6 +186,7 @@ class TestTranslateCommand:
              patch("algebras.commands.translate_command.FileScanner", return_value=mock_scanner), \
              patch("os.path.exists", return_value=True), \
              patch("os.path.getmtime", side_effect=[1000, 2000]), \
+             patch("builtins.open", mock_open()), \
              patch("algebras.commands.translate_command.click.echo") as mock_echo:
             
             # Call execute without force

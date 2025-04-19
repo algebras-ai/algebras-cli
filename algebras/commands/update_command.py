@@ -22,7 +22,7 @@ def execute(language: Optional[str] = None) -> None:
     config = Config()
     
     if not config.exists():
-        click.echo(f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.{Fore.RESET}")
+        click.echo(f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.\x1b[0m")
         return
     
     # Load configuration
@@ -34,7 +34,7 @@ def execute(language: Optional[str] = None) -> None:
     # Filter languages if specified
     if language:
         if language not in all_languages:
-            click.echo(f"{Fore.RED}Language '{language}' is not configured in your project.{Fore.RESET}")
+            click.echo(f"{Fore.RED}Language '{language}' is not configured in your project.\x1b[0m")
             return
         languages = [language]
     else:
@@ -42,7 +42,7 @@ def execute(language: Optional[str] = None) -> None:
         languages = all_languages[1:]
     
     if not languages:
-        click.echo(f"{Fore.YELLOW}No target languages configured. Add languages with 'algebras add <language>'.{Fore.RESET}")
+        click.echo(f"{Fore.YELLOW}No target languages configured. Add languages with 'algebras add <language>'.\x1b[0m")
         return
     
     # Get source language
@@ -56,7 +56,7 @@ def execute(language: Optional[str] = None) -> None:
         # Get source files
         source_files = files_by_language.get(source_language, [])
         if not source_files:
-            click.echo(f"{Fore.YELLOW}No source files found for language '{source_language}'.{Fore.RESET}")
+            click.echo(f"{Fore.YELLOW}No source files found for language '{source_language}'.\x1b[0m")
             return
         
         # Find outdated files
@@ -110,10 +110,10 @@ def execute(language: Optional[str] = None) -> None:
         # Print summary
         total_outdated = sum(len(files) for files in outdated_by_language.values())
         if total_outdated == 0:
-            click.echo(f"{Fore.GREEN}All translations are up to date.{Fore.RESET}")
+            click.echo(f"{Fore.GREEN}All translations are up to date.\x1b[0m")
             return
         
-        click.echo(f"{Fore.YELLOW}Found {total_outdated} outdated translations.{Fore.RESET}")
+        click.echo(f"{Fore.YELLOW}Found {total_outdated} outdated translations.\x1b[0m")
         
         # Update outdated files
         for lang in languages:
@@ -126,8 +126,8 @@ def execute(language: Optional[str] = None) -> None:
             # Use translate command with force option to update files
             translate_command.execute(lang, force=True)
         
-        click.echo(f"\n{Fore.GREEN}Update completed.{Fore.RESET}")
-        click.echo(f"To check the status of your translations, run: {Fore.BLUE}algebras status{Fore.RESET}")
+        click.echo(f"\n{Fore.GREEN}Update completed.\x1b[0m")
+        click.echo(f"To check the status of your translations, run: {Fore.BLUE}algebras status\x1b[0m")
     
     except Exception as e:
-        click.echo(f"{Fore.RED}Error: {str(e)}{Fore.RESET}") 
+        click.echo(f"{Fore.RED}Error: {str(e)}\x1b[0m") 

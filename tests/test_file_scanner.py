@@ -98,24 +98,24 @@ class TestFileScanner:
             "locales/de.yaml",
             "generic.json"  # No language marker, should be grouped with default language
         ]
-
+        
         # Mock Config
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.load.return_value = {}
         mock_config.get_path_rules.return_value = ["**/*.json", "**/*.yaml"]
         mock_config.get_languages.return_value = ["en", "fr", "de"]
-
+        
         # Patch Config class and find_localization_files method
         monkeypatch.setattr("algebras.services.file_scanner.Config", lambda: mock_config)
-
+        
         # Create scanner with mocked find_localization_files
         scanner = FileScanner()
         scanner.find_localization_files = lambda: file_paths
-
+        
         # Test group_files_by_language
         result = scanner.group_files_by_language()
-
+        
         # Verify the grouping
         assert set(result.keys()) == {"en", "fr", "de"}
         assert set(result["en"]) == {"messages.en.json", "locales/en.yaml", "generic.json"}

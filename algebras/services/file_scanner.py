@@ -63,17 +63,33 @@ class FileScanner:
         languages = self.config.get_languages()
         
         result = {lang: [] for lang in languages}
+        assigned_files = set()
         
-        # Simplified approach: check if language code is in the file path
+        # First pass: assign files with explicit language markers
         for file_path in files:
             base_name = os.path.basename(file_path)
+            
+            # Check for language markers in the filename
             for lang in languages:
-                if f".{lang}." in base_name or f"-{lang}." in base_name or f"_{lang}." in base_name:
+                # Check common language marker patterns
+                patterns = [
+                    f".{lang}.",  # e.g., messages.en.json
+                    f"-{lang}.",  # e.g., messages-en.json
+                    f"_{lang}.",  # e.g., messages_en.json
+                    f"/{lang}.",  # e.g., locales/en.yaml
+                    f"{os.path.sep}{lang}."  # OS agnostic path separator
+                ]
+                
+                if any(pattern in file_path for pattern in patterns):
                     result[lang].append(file_path)
+                    assigned_files.add(file_path)
                     break
-            else:
-                # If no language code found, assume it's the default language (first in list)
-                if languages:
-                    result[languages[0]].append(file_path)
+        
+        # Second pass: assign unmarked files to the default language
+        if languages:
+            default_lang = languages[0]
+            for file_path in files:
+                if file_path not in assigned_files:
+                    result[default_lang].append(file_path)
         
         return result 
