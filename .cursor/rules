@@ -1,0 +1,23 @@
+Translate your application with Algebras CLI powered by AI.
+
+What is Algebras CLI?
+Algebras CLI easily tracks your application's localization status and automates the process of updating translations.Algebras CLI is python package.
+
+
+Algebras using ALGEBRAS_API_KEY to authenticate. You can get your API key from Algebras dashboard (platform.algebras.io).
+
+.algebras.lock file is used to lock the translations for the current version of the application and track the changes applied to the translations.
+.algebras.config file is used to configure the Algebras CLI: list of languages to translate the application into, specific path rule to find localization files etc.
+
+Commands:
+- algebras init: Initialize a new Algebras project
+- algebras add: Add a new language to your application
+- algebras translate: Translate your application
+- algebras update: Update your translations
+- algebras review: Review your translations
+- algebras status: Check the status of your translations
+- algebras ci: Run the CI pipeline
+
+
+On every added feature update or write unit tests from scratch.
+
