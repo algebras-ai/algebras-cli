@@ -9,7 +9,7 @@ setup(
         "click>=8.0.0",
         "colorama>=0.4.4",
         "pyyaml>=6.0",
-        "openai>=0.27.0",
+        "openai>=1.0.0",
     ],
     entry_points={
         "console_scripts": [

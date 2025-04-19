@@ -8,6 +8,7 @@ import yaml
 from unittest.mock import patch, MagicMock, mock_open
 
 import pytest
+from openai import OpenAI
 
 from algebras.config import Config
 from algebras.services.translator import Translator
@@ -27,6 +28,10 @@ class TestTranslator:
         # Patch Config class
         monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
 
+        # Mock OpenAI client
+        mock_openai = MagicMock(spec=OpenAI)
+        monkeypatch.setattr("algebras.services.translator.OpenAI", lambda api_key: mock_openai)
+
         # Mock environment variable
         monkeypatch.setenv("OPENAI_API_KEY", "test-api-key")
 
@@ -38,6 +43,7 @@ class TestTranslator:
         assert mock_config.load.called
         assert mock_config.get_api_config.called
         assert translator.api_config == {"provider": "openai", "model": "gpt-4"}
+        assert translator.client is not None
 
     def test_init_no_config(self, monkeypatch):
         """Test initialization of Translator with no config file"""
@@ -66,18 +72,26 @@ class TestTranslator:
         # Mock environment variable
         monkeypatch.setenv("OPENAI_API_KEY", "test-api-key")
 
-        # Mock OpenAI response
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Bonjour le monde"
+        # Mock OpenAI client and response
+        mock_completion = MagicMock()
+        mock_completion.choices = [MagicMock()]
+        mock_completion.choices[0].message.content = "Bonjour le monde"
+        
+        mock_chat = MagicMock()
+        mock_chat.completions.create.return_value = mock_completion
+        
+        mock_client = MagicMock()
+        mock_client.chat = mock_chat
+        
+        monkeypatch.setattr("algebras.services.translator.OpenAI", lambda api_key: mock_client)
 
-        # Patch OpenAI ChatCompletion.create
-        with patch("openai.ChatCompletion.create", return_value=mock_response):
-            translator = Translator()
-            result = translator.translate_text("Hello world", "en", "fr")
+        # Initialize Translator
+        translator = Translator()
+        result = translator.translate_text("Hello world", "en", "fr")
 
-            # Verify the translation
-            assert result == "Bonjour le monde"
+        # Verify the translation
+        assert result == "Bonjour le monde"
+        mock_chat.completions.create.assert_called_once()
 
     def test_translate_text_unsupported_provider(self, monkeypatch):
         """Test translate_text method with unsupported provider"""
@@ -110,10 +124,13 @@ class TestTranslator:
 
         # Ensure no API key in environment
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        monkeypatch.setattr("openai.api_key", None)
+        
+        # Set client to None
+        monkeypatch.setattr("algebras.services.translator.OpenAI", lambda api_key: None)
 
-        # Initialize Translator
+        # Initialize Translator with no client
         translator = Translator()
+        translator.client = None
 
         # Test translate_text with no API key
         with pytest.raises(ValueError, match="OpenAI API key not found"):

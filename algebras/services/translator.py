@@ -6,7 +6,7 @@ import os
 import json
 import yaml
 from typing import Dict, Any, List, Optional
-import openai
+from openai import OpenAI
 
 from algebras.config import Config
 
@@ -22,10 +22,12 @@ class Translator:
         self.config.load()
         self.api_config = self.config.get_api_config()
         
-        # Set up OpenAI if available
+        # Set up OpenAI client if available
         openai_api_key = os.environ.get("OPENAI_API_KEY")
         if openai_api_key:
-            openai.api_key = openai_api_key
+            self.client = OpenAI(api_key=openai_api_key)
+        else:
+            self.client = None
         
     def translate_text(self, text: str, source_lang: str, target_lang: str) -> str:
         """
@@ -60,7 +62,7 @@ class Translator:
         """
         model = self.api_config.get("model", "gpt-4")
         
-        if not openai.api_key:
+        if not self.client:
             raise ValueError("OpenAI API key not found. Set the OPENAI_API_KEY environment variable.")
         
         prompt = f"""
@@ -72,7 +74,7 @@ class Translator:
         {text}
         """
         
-        response = openai.ChatCompletion.create(
+        response = self.client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": "You are a professional translator."},
