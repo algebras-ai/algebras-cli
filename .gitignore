@@ -1,3 +1,6 @@
+# Folder to clone repos into and test the CLI
+examples/repos/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
