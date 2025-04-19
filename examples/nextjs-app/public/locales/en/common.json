@@ -1,0 +1,19 @@
+{
+  "title": "Welcome to NextJS Application",
+  "description": "This is a sample project to test algebras-cli with NextJS",
+  "navigation": {
+    "home": "Home",
+    "about": "About",
+    "contact": "Contact"
+  },
+  "buttons": {
+    "submit": "Submit",
+    "cancel": "Cancel",
+    "login": "Log In",
+    "register": "Register"
+  },
+  "errors": {
+    "required": "This field is required",
+    "invalid_email": "Please enter a valid email address"
+  }
+} 

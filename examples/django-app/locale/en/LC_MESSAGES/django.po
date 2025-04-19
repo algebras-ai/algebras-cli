@@ -1,0 +1,62 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2023-09-01 12:00+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: templates/home.html:10
+msgid "Welcome to Django Application"
+msgstr "Welcome to Django Application"
+
+#: templates/home.html:15
+msgid "This is a sample project to test algebras-cli with Django"
+msgstr "This is a sample project to test algebras-cli with Django"
+
+#: templates/navbar.html:5
+msgid "Home"
+msgstr "Home"
+
+#: templates/navbar.html:8
+msgid "About"
+msgstr "About"
+
+#: templates/navbar.html:11
+msgid "Contact"
+msgstr "Contact"
+
+#: templates/forms.html:10
+msgid "Submit"
+msgstr "Submit"
+
+#: templates/forms.html:15
+msgid "Cancel"
+msgstr "Cancel"
+
+#: templates/auth/login.html:8
+msgid "Log In"
+msgstr "Log In"
+
+#: templates/auth/register.html:8
+msgid "Register"
+msgstr "Register"
+
+#: forms.py:25
+msgid "This field is required"
+msgstr "This field is required"
+
+#: forms.py:35
+msgid "Please enter a valid email address"
+msgstr "Please enter a valid email address" 
