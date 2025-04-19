@@ -24,9 +24,19 @@ def execute(force: bool = False) -> None:
     
     click.echo(f"{Fore.GREEN}Initializing Algebras project...\x1b[0m")
     
+    # Create config with detected languages using the enhanced create_default method
     config.create_default()
     
     click.echo(f"{Fore.GREEN}✓ Created configuration file: \x1b[0m{config.config_path}")
-    click.echo(f"\nYour Algebras project has been initialized with English as the default language.")
+    
+    # Load the config to get the detected languages
+    config.load()
+    languages = config.get_languages()
+    
+    if len(languages) > 1:
+        click.echo(f"\nYour Algebras project has been initialized with the following languages: {', '.join(languages)}")
+    else:
+        click.echo(f"\nYour Algebras project has been initialized with English as the default language.")
+    
     click.echo(f"To add more languages, run: {Fore.BLUE}algebras add <language>\x1b[0m")
     click.echo(f"To check the status of your translations, run: {Fore.BLUE}algebras status\x1b[0m") 
