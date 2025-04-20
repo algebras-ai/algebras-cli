@@ -136,7 +136,7 @@ class Translator:
             
             if response.status_code == 200:
                 result = response.json()
-                return result.get("translatedText", "")
+                return result.get("data", "")
             else:
                 error_msg = f"Error from Algebras AI API: {response.status_code} - {response.text}"
                 raise Exception(error_msg)

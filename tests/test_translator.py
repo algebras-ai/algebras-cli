@@ -349,7 +349,7 @@ class TestTranslator:
         # Mock requests.post
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"translatedText": "Hallo Welt"}
+        mock_response.json.return_value = {"data": "Hallo Welt"}
         
         mock_post = MagicMock(return_value=mock_response)
         monkeypatch.setattr("algebras.services.translator.requests.post", mock_post)
