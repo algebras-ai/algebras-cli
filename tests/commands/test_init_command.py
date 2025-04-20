@@ -94,8 +94,8 @@ class TestInitCommand:
             # Verify the command executed successfully
             assert result.exit_code == 0
             
-            # Verify execute was called with the right arguments
-            mock_execute.assert_called_once_with(False)
+            # Verify execute was called with the right arguments (force=False, verbose=False)
+            mock_execute.assert_called_once_with(False, False)
             
             # Test with force option
             result = runner.invoke(init, ["--force"])
@@ -104,4 +104,4 @@ class TestInitCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments
-            mock_execute.assert_called_with(True) 
+            mock_execute.assert_called_with(True, False) 
