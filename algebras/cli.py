@@ -25,9 +25,10 @@ def cli():
 
 @cli.command("init")
 @click.option("--force", is_flag=True, help="Force initialization even if a config file exists.")
-def init(force):
+@click.option("--verbose", is_flag=True, help="Show detailed information about locale detection.")
+def init(force, verbose):
     """Initialize a new Algebras project."""
-    init_command.execute(force)
+    init_command.execute(force, verbose)
 
 
 @cli.command("add")

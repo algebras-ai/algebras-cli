@@ -66,7 +66,22 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
             return
         
         click.echo(f"{Fore.GREEN}Found {len(source_files)} source files for language '{source_language}'.\x1b[0m")
-        
+        # Print verbose information about source files
+        click.echo("\nSource files:")
+        for idx, file_path in enumerate(source_files, 1):
+            file_size = os.path.getsize(file_path)
+            file_size_str = f"{file_size / 1024:.1f} KB" if file_size >= 1024 else f"{file_size} bytes"
+            file_ext = os.path.splitext(file_path)[1]
+            
+            # Get relative path for cleaner display
+            try:
+                rel_path = os.path.relpath(file_path)
+            except ValueError:
+                rel_path = file_path
+                
+            click.echo(f"  {idx}. {Fore.CYAN}{rel_path}{Fore.RESET} ({file_size_str}, {file_ext})")
+            
+        click.echo("")  # Empty line for better readability
         # Initialize translator
         translator = Translator()
         
