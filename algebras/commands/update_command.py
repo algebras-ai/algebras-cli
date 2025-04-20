@@ -54,9 +54,10 @@ def execute(language: Optional[str] = None) -> None:
     try:
         scanner = FileScanner()
         files_by_language = scanner.group_files_by_language()
-        
+        print(f"files_by_language: {files_by_language}")
         # Get source files
         source_files = files_by_language.get(source_language, [])
+        print(f"source_files: {source_files}")
         if not source_files:
             click.echo(f"{Fore.YELLOW}No source files found for language '{source_language}'.\x1b[0m")
             return
@@ -76,8 +77,18 @@ def execute(language: Optional[str] = None) -> None:
                 lang_basename = os.path.basename(lang_file)
                 lang_dirname = os.path.dirname(lang_file)
                 
-                # Remove language suffix to find base filename
-                if "." in lang_basename:
+                # Handle simple case where filename is just "language.json"
+                if lang_basename == f"{lang}.json" and f"{source_language}.json" in [os.path.basename(f) for f in source_files]:
+                    source_basename = f"{source_language}.json"
+                    potential_source_file = os.path.join(lang_dirname, source_basename)
+                    
+                    # Find the exact source file path
+                    for src_file in source_files:
+                        if os.path.basename(src_file) == source_basename:
+                            source_file = src_file
+                            break
+                # More complex cases with language suffixes
+                elif "." in lang_basename:
                     name_parts = lang_basename.split(".")
                     ext = name_parts.pop()
                     base = ".".join(name_parts)
@@ -94,14 +105,20 @@ def execute(language: Optional[str] = None) -> None:
                         base_source = base.replace(f".{lang}", "")
                     
                     source_basename = f"{base_source}.{ext}"
+                    potential_source_file = os.path.join(lang_dirname, source_basename)
+                    
+                    if potential_source_file in source_files:
+                        source_file = potential_source_file
                 else:
                     source_basename = lang_basename.replace(f".{lang}", "")
-                
-                potential_source_file = os.path.join(lang_dirname, source_basename)
-                
-                if potential_source_file in source_files:
-                    source_file = potential_source_file
+                    potential_source_file = os.path.join(lang_dirname, source_basename)
                     
+                    if potential_source_file in source_files:
+                        source_file = potential_source_file
+                
+                print(f"lang_file: {lang_file}, source_file: {source_file}")
+                
+                if source_file:
                     # Check if file is outdated based on modification time
                     source_mtime = os.path.getmtime(source_file)
                     lang_mtime = os.path.getmtime(lang_file)
