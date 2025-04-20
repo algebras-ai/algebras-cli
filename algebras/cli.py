@@ -49,10 +49,11 @@ def translate(language, force, only_missing):
 @cli.command("update")
 @click.option("--language", "-l", help="Update only the specified language.")
 @click.option("--full", is_flag=True, help="Translate the entire file, not just missing keys.")
-def update(language, full):
+@click.option("--use-git", is_flag=True, help="Use git for key validation (slower but more thorough).")
+def update(language, full, use_git):
     """Update your translations."""
     only_missing = not full
-    update_command.execute(language, only_missing)
+    update_command.execute(language, only_missing, not use_git)
 
 
 @cli.command("review")
