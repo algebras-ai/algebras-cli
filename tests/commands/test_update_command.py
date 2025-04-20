@@ -114,7 +114,7 @@ class TestUpdateCommand(unittest.TestCase):
             execute()
             
             # Check that the warning message was displayed
-            mock_echo.assert_called_once_with(
+            mock_echo.assert_any_call(
                 f"{Fore.YELLOW}No source files found for language '{self.source_language}'.\x1b[0m"
             )
         

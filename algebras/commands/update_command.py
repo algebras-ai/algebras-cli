@@ -14,14 +14,14 @@ from algebras.utils.lang_validator import validate_language_files, find_outdated
 from algebras.utils.git_utils import is_git_available, is_git_repository
 
 
-def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_validation: bool = True) -> None:
+def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_validation: bool = False) -> None:
     """
     Update your translations.
     
     Args:
         language: Language to update (if None, update all languages)
         only_missing: If True, only missing keys will be translated (default: True)
-        skip_git_validation: If True, git validation will be skipped even if git is available (default: True)
+        skip_git_validation: If True, git validation will be skipped even if git is available (default: False)
     """
     config = Config()
     
@@ -55,11 +55,10 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
     
     # Check if git is available for outdated key detection
     git_available = is_git_available() and not skip_git_validation
-    if not skip_git_validation:
-        if is_git_available():
-            click.echo(f"{Fore.BLUE}Using git for key validation. This may take some time...\x1b[0m")
-        else:
-            click.echo(f"{Fore.YELLOW}Git was requested but is not available. Skipping detection of updated keys.\x1b[0m")
+    if git_available:
+        click.echo(f"{Fore.BLUE}Using git for key validation. This may take some time...\x1b[0m")
+    else:
+        click.echo(f"{Fore.YELLOW}Git is not available. Skipping detection of updated keys.\x1b[0m")
     
     # Scan for files
     try:
@@ -145,7 +144,7 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                         missing_keys_files.append((lang_file, missing_keys))
                     
                     # Check for outdated keys using git history if available
-                    if git_available and is_git_repository(source_file):
+                    if git_available and is_git_repository(os.path.dirname(source_file)):
                         has_outdated_keys, outdated_keys = find_outdated_keys(source_file, lang_file)
                         if has_outdated_keys:
                             outdated_keys_files.append((lang_file, outdated_keys))
