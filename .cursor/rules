@@ -21,3 +21,4 @@ Commands:
 
 On every added feature update or write unit tests from scratch.
 
+Dont forget to do source venv/bin/activate before running the commands.
