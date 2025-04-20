@@ -94,6 +94,14 @@ def execute(language: Optional[str] = None) -> None:
                 ext = name_parts.pop()
                 base = ".".join(name_parts)
                 
+                # Special case for files named directly with language code (e.g., 'ca.json', 'en.json')
+                if base == target_language and ext in ["json", "yaml", "yml"]:
+                    source_basename = f"{source_language}.{ext}"
+                    potential_source_file = os.path.join(target_dirname, source_basename)
+                    if potential_source_file in source_files:
+                        matched_files.append((potential_source_file, target_file))
+                        continue
+                
                 # Replace target language marker with source language marker
                 if f".{target_language}" in base:
                     base_source = base.replace(f".{target_language}", f".{source_language}")

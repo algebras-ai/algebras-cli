@@ -92,7 +92,9 @@ class FileScanner:
                     f"-{lang}.",  # e.g., messages-en.json
                     f"_{lang}.",  # e.g., messages_en.json
                     f"/{lang}.",  # e.g., locales/en.yaml
-                    f"{os.path.sep}{lang}."  # OS agnostic path separator
+                    f"{os.path.sep}{lang}.",  # OS agnostic path separator
+                    f"/{lang}",  # For files simply named as the language code (e.g., en.json)
+                    f"{os.path.sep}{lang}"  # OS agnostic path separator for files named with language code
                 ]
                 
                 if any(pattern in file_path for pattern in patterns):
