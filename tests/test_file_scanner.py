@@ -105,6 +105,7 @@ class TestFileScanner:
         mock_config.load.return_value = {}
         mock_config.get_path_rules.return_value = ["**/*.json", "**/*.yaml"]
         mock_config.get_languages.return_value = ["en", "fr", "de"]
+        mock_config.get_source_language.return_value = "en"
         
         # Patch Config class and find_localization_files method
         monkeypatch.setattr("algebras.services.file_scanner.Config", lambda: mock_config)

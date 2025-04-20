@@ -64,6 +64,7 @@ class TestStatusCommand:
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_source_language.return_value = "en"
         
         # Mock FileScanner
         mock_scanner = MagicMock(spec=FileScanner)
@@ -81,6 +82,7 @@ class TestStatusCommand:
             assert mock_config.exists.called
             assert mock_config.load.called
             assert mock_config.get_languages.called
+            assert mock_config.get_source_language.called
             assert mock_scanner.group_files_by_language.called
             
             # Verify output message
@@ -92,6 +94,7 @@ class TestStatusCommand:
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en", "fr", "es"]
+        mock_config.get_source_language.return_value = "en"
         
         # Mock FileScanner
         mock_scanner = MagicMock(spec=FileScanner)
@@ -114,6 +117,7 @@ class TestStatusCommand:
             assert mock_config.exists.called
             assert mock_config.load.called
             assert mock_config.get_languages.called
+            assert mock_config.get_source_language.called
             assert mock_scanner.group_files_by_language.called
             
             # Verify output messages
@@ -128,6 +132,7 @@ class TestStatusCommand:
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en", "fr", "es"]
+        mock_config.get_source_language.return_value = "en"
         
         # Mock FileScanner
         mock_scanner = MagicMock(spec=FileScanner)
@@ -149,6 +154,7 @@ class TestStatusCommand:
             assert mock_config.exists.called
             assert mock_config.load.called
             assert mock_config.get_languages.called
+            assert mock_config.get_source_language.called
             assert mock_scanner.group_files_by_language.called
             
             # Verify output messages
@@ -165,6 +171,7 @@ class TestStatusCommand:
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_source_language.return_value = "en"
         
         # Mock FileScanner
         mock_scanner = MagicMock(spec=FileScanner)
@@ -187,6 +194,7 @@ class TestStatusCommand:
             assert mock_config.exists.called
             assert mock_config.load.called
             assert mock_config.get_languages.called
+            assert mock_config.get_source_language.called
             assert mock_scanner.group_files_by_language.called
             
             # Verify output messages showing outdated files

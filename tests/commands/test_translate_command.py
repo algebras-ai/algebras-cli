@@ -88,6 +88,7 @@ class TestTranslateCommand:
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_source_language.return_value = "en"
         
         # Mock FileScanner
         mock_scanner = MagicMock(spec=FileScanner)
@@ -116,6 +117,7 @@ class TestTranslateCommand:
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_source_language.return_value = "en"
 
         # Set up source and target paths
         source_file = "public/locales/en/messages.json"
@@ -179,6 +181,7 @@ class TestTranslateCommand:
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en", "fr"]
         mock_config.config_path = "/path/to/.algebras.config"
+        mock_config.get_source_language.return_value = "en"
         # Make sure load() doesn't actually try to load anything
         mock_config.load.return_value = {"languages": ["en", "fr"]}
         mock_config.data = {"languages": ["en", "fr"]}
@@ -237,6 +240,7 @@ class TestTranslateCommand:
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_source_language.return_value = "en"
 
         # Set up paths for testing
         source_file = "public/locales/en/messages.json"
@@ -298,7 +302,7 @@ class TestTranslateCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments
-            mock_execute.assert_called_once_with(None, False)
+            mock_execute.assert_called_once_with(None, False, False)
             
             # Test with language and force options
             result = runner.invoke(translate, ["--language", "fr", "--force"])
@@ -307,4 +311,4 @@ class TestTranslateCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments
-            mock_execute.assert_called_with("fr", True) 
+            mock_execute.assert_called_with("fr", True, False) 
