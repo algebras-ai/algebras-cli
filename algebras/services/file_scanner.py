@@ -30,6 +30,14 @@ class FileScanner:
         include_patterns = []
         exclude_patterns = []
         
+        # Add more specific patterns for locale files
+        specific_locale_patterns = [
+            "src/locales/*.json",
+            "locales/*.json",
+            "src/i18n/*.json",
+            "i18n/*.json"
+        ]
+        
         # Separate include and exclude patterns
         for rule in self.path_rules:
             if rule.startswith("!"):
@@ -37,12 +45,19 @@ class FileScanner:
             else:
                 include_patterns.append(rule)
         
-        # Find all files matching include patterns
+        # Find all files matching specific locale patterns first
         all_files = set()
-        for pattern in include_patterns:
+        for pattern in specific_locale_patterns:
             for file_path in glob.glob(pattern, recursive=True):
                 if os.path.isfile(file_path):
                     all_files.add(os.path.normpath(file_path))
+        
+        # If no files found, fallback to general patterns
+        if not all_files:
+            for pattern in include_patterns:
+                for file_path in glob.glob(pattern, recursive=True):
+                    if os.path.isfile(file_path):
+                        all_files.add(os.path.normpath(file_path))
         
         # Remove files matching exclude patterns
         for pattern in exclude_patterns:
@@ -87,7 +102,7 @@ class FileScanner:
         
         # Second pass: assign unmarked files to the default language
         if languages:
-            default_lang = languages[0]
+            default_lang = self.config.get_source_language()
             for file_path in files:
                 if file_path not in assigned_files:
                     result[default_lang].append(file_path)

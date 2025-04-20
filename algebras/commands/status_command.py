@@ -39,7 +39,7 @@ def execute(language: Optional[str] = None) -> None:
         languages = all_languages
     
     # Get source language
-    source_language = all_languages[0]
+    source_language = config.get_source_language()
     
     # Scan for files
     try:

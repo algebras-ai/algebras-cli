@@ -5,11 +5,12 @@ Update your translations
 import os
 import click
 from colorama import Fore
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple, Set
 
 from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
 from algebras.commands import translate_command
+from algebras.utils.lang_validator import validate_language_files
 
 
 def execute(language: Optional[str] = None) -> None:
@@ -38,15 +39,16 @@ def execute(language: Optional[str] = None) -> None:
             return
         languages = [language]
     else:
-        # Skip the first language (source language)
-        languages = all_languages[1:]
+        # Skip the source language
+        source_lang = config.get_source_language()
+        languages = [lang for lang in all_languages if lang != source_lang]
     
     if not languages:
         click.echo(f"{Fore.YELLOW}No target languages configured. Add languages with 'algebras add <language>'.\x1b[0m")
         return
     
     # Get source language
-    source_language = all_languages[0]
+    source_language = config.get_source_language()
     
     # Scan for files
     try:
@@ -59,12 +61,14 @@ def execute(language: Optional[str] = None) -> None:
             click.echo(f"{Fore.YELLOW}No source files found for language '{source_language}'.\x1b[0m")
             return
         
-        # Find outdated files
+        # Find outdated files and files with missing keys
         outdated_by_language = {}
+        missing_keys_by_language = {}
         
         for lang in languages:
             lang_files = files_by_language.get(lang, [])
             outdated_files = []
+            missing_keys_files = []
             
             for lang_file in lang_files:
                 # Find corresponding source file
@@ -98,30 +102,61 @@ def execute(language: Optional[str] = None) -> None:
                 if potential_source_file in source_files:
                     source_file = potential_source_file
                     
-                    # Check if file is outdated
+                    # Check if file is outdated based on modification time
                     source_mtime = os.path.getmtime(source_file)
                     lang_mtime = os.path.getmtime(lang_file)
                     
                     if lang_mtime < source_mtime:
                         outdated_files.append(lang_file)
+                    
+                    # Check if all keys from source language exist in target language
+                    is_valid, missing_keys = validate_language_files(source_file, lang_file)
+                    if not is_valid:
+                        missing_keys_files.append((lang_file, missing_keys))
             
             outdated_by_language[lang] = outdated_files
+            missing_keys_by_language[lang] = missing_keys_files
         
-        # Print summary
+        # Count outdated and missing keys files
         total_outdated = sum(len(files) for files in outdated_by_language.values())
-        if total_outdated == 0:
-            click.echo(f"{Fore.GREEN}All translations are up to date.\x1b[0m")
+        total_missing_keys = sum(len(files) for files in missing_keys_by_language.values())
+        
+        if total_outdated == 0 and total_missing_keys == 0:
+            click.echo(f"{Fore.GREEN}All translations are up to date and complete.\x1b[0m")
             return
         
-        click.echo(f"{Fore.YELLOW}Found {total_outdated} outdated translations.\x1b[0m")
+        # Print summary
+        if total_outdated > 0:
+            click.echo(f"{Fore.YELLOW}Found {total_outdated} outdated translations.\x1b[0m")
         
-        # Update outdated files
+        if total_missing_keys > 0:
+            click.echo(f"{Fore.YELLOW}Found {total_missing_keys} translations with missing keys.\x1b[0m")
+        
+        # Update outdated files and files with missing keys
         for lang in languages:
             outdated_files = outdated_by_language[lang]
-            if not outdated_files:
+            missing_keys_files = missing_keys_by_language[lang]
+            
+            # Get unique files that need updating (either outdated or missing keys)
+            files_to_update = set()
+            files_to_update.update(outdated_files)
+            files_to_update.update([file for file, _ in missing_keys_files])
+            
+            if not files_to_update:
+                click.echo(f"\n{Fore.GREEN}Language '{lang}' is up to date and complete.\x1b[0m")
                 continue
-                
-            click.echo(f"\n{Fore.BLUE}Updating {len(outdated_files)} files for language '{lang}'...{Fore.RESET}")
+            
+            click.echo(f"\n{Fore.BLUE}Updating {len(files_to_update)} files for language '{lang}'...{Fore.RESET}")
+            
+            # For files with missing keys, print the missing keys
+            for file_path, missing_keys in missing_keys_files:
+                if missing_keys:
+                    click.echo(f"  {Fore.YELLOW}File {os.path.basename(file_path)} is missing {len(missing_keys)} keys:{Fore.RESET}")
+                    # Print up to 5 missing keys as examples
+                    for key in list(missing_keys)[:5]:
+                        click.echo(f"    - {key}")
+                    if len(missing_keys) > 5:
+                        click.echo(f"    - ... and {len(missing_keys) - 5} more")
             
             # Use translate command with force option to update files
             translate_command.execute(lang, force=True)

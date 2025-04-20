@@ -121,6 +121,16 @@ class Config:
         
         return self.data.get("languages", [])
     
+    def get_source_language(self) -> str:
+        """Get the source language. Defaults to the first language in the list if not specified."""
+        if not self.data:
+            if not self.exists():
+                return "en"
+            self.load()
+        
+        # Return the explicitly defined source language, or default to the first language
+        return self.data.get("source_language", self.get_languages()[0] if self.get_languages() else "en")
+    
     def add_language(self, language: str) -> None:
         """Add a new language to the configuration."""
         if not self.data:

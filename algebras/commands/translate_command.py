@@ -45,11 +45,12 @@ def execute(language: Optional[str] = None, force: bool = False) -> None:
             return
         target_languages = [language]
     else:
-        # Skip the first language (source language)
-        target_languages = languages[1:]
+        # Skip the source language
+        source_lang = config.get_source_language()
+        target_languages = [lang for lang in languages if lang != source_lang]
     
     # Get source language
-    source_language = languages[0]
+    source_language = config.get_source_language()
     
     # Scan for files
     try:
