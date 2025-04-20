@@ -13,12 +13,13 @@ from algebras.commands import translate_command
 from algebras.utils.lang_validator import validate_language_files
 
 
-def execute(language: Optional[str] = None) -> None:
+def execute(language: Optional[str] = None, only_missing: bool = True) -> None:
     """
     Update your translations.
     
     Args:
         language: Language to update (if None, update all languages)
+        only_missing: If True, only missing keys will be translated (default: True)
     """
     config = Config()
     
@@ -176,7 +177,7 @@ def execute(language: Optional[str] = None) -> None:
                         click.echo(f"    - ... and {len(missing_keys) - 5} more")
             
             # Use translate command with force option to update files
-            translate_command.execute(lang, force=True)
+            translate_command.execute(lang, force=True, only_missing=only_missing)
         
         click.echo(f"\n{Fore.GREEN}Update completed.\x1b[0m")
         click.echo(f"To check the status of your translations, run: {Fore.BLUE}algebras status\x1b[0m")

@@ -40,16 +40,19 @@ def add(language):
 @cli.command("translate")
 @click.option("--language", "-l", help="Translate only the specified language.")
 @click.option("--force", is_flag=True, help="Force translation even if files are up to date.")
-def translate(language, force):
+@click.option("--only-missing", is_flag=True, help="Only translate keys that are missing in the target files.")
+def translate(language, force, only_missing):
     """Translate your application."""
-    translate_command.execute(language, force)
+    translate_command.execute(language, force, only_missing)
 
 
 @cli.command("update")
 @click.option("--language", "-l", help="Update only the specified language.")
-def update(language):
+@click.option("--full", is_flag=True, help="Translate the entire file, not just missing keys.")
+def update(language, full):
     """Update your translations."""
-    update_command.execute(language)
+    only_missing = not full
+    update_command.execute(language, only_missing)
 
 
 @cli.command("review")

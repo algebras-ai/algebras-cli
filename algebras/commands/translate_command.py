@@ -13,15 +13,17 @@ from algebras.config import Config
 from algebras.services.translator import Translator
 from algebras.services.file_scanner import FileScanner
 from algebras.utils.path_utils import determine_target_path
+from algebras.utils.lang_validator import validate_language_files
 
 
-def execute(language: Optional[str] = None, force: bool = False) -> None:
+def execute(language: Optional[str] = None, force: bool = False, only_missing: bool = False) -> None:
     """
     Translate your application.
     
     Args:
         language: Language to translate (if None, translate all languages)
         force: Force translation even if files are up to date
+        only_missing: Only translate keys that are missing in the target file
     """
     config = Config()
     
@@ -132,26 +134,69 @@ def execute(language: Optional[str] = None, force: bool = False) -> None:
                     source_mtime = os.path.getmtime(source_file)
                     target_mtime = os.path.getmtime(target_file)
                     
-                    if target_mtime > source_mtime:
+                    if target_mtime > source_mtime and not only_missing:
                         click.echo(f"  {Fore.YELLOW}Skipping {target_basename} (already up to date)\x1b[0m")
                         continue
                 
-                # Translate the file
-                click.echo(f"  {Fore.GREEN}Translating {source_basename} to {target_basename}...\x1b[0m")
-                try:
-                    translated_content = translator.translate_file(source_file, target_lang)
+                # Handle the translation based on mode (full or missing keys only)
+                if only_missing and os.path.exists(target_file):
+                    # Check which keys are missing in the target file
+                    is_valid, missing_keys = validate_language_files(source_file, target_file)
                     
-                    # Save translated content
-                    if source_file.endswith(".json"):
-                        with open(target_file, "w", encoding="utf-8") as f:
-                            json.dump(translated_content, f, ensure_ascii=False, indent=2)
-                    elif source_file.endswith((".yaml", ".yml")):
-                        with open(target_file, "w", encoding="utf-8") as f:
-                            yaml.dump(translated_content, f, default_flow_style=False, allow_unicode=True)
+                    if not missing_keys:
+                        click.echo(f"  {Fore.GREEN}No missing keys in {target_basename}. Nothing to translate.\x1b[0m")
+                        continue
                     
-                    click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
-                except Exception as e:
-                    click.echo(f"  {Fore.RED}Error translating {source_basename}: {str(e)}\x1b[0m")
+                    click.echo(f"  {Fore.GREEN}Translating only {len(missing_keys)} missing keys in {target_basename}...\x1b[0m")
+                    try:
+                        # Load both source and target files
+                        if source_file.endswith(".json"):
+                            with open(source_file, "r", encoding="utf-8") as f:
+                                source_content = json.load(f)
+                            with open(target_file, "r", encoding="utf-8") as f:
+                                target_content = json.load(f)
+                        elif source_file.endswith((".yaml", ".yml")):
+                            with open(source_file, "r", encoding="utf-8") as f:
+                                source_content = yaml.safe_load(f)
+                            with open(target_file, "r", encoding="utf-8") as f:
+                                target_content = yaml.safe_load(f)
+                                
+                        # Translate only the missing keys
+                        translated_content = translator.translate_missing_keys(
+                            source_content, 
+                            target_content, 
+                            list(missing_keys), 
+                            target_lang
+                        )
+                        
+                        # Save updated content
+                        if source_file.endswith(".json"):
+                            with open(target_file, "w", encoding="utf-8") as f:
+                                json.dump(translated_content, f, ensure_ascii=False, indent=2)
+                        elif source_file.endswith((".yaml", ".yml")):
+                            with open(target_file, "w", encoding="utf-8") as f:
+                                yaml.dump(translated_content, f, default_flow_style=False, allow_unicode=True)
+                        
+                        click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
+                    except Exception as e:
+                        click.echo(f"  {Fore.RED}Error translating missing keys in {source_basename}: {str(e)}\x1b[0m")
+                else:
+                    # Translate the full file
+                    click.echo(f"  {Fore.GREEN}Translating {source_basename} to {target_basename}...\x1b[0m")
+                    try:
+                        translated_content = translator.translate_file(source_file, target_lang)
+                        
+                        # Save translated content
+                        if source_file.endswith(".json"):
+                            with open(target_file, "w", encoding="utf-8") as f:
+                                json.dump(translated_content, f, ensure_ascii=False, indent=2)
+                        elif source_file.endswith((".yaml", ".yml")):
+                            with open(target_file, "w", encoding="utf-8") as f:
+                                yaml.dump(translated_content, f, default_flow_style=False, allow_unicode=True)
+                        
+                        click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
+                    except Exception as e:
+                        click.echo(f"  {Fore.RED}Error translating {source_basename}: {str(e)}\x1b[0m")
         
         click.echo(f"\n{Fore.GREEN}Translation completed.\x1b[0m")
         click.echo(f"To check the status of your translations, run: {Fore.BLUE}algebras status\x1b[0m")
