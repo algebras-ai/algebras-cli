@@ -75,33 +75,57 @@ def execute(language: Optional[str] = None, force: bool = False) -> None:
             # Get existing files for this language
             existing_files = files_by_language.get(target_lang, [])
             existing_file_basenames = [os.path.basename(f) for f in existing_files]
+            existing_file_paths = {os.path.basename(f): f for f in existing_files}
             
             # Process each source file
             for source_file in source_files:
                 source_basename = os.path.basename(source_file)
                 source_dirname = os.path.dirname(source_file)
+                source_ext = source_basename.split('.')[-1] if '.' in source_basename else ''
                 
-                # Determine target filename
-                if "." in source_basename:
-                    name_parts = source_basename.split(".")
-                    ext = name_parts.pop()
-                    base = ".".join(name_parts)
-                    
-                    # Check if the base already contains language marker
-                    if f".{source_language}" in base or f"-{source_language}" in base or f"_{source_language}" in base:
-                        base = base.replace(f".{source_language}", "")
-                        base = base.replace(f"-{source_language}", "")
-                        base = base.replace(f"_{source_language}", "")
-                    
-                    target_basename = f"{base}.{ext}"
+                # First, check if there's a direct corresponding file in the target language
+                # Example: src/locales/en.json -> src/locales/es.json
+                if source_basename == f"{source_language}.{source_ext}" and f"{target_lang}.{source_ext}" in existing_file_basenames:
+                    target_file = existing_file_paths[f"{target_lang}.{source_ext}"]
+                    target_basename = os.path.basename(target_file)
+                    target_dirname = os.path.dirname(target_file)
                 else:
-                    target_basename = source_basename
+                    # Determine target filename using the more complex logic
+                    if "." in source_basename:
+                        name_parts = source_basename.split(".")
+                        ext = name_parts.pop()
+                        base = ".".join(name_parts)
+                        
+                        # Special case for common localization pattern like "en.json", "es.json" in same directory
+                        if source_basename == f"{source_language}.{ext}" and len(base) == len(source_language):
+                            target_basename = f"{target_lang}.{ext}"
+                        # Check if the base already contains language marker
+                        elif f".{source_language}" in base or f"-{source_language}" in base or f"_{source_language}" in base:
+                            base = base.replace(f".{source_language}", f".{target_lang}")
+                            base = base.replace(f"-{source_language}", f"-{target_lang}")
+                            base = base.replace(f"_{source_language}", f"_{target_lang}")
+                            target_basename = f"{base}.{ext}"
+                        else:
+                            # If no language marker, add one with the target language
+                            base = f"{base}.{target_lang}"
+                            target_basename = f"{base}.{ext}"
+                    else:
+                        target_basename = f"{source_basename}.{target_lang}"
+                    
+                    # Check if target file exists in the list of already existing files for this language
+                    if target_basename in existing_file_basenames:
+                        target_file = existing_file_paths[target_basename]
+                        target_dirname = os.path.dirname(target_file)
+                    else:
+                        # Determine the target directory path
+                        target_dirname = os.path.dirname(determine_target_path(source_file, source_language, target_lang))
+                        target_file = os.path.join(target_dirname, target_basename)
                 
-                # Determine the target directory path
-                target_dirname = os.path.dirname(determine_target_path(source_file, source_language, target_lang))
                 os.makedirs(target_dirname, exist_ok=True)
                 
-                target_file = os.path.join(target_dirname, target_basename)
+                # Log the file paths for debugging
+                print(f"  Source file: {source_file}")
+                print(f"  Target file: {target_file}")
                 
                 # Check if target file already exists and is up to date
                 if not force and os.path.exists(target_file):

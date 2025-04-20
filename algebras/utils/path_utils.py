@@ -22,4 +22,19 @@ def determine_target_path(source_path: str, source_lang: str, target_lang: str) 
     elif source_path.endswith(f"/{source_lang}") or source_path.endswith(f"\\{source_lang}"):
         target_path = source_path[:-len(source_lang)] + target_lang
     
+    # Check for language-specific naming patterns in directories
+    path_parts = os.path.normpath(source_path).split(os.sep)
+    for i, part in enumerate(path_parts):
+        if part == source_lang or part.lower() == source_lang.lower():
+            path_parts[i] = target_lang
+            target_path = os.path.join(*path_parts)
+            break
+        # Check for locale directories like 'en-US', 'es-ES', etc.
+        if part.startswith(f"{source_lang}-") or part.startswith(f"{source_lang}_"):
+            prefix = part[:len(source_lang)]
+            suffix = part[len(source_lang):]
+            path_parts[i] = f"{target_lang}{suffix}"
+            target_path = os.path.join(*path_parts)
+            break
+    
     return target_path 
