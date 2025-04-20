@@ -10,7 +10,8 @@ from typing import Optional, Dict, List, Tuple, Set
 from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
 from algebras.commands import translate_command
-from algebras.utils.lang_validator import validate_language_files
+from algebras.utils.lang_validator import validate_language_files, find_outdated_keys
+from algebras.utils.git_utils import is_git_available, is_git_repository
 
 
 def execute(language: Optional[str] = None, only_missing: bool = True) -> None:
@@ -51,6 +52,11 @@ def execute(language: Optional[str] = None, only_missing: bool = True) -> None:
     # Get source language
     source_language = config.get_source_language()
     
+    # Check if git is available for outdated key detection
+    git_available = is_git_available()
+    if not git_available:
+        click.echo(f"{Fore.YELLOW}Git is not available. Skipping detection of updated keys.\x1b[0m")
+    
     # Scan for files
     try:
         scanner = FileScanner()
@@ -66,11 +72,13 @@ def execute(language: Optional[str] = None, only_missing: bool = True) -> None:
         # Find outdated files and files with missing keys
         outdated_by_language = {}
         missing_keys_by_language = {}
+        outdated_keys_by_language = {}
         
         for lang in languages:
             lang_files = files_by_language.get(lang, [])
             outdated_files = []
             missing_keys_files = []
+            outdated_keys_files = []
             
             for lang_file in lang_files:
                 # Find corresponding source file
@@ -131,34 +139,47 @@ def execute(language: Optional[str] = None, only_missing: bool = True) -> None:
                     is_valid, missing_keys = validate_language_files(source_file, lang_file)
                     if not is_valid:
                         missing_keys_files.append((lang_file, missing_keys))
+                    
+                    # Check for outdated keys using git history if available
+                    if git_available and is_git_repository(source_file):
+                        has_outdated_keys, outdated_keys = find_outdated_keys(source_file, lang_file)
+                        if has_outdated_keys:
+                            outdated_keys_files.append((lang_file, outdated_keys))
             
             outdated_by_language[lang] = outdated_files
             missing_keys_by_language[lang] = missing_keys_files
+            outdated_keys_by_language[lang] = outdated_keys_files
         
         # Count outdated and missing keys files
         total_outdated = sum(len(files) for files in outdated_by_language.values())
         total_missing_keys = sum(len(files) for files in missing_keys_by_language.values())
+        total_outdated_keys = sum(len(files) for files in outdated_keys_by_language.values())
         
-        if total_outdated == 0 and total_missing_keys == 0:
+        if total_outdated == 0 and total_missing_keys == 0 and total_outdated_keys == 0:
             click.echo(f"{Fore.GREEN}All translations are up to date and complete.\x1b[0m")
             return
         
         # Print summary
         if total_outdated > 0:
-            click.echo(f"{Fore.YELLOW}Found {total_outdated} outdated translations.\x1b[0m")
+            click.echo(f"{Fore.YELLOW}Found {total_outdated} outdated translations (file modification time).\x1b[0m")
         
         if total_missing_keys > 0:
             click.echo(f"{Fore.YELLOW}Found {total_missing_keys} translations with missing keys.\x1b[0m")
+            
+        if total_outdated_keys > 0:
+            click.echo(f"{Fore.YELLOW}Found {total_outdated_keys} translations with outdated keys (based on git history).\x1b[0m")
         
         # Update outdated files and files with missing keys
         for lang in languages:
             outdated_files = outdated_by_language[lang]
             missing_keys_files = missing_keys_by_language[lang]
+            outdated_keys_files = outdated_keys_by_language[lang]
             
-            # Get unique files that need updating (either outdated or missing keys)
+            # Get unique files that need updating (either outdated, missing keys, or outdated keys)
             files_to_update = set()
             files_to_update.update(outdated_files)
             files_to_update.update([file for file, _ in missing_keys_files])
+            files_to_update.update([file for file, _ in outdated_keys_files])
             
             if not files_to_update:
                 click.echo(f"\n{Fore.GREEN}Language '{lang}' is up to date and complete.\x1b[0m")
@@ -175,6 +196,16 @@ def execute(language: Optional[str] = None, only_missing: bool = True) -> None:
                         click.echo(f"    - {key}")
                     if len(missing_keys) > 5:
                         click.echo(f"    - ... and {len(missing_keys) - 5} more")
+            
+            # For files with outdated keys, print the outdated keys
+            for file_path, outdated_keys in outdated_keys_files:
+                if outdated_keys:
+                    click.echo(f"  {Fore.YELLOW}File {os.path.basename(file_path)} has {len(outdated_keys)} outdated keys:{Fore.RESET}")
+                    # Print up to 5 outdated keys as examples
+                    for key in list(outdated_keys)[:5]:
+                        click.echo(f"    - {key}")
+                    if len(outdated_keys) > 5:
+                        click.echo(f"    - ... and {len(outdated_keys) - 5} more")
             
             # Use translate command with force option to update files
             translate_command.execute(lang, force=True, only_missing=only_missing)

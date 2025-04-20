@@ -1,102 +1,218 @@
 import os
 import json
-import pytest
-import tempfile
-from algebras.utils.lang_validator import extract_all_keys, validate_language_files
+import unittest
+from unittest.mock import patch, mock_open, Mock, ANY
+
+from algebras.utils.lang_validator import (
+    read_language_file,
+    extract_all_keys,
+    get_key_value,
+    validate_language_files,
+    find_outdated_keys
+)
 
 
-def test_extract_all_keys():
-    """Test that all keys are correctly extracted from a nested dictionary"""
-    # Test data
-    data = {
-        "Index": {
-            "meta_title": "Title",
-            "meta_description": "Description"
-        },
-        "Navbar": {
-            "sign_in": "Sign in",
-            "sign_up": "Sign up",
-            "product": "Product"
-        }
-    }
-    
-    # Extract keys
-    keys = extract_all_keys(data)
-    
-    # Expected keys
-    expected_keys = {
-        "Index", "Index.meta_title", "Index.meta_description",
-        "Navbar", "Navbar.sign_in", "Navbar.sign_up", "Navbar.product"
-    }
-    
-    assert keys == expected_keys
-
-
-def test_validate_language_files():
-    """Test validation of language files"""
-    # Create temporary source file
-    with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as source_file:
-        source_data = {
-            "Index": {
-                "meta_title": "Title",
-                "meta_description": "Description"
+class TestLangValidator(unittest.TestCase):
+    def setUp(self):
+        # Test data
+        self.source_data = {
+            "welcome": "Welcome",
+            "login": {
+                "title": "Login",
+                "username": "Username",
+                "password": "Password"
             },
-            "Navbar": {
-                "sign_in": "Sign in",
-                "sign_up": "Sign up",
-                "product": "Product"
+            "errors": {
+                "required": "This field is required",
+                "invalid": "Invalid input"
             }
         }
-        source_file.write(json.dumps(source_data).encode('utf-8'))
-        source_path = source_file.name
-    
-    # Create temporary target file with all keys (valid)
-    with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as target_valid_file:
-        target_valid_data = {
-            "Index": {
-                "meta_title": "Заголовок",
-                "meta_description": "Описание"
-            },
-            "Navbar": {
-                "sign_in": "Войти",
-                "sign_up": "Зарегистрироваться",
-                "product": "Продукт"
-            }
-        }
-        target_valid_file.write(json.dumps(target_valid_data).encode('utf-8'))
-        target_valid_path = target_valid_file.name
-    
-    # Create temporary target file with missing keys (invalid)
-    with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as target_invalid_file:
-        target_invalid_data = {
-            "Index": {
-                "meta_title": "Заголовок"
-                # meta_description is missing
-            },
-            "Navbar": {
-                "sign_in": "Войти",
-                "sign_up": "Зарегистрироваться"
-                # product is missing
-            }
-        }
-        target_invalid_file.write(json.dumps(target_invalid_data).encode('utf-8'))
-        target_invalid_path = target_invalid_file.name
-    
-    try:
-        # Test valid file
-        is_valid, missing_keys = validate_language_files(source_path, target_valid_path)
-        assert is_valid is True
-        assert len(missing_keys) == 0
         
-        # Test invalid file
-        is_valid, missing_keys = validate_language_files(source_path, target_invalid_path)
-        assert is_valid is False
-        assert len(missing_keys) == 2
-        assert "Index.meta_description" in missing_keys
-        assert "Navbar.product" in missing_keys
-    
-    finally:
-        # Clean up temporary files
-        os.unlink(source_path)
-        os.unlink(target_valid_path)
-        os.unlink(target_invalid_path) 
+        self.target_data = {
+            "welcome": "Bienvenue",
+            "login": {
+                "title": "Connexion",
+                "username": "Nom d'utilisateur",
+                # Missing password key
+            },
+            "errors": {
+                "required": "Ce champ est obligatoire",
+                "invalid": "Entrée invalide"
+            }
+        }
+        
+        # Sample file paths
+        self.source_file = "en.json"
+        self.target_file = "fr.json"
+        
+        # Fixed date strings for consistent tests
+        self.older_date = "2023-01-01T12:00:00"
+        self.newer_date = "2023-02-01T12:00:00"
+
+    @patch('builtins.open', new_callable=mock_open, read_data='{"key1": "value1", "key2": {"nested": "value2"}}')
+    def test_read_language_file_json(self, mock_file):
+        result = read_language_file("test.json")
+        
+        self.assertEqual(result, {"key1": "value1", "key2": {"nested": "value2"}})
+        mock_file.assert_called_once_with("test.json", 'r', encoding='utf-8')
+
+    @patch('yaml.safe_load')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_read_language_file_yaml(self, mock_file, mock_yaml_load):
+        mock_yaml_load.return_value = {"key1": "value1", "key2": {"nested": "value2"}}
+        
+        result = read_language_file("test.yaml")
+        
+        self.assertEqual(result, {"key1": "value1", "key2": {"nested": "value2"}})
+        mock_file.assert_called_once_with("test.yaml", 'r', encoding='utf-8')
+
+    def test_extract_all_keys(self):
+        keys = extract_all_keys(self.source_data)
+        
+        expected_keys = {
+            "welcome",
+            "login",
+            "login.title",
+            "login.username",
+            "login.password",
+            "errors",
+            "errors.required",
+            "errors.invalid"
+        }
+        
+        self.assertEqual(keys, expected_keys)
+
+    def test_get_key_value(self):
+        # Test simple key
+        value1 = get_key_value(self.source_data, "welcome")
+        self.assertEqual(value1, "Welcome")
+        
+        # Test nested key
+        value2 = get_key_value(self.source_data, "login.title")
+        self.assertEqual(value2, "Login")
+        
+        value3 = get_key_value(self.source_data, "errors.required")
+        self.assertEqual(value3, "This field is required")
+        
+        # Test non-existent key
+        value4 = get_key_value(self.source_data, "nonexistent")
+        self.assertIsNone(value4)
+        
+        value5 = get_key_value(self.source_data, "login.nonexistent")
+        self.assertIsNone(value5)
+
+    @patch('algebras.utils.lang_validator.read_language_file')
+    def test_validate_language_files(self, mock_read_file):
+        # Mock read_language_file to return test data
+        mock_read_file.side_effect = [self.source_data, self.target_data]
+        
+        is_valid, missing_keys = validate_language_files(self.source_file, self.target_file)
+        
+        self.assertFalse(is_valid)
+        self.assertEqual(missing_keys, {"login.password"})
+        self.assertEqual(mock_read_file.call_count, 2)
+
+    @patch('algebras.utils.lang_validator.is_git_available')
+    def test_find_outdated_keys_no_git(self, mock_is_git_available):
+        # Test when git is not available
+        mock_is_git_available.return_value = False
+        
+        has_outdated, outdated_keys = find_outdated_keys(self.source_file, self.target_file)
+        
+        self.assertFalse(has_outdated)
+        self.assertEqual(outdated_keys, set())
+        mock_is_git_available.assert_called_once()
+
+    @patch('algebras.utils.lang_validator.is_git_available')
+    @patch('algebras.utils.lang_validator.is_git_repository')
+    def test_find_outdated_keys_not_git_repo(self, mock_is_git_repo, mock_is_git_available):
+        # Test when git is available but path is not in a git repository
+        mock_is_git_available.return_value = True
+        mock_is_git_repo.return_value = False
+        
+        has_outdated, outdated_keys = find_outdated_keys(self.source_file, self.target_file)
+        
+        self.assertFalse(has_outdated)
+        self.assertEqual(outdated_keys, set())
+        mock_is_git_available.assert_called_once()
+        mock_is_git_repo.assert_called_once_with(self.source_file)
+
+    @patch('algebras.utils.lang_validator.is_git_available')
+    @patch('algebras.utils.lang_validator.is_git_repository')
+    @patch('algebras.utils.lang_validator.read_language_file')
+    @patch('algebras.utils.lang_validator.compare_key_modifications')
+    def test_find_outdated_keys_with_outdated(self, mock_compare, mock_read_file, mock_is_git_repo, mock_is_git_available):
+        # Update test data to include same keys but different values
+        target_data_with_diff = self.target_data.copy()
+        target_data_with_diff["welcome"] = "Old welcome text"  # Different from source
+        
+        # Mock dependencies
+        mock_is_git_available.return_value = True
+        mock_is_git_repo.return_value = True
+        mock_read_file.side_effect = [self.source_data, target_data_with_diff]
+        
+        # Create a custom side effect function that returns True only for the "welcome" key
+        def compare_side_effect(source_file, target_file, key):
+            if key == "welcome":
+                return True, self.newer_date, self.older_date
+            return False, self.older_date, self.older_date
+        
+        # Set the side effect for mock_compare
+        mock_compare.side_effect = compare_side_effect
+        
+        has_outdated, outdated_keys = find_outdated_keys(self.source_file, self.target_file)
+        
+        self.assertTrue(has_outdated)
+        self.assertEqual(outdated_keys, {"welcome"})
+        mock_is_git_available.assert_called_once()
+        mock_is_git_repo.assert_called_once_with(self.source_file)
+        mock_read_file.assert_called()
+        # Verify compare_key_modifications was called for the welcome key
+        mock_compare.assert_any_call(self.source_file, self.target_file, "welcome")
+
+    @patch('algebras.utils.lang_validator.is_git_available')
+    @patch('algebras.utils.lang_validator.is_git_repository')
+    @patch('algebras.utils.lang_validator.read_language_file')
+    @patch('algebras.utils.lang_validator.compare_key_modifications')
+    def test_find_outdated_keys_no_outdated(self, mock_compare, mock_read_file, mock_is_git_repo, mock_is_git_available):
+        # Both source and target have same values
+        source_data = {"key1": "value1", "key2": "value2"}
+        target_data = {"key1": "value1", "key2": "value2"}
+        
+        # Mock dependencies
+        mock_is_git_available.return_value = True
+        mock_is_git_repo.return_value = True
+        mock_read_file.side_effect = [source_data, target_data]
+        
+        # Values are the same, so compare_key_modifications should not be called
+        
+        has_outdated, outdated_keys = find_outdated_keys(self.source_file, self.target_file)
+        
+        self.assertFalse(has_outdated)
+        self.assertEqual(outdated_keys, set())
+        mock_is_git_available.assert_called_once()
+        mock_is_git_repo.assert_called_once_with(self.source_file)
+        mock_read_file.assert_called()
+        mock_compare.assert_not_called()  # Should not be called when values are the same
+
+    @patch('algebras.utils.lang_validator.is_git_available')
+    @patch('algebras.utils.lang_validator.is_git_repository')
+    @patch('algebras.utils.lang_validator.read_language_file')
+    @patch('algebras.utils.lang_validator.compare_key_modifications')
+    def test_find_outdated_keys_with_exception(self, mock_compare, mock_read_file, mock_is_git_repo, mock_is_git_available):
+        # Test error handling
+        mock_is_git_available.return_value = True
+        mock_is_git_repo.return_value = True
+        mock_read_file.side_effect = Exception("Test exception")
+        
+        has_outdated, outdated_keys = find_outdated_keys(self.source_file, self.target_file)
+        
+        self.assertFalse(has_outdated)
+        self.assertEqual(outdated_keys, set())
+        mock_is_git_available.assert_called_once()
+        mock_is_git_repo.assert_called_once_with(self.source_file)
+        mock_read_file.assert_called_once()
+
+
+if __name__ == "__main__":
+    unittest.main() 
