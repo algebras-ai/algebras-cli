@@ -7,16 +7,20 @@ import json
 import yaml
 import click
 from colorama import Fore
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple, Set
 
 from algebras.config import Config
 from algebras.services.translator import Translator
 from algebras.services.file_scanner import FileScanner
 from algebras.utils.path_utils import determine_target_path
-from algebras.utils.lang_validator import validate_language_files
+from algebras.utils.lang_validator import validate_language_files, find_outdated_keys, extract_all_keys
+from algebras.utils.git_utils import is_git_available, is_git_repository
 
 
-def execute(language: Optional[str] = None, force: bool = False, only_missing: bool = False) -> None:
+def execute(language: Optional[str] = None, force: bool = False, only_missing: bool = False,
+           outdated_files: List[Tuple[str, str]] = None, 
+           missing_keys_files: List[Tuple[str, Set[str], str]] = None,
+           outdated_keys_files: List[Tuple[str, Set[str], str]] = None) -> None:
     """
     Translate your application.
     
@@ -24,6 +28,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         language: Language to translate (if None, translate all languages)
         force: Force translation even if files are up to date
         only_missing: Only translate keys that are missing in the target file
+        outdated_files: List of tuples (target_file, source_file) that are outdated by modification time
+        missing_keys_files: List of tuples (target_file, missing_keys, source_file)
+        outdated_keys_files: List of tuples (target_file, outdated_keys, source_file)
     """
     config = Config()
     
@@ -54,6 +61,190 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
     # Get source language
     source_language = config.get_source_language()
     
+    # Initialize translator
+    translator = Translator()
+    
+    # Initialize lists if they're None
+    outdated_files = outdated_files or []
+    missing_keys_files = missing_keys_files or []
+    outdated_keys_files = outdated_keys_files or []
+    
+    # Check if we have specific files to update
+    if outdated_files or missing_keys_files or outdated_keys_files:
+        # Process the specific files that were passed in
+        
+        for target_lang in target_languages:
+            # Process outdated files - find changed keys by comparing the content
+            for target_file, source_file in outdated_files:
+                click.echo(f"\n{Fore.BLUE}Processing outdated file {os.path.basename(target_file)} for language '{target_lang}'...{Fore.RESET}")
+                
+                try:
+                    # Load both source and target files
+                    if source_file.endswith(".json"):
+                        with open(source_file, "r", encoding="utf-8") as f:
+                            source_content = json.load(f)
+                        with open(target_file, "r", encoding="utf-8") as f:
+                            target_content = json.load(f)
+                    elif source_file.endswith((".yaml", ".yml")):
+                        with open(source_file, "r", encoding="utf-8") as f:
+                            source_content = yaml.safe_load(f)
+                        with open(target_file, "r", encoding="utf-8") as f:
+                            target_content = yaml.safe_load(f)
+                    
+                    # Extract all keys from both files
+                    source_keys = extract_all_keys(source_content)
+                    target_keys = extract_all_keys(target_content)
+                    
+                    # Find keys that exist in both files - these are potentially outdated
+                    common_keys = source_keys.intersection(target_keys)
+                    
+                    # Compare values to find potentially modified keys
+                    modified_keys = []
+                    for key in common_keys:
+                        key_parts = key.split('.')
+                        source_value = get_nested_value(source_content, key_parts)
+                        target_value = get_nested_value(target_content, key_parts)
+                        
+                        # If values are different, consider this key outdated
+                        if source_value != target_value and isinstance(source_value, str):
+                            modified_keys.append(key)
+                    
+                    # Find keys only in source (missing keys)
+                    missing_keys = source_keys - target_keys
+                    
+                    # Report what we found
+                    if missing_keys:
+                        click.echo(f"  {Fore.YELLOW}Found {len(missing_keys)} missing keys in {os.path.basename(target_file)}{Fore.RESET}")
+                    
+                    if modified_keys:
+                        click.echo(f"  {Fore.YELLOW}Found {len(modified_keys)} potentially outdated keys in {os.path.basename(target_file)}{Fore.RESET}")
+                        # Print up to 5 modified keys as examples
+                        for key in modified_keys[:5]:
+                            click.echo(f"    - {key}")
+                        if len(modified_keys) > 5:
+                            click.echo(f"    - ... and {len(modified_keys) - 5} more")
+                    
+                    # Translate missing keys
+                    if missing_keys:
+                        click.echo(f"  {Fore.GREEN}Translating {len(missing_keys)} missing keys...{Fore.RESET}")
+                        target_content = translator.translate_missing_keys(
+                            source_content, 
+                            target_content, 
+                            list(missing_keys), 
+                            target_lang
+                        )
+                    
+                    # Translate modified keys
+                    if modified_keys:
+                        click.echo(f"  {Fore.GREEN}Translating {len(modified_keys)} outdated keys...{Fore.RESET}")
+                        target_content = translator.translate_outdated_keys(
+                            source_content,
+                            target_content,
+                            modified_keys,
+                            target_lang
+                        )
+                    
+                    # Save updated content if there were changes
+                    if missing_keys or modified_keys:
+                        if target_file.endswith(".json"):
+                            with open(target_file, "w", encoding="utf-8") as f:
+                                json.dump(target_content, f, ensure_ascii=False, indent=2)
+                        elif target_file.endswith((".yaml", ".yml")):
+                            with open(target_file, "w", encoding="utf-8") as f:
+                                yaml.dump(target_content, f, default_flow_style=False, allow_unicode=True)
+                        
+                        updated_count = len(missing_keys) + len(modified_keys)
+                        click.echo(f"  {Fore.GREEN}✓ Updated {updated_count} keys in {target_file}\x1b[0m")
+                    else:
+                        click.echo(f"  {Fore.GREEN}No keys need to be updated in {os.path.basename(target_file)}\x1b[0m")
+                        
+                except Exception as e:
+                    click.echo(f"  {Fore.RED}Error processing outdated file {os.path.basename(target_file)}: {str(e)}\x1b[0m")
+            
+            # Process files with specific missing keys
+            for target_file, missing_keys, source_file in missing_keys_files:
+                if os.path.basename(target_file).startswith(target_lang):
+                    click.echo(f"\n{Fore.BLUE}Processing file with missing keys {os.path.basename(target_file)}...{Fore.RESET}")
+                    
+                    try:
+                        # Load both source and target files
+                        if source_file.endswith(".json"):
+                            with open(source_file, "r", encoding="utf-8") as f:
+                                source_content = json.load(f)
+                            with open(target_file, "r", encoding="utf-8") as f:
+                                target_content = json.load(f)
+                        elif source_file.endswith((".yaml", ".yml")):
+                            with open(source_file, "r", encoding="utf-8") as f:
+                                source_content = yaml.safe_load(f)
+                            with open(target_file, "r", encoding="utf-8") as f:
+                                target_content = yaml.safe_load(f)
+                        
+                        # Translate missing keys
+                        if missing_keys:
+                            click.echo(f"  {Fore.GREEN}Translating {len(missing_keys)} missing keys...{Fore.RESET}")
+                            target_content = translator.translate_missing_keys(
+                                source_content, 
+                                target_content, 
+                                list(missing_keys), 
+                                target_lang
+                            )
+                            
+                            # Save updated content
+                            if target_file.endswith(".json"):
+                                with open(target_file, "w", encoding="utf-8") as f:
+                                    json.dump(target_content, f, ensure_ascii=False, indent=2)
+                            elif target_file.endswith((".yaml", ".yml")):
+                                with open(target_file, "w", encoding="utf-8") as f:
+                                    yaml.dump(target_content, f, default_flow_style=False, allow_unicode=True)
+                            
+                            click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
+                    except Exception as e:
+                        click.echo(f"  {Fore.RED}Error processing file with missing keys {os.path.basename(target_file)}: {str(e)}\x1b[0m")
+            
+            # Process files with outdated keys
+            for target_file, outdated_keys, source_file in outdated_keys_files:
+                if os.path.basename(target_file).startswith(target_lang):
+                    click.echo(f"\n{Fore.BLUE}Processing file with outdated keys {os.path.basename(target_file)}...{Fore.RESET}")
+                    
+                    try:
+                        # Load both source and target files
+                        if source_file.endswith(".json"):
+                            with open(source_file, "r", encoding="utf-8") as f:
+                                source_content = json.load(f)
+                            with open(target_file, "r", encoding="utf-8") as f:
+                                target_content = json.load(f)
+                        elif source_file.endswith((".yaml", ".yml")):
+                            with open(source_file, "r", encoding="utf-8") as f:
+                                source_content = yaml.safe_load(f)
+                            with open(target_file, "r", encoding="utf-8") as f:
+                                target_content = yaml.safe_load(f)
+                        
+                        # Translate outdated keys
+                        if outdated_keys:
+                            click.echo(f"  {Fore.GREEN}Translating {len(outdated_keys)} outdated keys...{Fore.RESET}")
+                            target_content = translator.translate_outdated_keys(
+                                source_content,
+                                target_content,
+                                list(outdated_keys),
+                                target_lang
+                            )
+                            
+                            # Save updated content
+                            if target_file.endswith(".json"):
+                                with open(target_file, "w", encoding="utf-8") as f:
+                                    json.dump(target_content, f, ensure_ascii=False, indent=2)
+                            elif target_file.endswith((".yaml", ".yml")):
+                                with open(target_file, "w", encoding="utf-8") as f:
+                                    yaml.dump(target_content, f, default_flow_style=False, allow_unicode=True)
+                            
+                            click.echo(f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m")
+                    except Exception as e:
+                        click.echo(f"  {Fore.RED}Error processing file with outdated keys {os.path.basename(target_file)}: {str(e)}\x1b[0m")
+        
+        click.echo(f"\n{Fore.GREEN}Translation completed.\x1b[0m")
+        return
+    
+    # If no specific files were provided, scan and process all files
     # Scan for files
     try:
         scanner = FileScanner()
@@ -82,8 +273,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
             click.echo(f"  {idx}. {Fore.CYAN}{rel_path}{Fore.RESET} ({file_size_str}, {file_ext})")
             
         click.echo("")  # Empty line for better readability
-        # Initialize translator
-        translator = Translator()
+        
+        # Check if git is available for outdated key detection
+        git_available = is_git_available()
         
         # Translate each target language
         for target_lang in target_languages:
@@ -158,11 +350,19 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     # Check which keys are missing in the target file
                     is_valid, missing_keys = validate_language_files(source_file, target_file)
                     
-                    if not missing_keys:
+                    # Check if there are outdated keys
+                    has_outdated_keys = False
+                    outdated_keys = set()
+                    if git_available and is_git_repository(os.path.dirname(source_file)):
+                        has_outdated_keys, outdated_keys = find_outdated_keys(source_file, target_file)
+                    
+                    if not missing_keys and not has_outdated_keys:
                         click.echo(f"  {Fore.GREEN}No missing keys in {target_basename}. Nothing to translate.\x1b[0m")
                         continue
                     
-                    click.echo(f"  {Fore.GREEN}Translating only {len(missing_keys)} missing keys in {target_basename}...\x1b[0m")
+                    if missing_keys:
+                        click.echo(f"  {Fore.GREEN}Translating {len(missing_keys)} missing keys in {target_basename}...\x1b[0m")
+                    
                     try:
                         # Load both source and target files
                         if source_file.endswith(".json"):
@@ -176,13 +376,26 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             with open(target_file, "r", encoding="utf-8") as f:
                                 target_content = yaml.safe_load(f)
                                 
-                        # Translate only the missing keys
-                        translated_content = translator.translate_missing_keys(
-                            source_content, 
-                            target_content, 
-                            list(missing_keys), 
-                            target_lang
-                        )
+                        # Translate the missing keys
+                        if missing_keys:
+                            translated_content = translator.translate_missing_keys(
+                                source_content, 
+                                target_content, 
+                                list(missing_keys), 
+                                target_lang
+                            )
+                        else:
+                            translated_content = target_content
+                            
+                        # Translate outdated keys if needed
+                        if has_outdated_keys and not only_missing:
+                            click.echo(f"  {Fore.GREEN}Translating {len(outdated_keys)} outdated keys in {target_basename}...\x1b[0m")
+                            translated_content = translator.translate_outdated_keys(
+                                source_content,
+                                translated_content,
+                                list(outdated_keys),
+                                target_lang
+                            )
                         
                         # Save updated content
                         if source_file.endswith(".json"):
@@ -192,9 +405,10 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             with open(target_file, "w", encoding="utf-8") as f:
                                 yaml.dump(translated_content, f, default_flow_style=False, allow_unicode=True)
                         
-                        click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
+                        updated_count = len(missing_keys) + (len(outdated_keys) if has_outdated_keys and not only_missing else 0)
+                        click.echo(f"  {Fore.GREEN}✓ Updated {updated_count} keys in {target_file}\x1b[0m")
                     except Exception as e:
-                        click.echo(f"  {Fore.RED}Error translating missing keys in {source_basename}: {str(e)}\x1b[0m")
+                        click.echo(f"  {Fore.RED}Error translating keys in {source_basename}: {str(e)}\x1b[0m")
                 else:
                     # Translate the full file
                     click.echo(f"  {Fore.GREEN}Translating {source_basename} to {target_basename}...\x1b[0m")
@@ -217,4 +431,24 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         click.echo(f"To check the status of your translations, run: {Fore.BLUE}algebras status\x1b[0m")
     
     except Exception as e:
-        click.echo(f"{Fore.RED}Error: {str(e)}\x1b[0m") 
+        click.echo(f"{Fore.RED}Error: {str(e)}\x1b[0m")
+
+
+def get_nested_value(data: Dict[str, Any], key_parts: List[str]) -> Any:
+    """
+    Get a value from a nested dictionary using a list of key parts.
+    
+    Args:
+        data: Dictionary to get value from
+        key_parts: List of key parts representing a dot-notation path
+        
+    Returns:
+        Value at the specified path
+    """
+    current = data
+    for part in key_parts:
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+        else:
+            return None
+    return current 
