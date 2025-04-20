@@ -5,6 +5,7 @@ Translation service using AI providers
 import os
 import json
 import yaml
+import requests
 from typing import Dict, Any, List, Optional
 from openai import OpenAI
 
@@ -45,6 +46,8 @@ class Translator:
         
         if provider == "openai":
             return self._translate_with_openai(text, source_lang, target_lang)
+        elif provider == "algebras-ai":
+            return self._translate_with_algebras_ai(text, source_lang, target_lang)
         else:
             raise ValueError(f"Unsupported provider: {provider}")
     
@@ -84,6 +87,61 @@ class Translator:
         )
         
         return response.choices[0].message.content.strip()
+    
+    def _translate_with_algebras_ai(self, text: str, source_lang: str, target_lang: str) -> str:
+        """
+        Translate text using Algebras AI API.
+        
+        Args:
+            text: Text to translate
+            source_lang: Source language code (use 'auto' for automatic detection)
+            target_lang: Target language code
+            
+        Returns:
+            Translated text
+        """
+        api_key = os.environ.get("ALGEBRAS_API_KEY")
+        if not api_key:
+            raise ValueError("Algebras API key not found. Set the ALGEBRAS_API_KEY environment variable.")
+        
+        url = "https://platform.algebras.ai/api/v1/translation/translate"
+        headers = {
+            "accept": "application/json",
+            "X-Api-Key": api_key
+        }
+        
+        # Use 'auto' if source_lang is not specified or is 'auto'
+        source_lang_value = source_lang if source_lang and source_lang != "auto" else "auto"
+        
+        data = {
+            "sourceLanguage": source_lang_value,
+            "targetLanguage": target_lang,
+            "textContent": text,
+            "fileContent": "",
+            "glossaryId": "",
+            "prompt": "",
+            "flag": ""
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, files={
+                "sourceLanguage": (None, data["sourceLanguage"]),
+                "targetLanguage": (None, data["targetLanguage"]),
+                "textContent": (None, data["textContent"]),
+                "fileContent": (None, data["fileContent"]),
+                "glossaryId": (None, data["glossaryId"]),
+                "prompt": (None, data["prompt"]),
+                "flag": (None, data["flag"])
+            })
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result.get("translatedText", "")
+            else:
+                error_msg = f"Error from Algebras AI API: {response.status_code} - {response.text}"
+                raise Exception(error_msg)
+        except Exception as e:
+            raise Exception(f"Failed to translate with Algebras AI: {str(e)}")
     
     def translate_file(self, file_path: str, target_lang: str) -> Dict[str, Any]:
         """

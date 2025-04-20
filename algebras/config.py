@@ -154,8 +154,9 @@ class Config:
                 "!**/build/**",  # Exclude build directory
             ],
             "api": {
-                "provider": "openai",
-                "model": "gpt-4",
+                "provider": "openai",  # Default provider
+                "model": "gpt-4",     # Default model (for OpenAI)
+                # Provider options include: "openai", "algebras-ai"
             }
         }
         

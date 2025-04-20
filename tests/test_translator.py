@@ -331,3 +331,103 @@ class TestTranslator:
         
         # Verify the translation
         assert result == expected_translation 
+
+    def test_translate_with_algebras_ai(self, monkeypatch):
+        """Test translation with Algebras AI provider"""
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+
+        # Patch Config class
+        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+
+        # Mock environment variable
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        # Mock requests.post
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"translatedText": "Hallo Welt"}
+        
+        mock_post = MagicMock(return_value=mock_response)
+        monkeypatch.setattr("algebras.services.translator.requests.post", mock_post)
+
+        # Initialize Translator
+        translator = Translator()
+        result = translator.translate_text("Hello world", "en", "de")
+
+        # Verify the translation
+        assert result == "Hallo Welt"
+        
+        # Verify the correct URL and headers were used
+        expected_url = "https://platform.algebras.ai/api/v1/translation/translate"
+        expected_headers = {
+            "accept": "application/json",
+            "X-Api-Key": "test-api-key"
+        }
+        
+        # Check that requests.post was called with the correct arguments
+        mock_post.assert_called_once()
+        args, kwargs = mock_post.call_args
+        assert args[0] == expected_url
+        assert kwargs["headers"] == expected_headers
+        
+        # Check that files dict contains appropriate values
+        assert "sourceLanguage" in kwargs["files"]
+        assert "targetLanguage" in kwargs["files"]
+        assert "textContent" in kwargs["files"]
+        assert kwargs["files"]["sourceLanguage"][1] == "en"
+        assert kwargs["files"]["targetLanguage"][1] == "de"
+        assert kwargs["files"]["textContent"][1] == "Hello world"
+
+    def test_translate_with_algebras_ai_no_api_key(self, monkeypatch):
+        """Test translation with Algebras AI provider but no API key"""
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+
+        # Patch Config class
+        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+
+        # Ensure no API key in environment
+        monkeypatch.delenv("ALGEBRAS_API_KEY", raising=False)
+
+        # Initialize Translator
+        translator = Translator()
+
+        # Test translate_text with no API key
+        with pytest.raises(ValueError, match="Algebras API key not found"):
+            translator.translate_text("Hello world", "en", "fr")
+            
+    def test_translate_with_algebras_ai_error_response(self, monkeypatch):
+        """Test translation with Algebras AI provider returning an error"""
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+
+        # Patch Config class
+        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+
+        # Mock environment variable
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        # Mock requests.post to return an error
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.text = "Bad Request"
+        
+        mock_post = MagicMock(return_value=mock_response)
+        monkeypatch.setattr("algebras.services.translator.requests.post", mock_post)
+
+        # Initialize Translator
+        translator = Translator()
+
+        # Test translate_text with error response
+        with pytest.raises(Exception, match="Error from Algebras AI API: 400 - Bad Request"):
+            translator.translate_text("Hello world", "en", "fr") 
