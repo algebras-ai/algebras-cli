@@ -14,7 +14,7 @@ from algebras.utils.lang_validator import validate_language_files, find_outdated
 from algebras.utils.git_utils import is_git_available, is_git_repository
 
 
-def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_validation: bool = False) -> None:
+def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_validation: bool = False, ui_safe: bool = False) -> None:
     """
     Update your translations.
     
@@ -22,6 +22,7 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
         language: Language to update (if None, update all languages)
         only_missing: If True, only missing keys will be translated (default: True)
         skip_git_validation: If True, git validation will be skipped even if git is available (default: False)
+        ui_safe: If True, ensure translations will not be longer than original text (default: False)
     """
     config = Config()
     
@@ -224,7 +225,8 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                     lang, 
                     force=True, 
                     only_missing=True,
-                    outdated_files=[(file_path, source_file)]
+                    outdated_files=[(file_path, source_file)],
+                    ui_safe=ui_safe
                 )
                 
             # For files with missing or outdated keys (from git), call translate command
@@ -235,7 +237,8 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                     force=True, 
                     only_missing=True,
                     missing_keys_files=missing_keys_files,
-                    outdated_keys_files=outdated_keys_files
+                    outdated_keys_files=outdated_keys_files,
+                    ui_safe=ui_safe
                 )
         
         click.echo(f"\n{Fore.GREEN}Update completed.\x1b[0m")

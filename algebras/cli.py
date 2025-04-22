@@ -42,19 +42,21 @@ def add(language):
 @click.option("--language", "-l", help="Translate only the specified language.")
 @click.option("--force", is_flag=True, help="Force translation even if files are up to date.")
 @click.option("--only-missing", is_flag=True, help="Only translate keys that are missing in the target files.")
-def translate(language, force, only_missing):
+@click.option("--ui-safe", is_flag=True, help="Ensure translations will not exceed the original text length.")
+def translate(language, force, only_missing, ui_safe):
     """Translate your application."""
-    translate_command.execute(language, force, only_missing)
+    translate_command.execute(language, force, only_missing, ui_safe=ui_safe)
 
 
 @cli.command("update")
 @click.option("--language", "-l", help="Update only the specified language.")
 @click.option("--full", is_flag=True, help="Translate the entire file, not just missing keys.")
 @click.option("--use-git", is_flag=True, help="Use git for key validation (slower but more thorough).")
-def update(language, full, use_git):
+@click.option("--ui-safe", is_flag=True, help="Ensure translations will not exceed the original text length.")
+def update(language, full, use_git, ui_safe):
     """Update your translations."""
     only_missing = not full
-    update_command.execute(language, only_missing, not use_git)
+    update_command.execute(language, only_missing, not use_git, ui_safe=ui_safe)
 
 
 @cli.command("review")

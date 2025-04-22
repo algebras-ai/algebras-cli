@@ -20,7 +20,8 @@ from algebras.utils.git_utils import is_git_available, is_git_repository
 def execute(language: Optional[str] = None, force: bool = False, only_missing: bool = False,
            outdated_files: List[Tuple[str, str]] = None, 
            missing_keys_files: List[Tuple[str, Set[str], str]] = None,
-           outdated_keys_files: List[Tuple[str, Set[str], str]] = None) -> None:
+           outdated_keys_files: List[Tuple[str, Set[str], str]] = None,
+           ui_safe: bool = False) -> None:
     """
     Translate your application.
     
@@ -31,6 +32,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         outdated_files: List of tuples (target_file, source_file) that are outdated by modification time
         missing_keys_files: List of tuples (target_file, missing_keys, source_file)
         outdated_keys_files: List of tuples (target_file, outdated_keys, source_file)
+        ui_safe: If True, ensure translations will not be longer than original text
     """
     config = Config()
     
@@ -131,7 +133,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             source_content, 
                             target_content, 
                             list(missing_keys), 
-                            target_lang
+                            target_lang,
+                            ui_safe
                         )
                     
                     # Translate modified keys
@@ -141,7 +144,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             source_content,
                             target_content,
                             modified_keys,
-                            target_lang
+                            target_lang,
+                            ui_safe
                         )
                     
                     # Save updated content if there were changes
@@ -186,7 +190,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 source_content, 
                                 target_content, 
                                 list(missing_keys), 
-                                target_lang
+                                target_lang,
+                                ui_safe
                             )
                             
                             # Save updated content
@@ -226,7 +231,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 source_content,
                                 target_content,
                                 list(outdated_keys),
-                                target_lang
+                                target_lang,
+                                ui_safe
                             )
                             
                             # Save updated content
@@ -382,7 +388,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 source_content, 
                                 target_content, 
                                 list(missing_keys), 
-                                target_lang
+                                target_lang,
+                                ui_safe
                             )
                         else:
                             translated_content = target_content
@@ -394,7 +401,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 source_content,
                                 translated_content,
                                 list(outdated_keys),
-                                target_lang
+                                target_lang,
+                                ui_safe
                             )
                         
                         # Save updated content
@@ -413,7 +421,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     # Translate the full file
                     click.echo(f"  {Fore.GREEN}Translating {source_basename} to {target_basename}...\x1b[0m")
                     try:
-                        translated_content = translator.translate_file(source_file, target_lang)
+                        translated_content = translator.translate_file(source_file, target_lang, ui_safe)
                         
                         # Save translated content
                         if source_file.endswith(".json"):

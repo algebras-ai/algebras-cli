@@ -173,7 +173,7 @@ class TestTranslator:
         m = mock_open(read_data=json.dumps(json_content))
         
         # Mock translate_text to return expected translations
-        def mock_translate_text(text, source_lang, target_lang):
+        def mock_translate_text(text, source_lang, target_lang, ui_safe=False):
             if text == "Welcome to our application!":
                 return "Bienvenue dans notre application!"
             elif text == "Login":
@@ -239,7 +239,7 @@ class TestTranslator:
         monkeypatch.setattr(yaml, "safe_load", lambda f: parsed_yaml)
         
         # Mock translate_text to return expected translations
-        def mock_translate_text(text, source_lang, target_lang):
+        def mock_translate_text(text, source_lang, target_lang, ui_safe=False):
             if text == "Welcome to our application!":
                 return "Bienvenue dans notre application!"
             elif text == "Login":
@@ -314,7 +314,7 @@ class TestTranslator:
         monkeypatch.setenv("OPENAI_API_KEY", "test-api-key")
 
         # Mock translate_text to return expected translations
-        def mock_translate_text(text, source_lang, target_lang):
+        def mock_translate_text(text, source_lang, target_lang, ui_safe=False):
             if text == "Welcome to our application!":
                 return "Bienvenue dans notre application!"
             elif text == "Login":
@@ -330,7 +330,7 @@ class TestTranslator:
         result = translator._translate_nested_dict(nested_dict, "en", "fr")
         
         # Verify the translation
-        assert result == expected_translation 
+        assert result == expected_translation
 
     def test_translate_with_algebras_ai(self, monkeypatch):
         """Test translation with Algebras AI provider"""
