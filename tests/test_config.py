@@ -109,7 +109,7 @@ class TestConfig:
         assert "en" in config.data["languages"]
         assert "path_rules" in config.data
         assert "api" in config.data
-        assert config.data["api"]["provider"] == "openai"
+        assert config.data["api"]["provider"] == "algebras-ai"
 
     def test_get_languages_empty(self, monkeypatch):
         """Test get_languages with empty config"""

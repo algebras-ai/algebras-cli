@@ -21,6 +21,7 @@ class TestInitCommand:
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = False
         mock_config.config_path = "/path/to/.algebras.config"
+        mock_config.data = {"api": {"provider": "algebras-ai"}}
 
         # Patch Config and click.echo
         with patch("algebras.commands.init_command.Config", return_value=mock_config), \
@@ -42,6 +43,7 @@ class TestInitCommand:
         # Mock Config
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
+        mock_config.data = {"api": {"provider": "algebras-ai"}}
         
         # Patch Config and click.echo
         with patch("algebras.commands.init_command.Config", return_value=mock_config), \
@@ -63,6 +65,7 @@ class TestInitCommand:
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.config_path = "/path/to/.algebras.config"
+        mock_config.data = {"api": {"provider": "algebras-ai"}}
         
         # Patch Config and click.echo
         with patch("algebras.commands.init_command.Config", return_value=mock_config), \
@@ -94,8 +97,8 @@ class TestInitCommand:
             # Verify the command executed successfully
             assert result.exit_code == 0
             
-            # Verify execute was called with the right arguments (force=False, verbose=False)
-            mock_execute.assert_called_once_with(False, False)
+            # Verify execute was called with the right arguments (force=False, verbose=False, provider=None)
+            mock_execute.assert_called_once_with(False, False, None)
             
             # Test with force option
             result = runner.invoke(init, ["--force"])
@@ -104,4 +107,4 @@ class TestInitCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments
-            mock_execute.assert_called_with(True, False) 
+            mock_execute.assert_called_with(True, False, None) 
