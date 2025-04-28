@@ -7,6 +7,8 @@
 
 > Powerful AI-driven localization tool for your applications
 
+![Algebras CLI Demo](imgs/demo-font-size-30.gif)
+
 ## Overview
 
 Algebras CLI is a Python package that simplifies application localization by tracking translation status and automating updates. Powered by AI, it helps you manage translations across multiple languages with minimal effort.
