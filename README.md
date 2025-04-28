@@ -58,6 +58,21 @@ algebras review
 algebras status
 ```
 
+### Configure settings for your Algebras project
+
+```bash
+# View current configuration
+algebras configure
+
+# Set Algebras AI as the provider
+algebras configure --provider algebras-ai
+
+# Set OpenAI as the provider
+algebras configure --provider openai
+
+# Set the model for OpenAI provider
+algebras configure --model gpt-4
+```
 
 ### Run the CI pipeline
 
@@ -73,8 +88,8 @@ The `.algebras.config` file is used to configure the Algebras CLI. It contains t
 - `path_rules`: List of path rules to find localization files.
 - `api`: API configuration for translation providers:
   - `provider`: The translation provider to use. Supported values:
+    - `algebras-ai`: (Default) Use Algebras AI translation API (requires `ALGEBRAS_API_KEY` environment variable)
     - `openai`: Use OpenAI's GPT models for translation (requires `OPENAI_API_KEY` environment variable)
-    - `algebras-ai`: Use Algebras AI translation API (requires `ALGEBRAS_API_KEY` environment variable)
   - `model`: The model to use (for OpenAI provider)
 
 

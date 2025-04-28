@@ -11,6 +11,7 @@ from algebras.config import Config
 from algebras.commands import init_command, add_command
 from algebras.commands import translate_command, update_command
 from algebras.commands import review_command, status_command
+from algebras.commands import configure_command
 
 # Initialize colorama
 init()
@@ -26,9 +27,10 @@ def cli():
 @cli.command("init")
 @click.option("--force", is_flag=True, help="Force initialization even if a config file exists.")
 @click.option("--verbose", is_flag=True, help="Show detailed information about locale detection.")
-def init(force, verbose):
+@click.option("--provider", help="Set the default provider (e.g., 'openai', 'algebras-ai').")
+def init(force, verbose, provider):
     """Initialize a new Algebras project."""
-    init_command.execute(force, verbose)
+    init_command.execute(force, verbose, provider)
 
 
 @cli.command("add")
@@ -71,6 +73,14 @@ def review(language):
 def status(language):
     """Check the status of your translations."""
     status_command.execute(language)
+
+
+@cli.command("configure")
+@click.option("--provider", help="Set the API provider (e.g., 'openai', 'algebras-ai').")
+@click.option("--model", help="Set the model for the provider (only applicable for some providers).")
+def configure(provider, model):
+    """Configure your Algebras project settings."""
+    configure_command.execute(provider, model)
 
 
 def main():
