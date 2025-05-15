@@ -10,6 +10,7 @@ setup(
         "colorama>=0.4.4",
         "pyyaml>=6.0",
         "openai>=1.0.0",
+        "requests>=2.32.3",
     ],
     entry_points={
         "console_scripts": [
