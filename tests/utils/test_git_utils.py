@@ -127,24 +127,30 @@ class TestGitUtils(unittest.TestCase):
         mock_file.assert_called_once_with(yaml_file, 'r', encoding='utf-8')
         mock_yaml_load.assert_called_once()
 
+    @patch('os.path.exists', return_value=True)
+    @patch('algebras.utils.git_utils.get_key_line_number', return_value=1)
     @patch('algebras.utils.git_utils.is_git_repository')
     @patch('subprocess.run')
-    def test_get_key_last_modification(self, mock_run, mock_is_git_repo):
+    def test_get_key_last_modification(self, mock_run, mock_is_git_repo, mock_get_key_line_number, mock_exists):
         # Mock git repository check
         mock_is_git_repo.return_value = True
-        
-        # Create mock result for the second git command with date in stdout
-        mock_process = Mock()
-        mock_process.returncode = 0
-        # Git will return a list of dates, with the newest first
-        mock_process.stdout = f"{self.newer_date}\n"
-        
-        # Always return this successful result for any subprocess call
-        mock_run.return_value = mock_process
-        
+
+        # Mock for is_git_repository (returns 0, 'true')
+        mock_repo_process = Mock()
+        mock_repo_process.returncode = 0
+        mock_repo_process.stdout = 'true'
+
+        # Mock for git log/blame (returns 0, newer_date)
+        mock_git_process = Mock()
+        mock_git_process.returncode = 0
+        mock_git_process.stdout = f"{self.newer_date}\n"
+
+        # Set side_effect for subprocess.run
+        mock_run.side_effect = [mock_git_process]
+
         # Call the function we want to test
         result = get_key_last_modification(self.source_file, "key1.nested")
-        
+
         # Verify we get the expected date (the first line from stdout)
         self.assertEqual(result, self.newer_date)
         mock_is_git_repo.assert_called_once_with(self.source_file)

@@ -2,7 +2,7 @@ import os
 import json
 import yaml
 from typing import Dict, Any, Set, List, Tuple
-from algebras.utils.git_utils import is_git_available, is_git_repository, get_key_last_modification
+from algebras.utils.git_utils import is_git_available, is_git_repository, get_key_last_modification, compare_key_modifications
 
 
 def read_language_file(file_path: str) -> Dict[str, Any]:
@@ -133,12 +133,10 @@ def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[st
             # Skip if the values are the same
             if source_value == target_value:
                 continue
-                
-            # Check if source key was modified more recently than target key
-            source_mod = get_key_last_modification(source_file, key)
-            target_mod = get_key_last_modification(target_file, key)
             
-            if source_mod and target_mod and source_mod.get('date', '') > target_mod.get('date', ''):
+            # Use compare_key_modifications for robust patching/testing
+            is_outdated, _, _ = compare_key_modifications(source_file, target_file, key)
+            if is_outdated:
                 outdated_keys.add(key)
         
         return len(outdated_keys) > 0, outdated_keys

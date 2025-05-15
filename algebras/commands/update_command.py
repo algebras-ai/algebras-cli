@@ -262,53 +262,9 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                 for file_path in files_to_update:
                     click.echo(f"  - {file_path}")
             
-            # For files with missing keys, print the missing keys
-            for file_path, missing_keys, _ in missing_keys_files:
-                if missing_keys:
-                    click.echo(f"  {Fore.YELLOW}File {os.path.basename(file_path)} is missing {len(missing_keys)} keys:{Fore.RESET}")
-                    # Print up to 5 missing keys as examples
-                    for key in list(missing_keys)[:5]:
-                        click.echo(f"    - {key}")
-                    if len(missing_keys) > 5:
-                        click.echo(f"    - ... and {len(missing_keys) - 5} more")
-            
-            # For files with outdated keys, print the outdated keys
-            for file_path, outdated_keys, source_file in outdated_keys_files:
-                if outdated_keys:
-                    click.echo(f"  {Fore.YELLOW}File {os.path.basename(file_path)} has {len(outdated_keys)} outdated keys (git history):{Fore.RESET}")
-                    # Get detailed information for each outdated key
-                    for key in sorted(outdated_keys):
-                        source_info = get_key_last_modification(source_file, key)
-                        target_info = get_key_last_modification(file_path, key)
-                        
-                        # Get the values
-                        source_data = read_language_file(source_file)
-                        target_data = read_language_file(file_path)
-                        source_value = get_key_value(source_data, key)
-                        target_value = get_key_value(target_data, key)
-                        
-                        # Truncate values if too long
-                        source_value_short = source_value[:50] + "..." if len(source_value) > 50 else source_value
-                        target_value_short = target_value[:50] + "..." if len(target_value) > 50 else target_value
-                        
-                        click.echo(f"    - Key: {key}")
-                        click.echo(f"      Source: {source_value_short}")
-                        click.echo(f"        Date: {source_info.get('date', 'N/A')}")
-                        click.echo(f"        Commit: {source_info.get('commit_hash', 'N/A')}")
-                        click.echo(f"        Author: {source_info.get('author', 'N/A')}")
-                        click.echo(f"      Target: {target_value_short}")
-                        click.echo(f"        Date: {target_info.get('date', 'N/A')}")
-                        click.echo(f"        Commit: {target_info.get('commit_hash', 'N/A')}")
-                        click.echo(f"        Author: {target_info.get('author', 'N/A')}")
-                        click.echo("")  # Empty line for better readability
-            
-            # For outdated files based on modification time, extract potentially outdated keys
-            # by comparing the content of both files
+            # For outdated files based on modification time, call translate_command for each file
             for file_path, source_file in outdated_files:
                 click.echo(f"  {Fore.YELLOW}File {os.path.basename(file_path)} is outdated (modification time):{Fore.RESET}")
-                
-                # Pass this information to the translate command
-                # We'll handle the extraction of potentially outdated keys there
                 translate_command.execute(
                     lang, 
                     force=True, 
@@ -317,19 +273,36 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                     ui_safe=ui_safe,
                     verbose=verbose
                 )
-                
-            # For files with missing or outdated keys (from git), call translate command
-            # only for those specific keys
-            if missing_keys_files or outdated_keys_files:
-                translate_command.execute(
-                    lang, 
-                    force=True, 
-                    only_missing=True,
-                    missing_keys_files=missing_keys_files,
-                    outdated_keys_files=outdated_keys_files,
-                    ui_safe=ui_safe,
-                    verbose=verbose
-                )
+
+            # For files with missing keys, call translate_command for each file
+            for file_path, missing_keys, source_file in missing_keys_files:
+                if missing_keys:
+                    click.echo(f"  {Fore.YELLOW}File {os.path.basename(file_path)} is missing {len(missing_keys)} keys:{Fore.RESET}")
+                    for key in list(missing_keys)[:5]:
+                        click.echo(f"    - {key}")
+                    if len(missing_keys) > 5:
+                        click.echo(f"    - ... and {len(missing_keys) - 5} more")
+                    translate_command.execute(
+                        lang,
+                        force=True,
+                        only_missing=True,
+                        missing_keys_files=[(file_path, missing_keys, source_file)],
+                        ui_safe=ui_safe,
+                        verbose=verbose
+                    )
+
+            # For files with outdated keys, call translate_command for each file
+            for file_path, outdated_keys, source_file in outdated_keys_files:
+                if outdated_keys:
+                    click.echo(f"  {Fore.YELLOW}File {os.path.basename(file_path)} has {len(outdated_keys)} outdated keys (git history):{Fore.RESET}")
+                    translate_command.execute(
+                        lang,
+                        force=True,
+                        only_missing=True,
+                        outdated_keys_files=[(file_path, outdated_keys, source_file)],
+                        ui_safe=ui_safe,
+                        verbose=verbose
+                    )
         
         click.echo(f"\n{Fore.GREEN}Update completed.\x1b[0m")
         click.echo(f"To check the status of your translations, run: {Fore.BLUE}algebras status\x1b[0m")
