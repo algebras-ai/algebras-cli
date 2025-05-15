@@ -6,6 +6,19 @@ from typing import Dict, Optional, Tuple, List, Any
 import json
 import yaml
 import re
+import logging
+
+# Configure logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Create console handler if not already exists
+if not logger.handlers:
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(levelname)s: %(message)s')
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
 
 
 def is_git_available() -> bool:
@@ -107,43 +120,43 @@ def get_key_line_number(file_path: str, key: str) -> Optional[int]:
     Returns:
         Line number where the key is defined or None if not found
     """
-    print(f"\nSearching for key: {key}")
-    print(f"In file: {file_path}")
+    logger.debug(f"\nSearching for key: {key}")
+    logger.debug(f"In file: {file_path}")
     
     try:
         # First, check if the file exists
         if not os.path.exists(file_path):
-            print("File not found!")
+            logger.warning("File not found!")
             return None
             
         # Read the file content to parse the structure
-        print("Reading file content...")
+        logger.debug("Reading file content...")
         content = read_file_content(file_path)
         
         # Split the key into parts for nested access
         key_parts = key.split('.')
-        print(f"Split key into parts: {key_parts}")
+        logger.debug(f"Split key into parts: {key_parts}")
         
         # For nested structures, we need to find the exact line where the value is defined
-        print("Opening file to read lines...")
+        logger.debug("Opening file to read lines...")
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-        print(f"Read {len(lines)} lines from file")
+        logger.debug(f"Read {len(lines)} lines from file")
         
         # Different handling based on file format
         if file_path.endswith('.json'):
             # For JSON, we'll traverse the lines looking for the exact key pattern
-            print("Processing JSON file format")
+            logger.debug("Processing JSON file format")
             return _find_json_key_line(lines, key_parts)
         elif file_path.endswith(('.yaml', '.yml')):
             # For YAML, we need to handle indentation
-            print("Processing YAML file format")
+            logger.debug("Processing YAML file format")
             return _find_yaml_key_line(lines, key_parts)
         else:
-            print("Unsupported file format")
+            logger.warning("Unsupported file format")
             return None
     except Exception as e:
-        print(f"Error occurred: {str(e)}")
+        logger.error(f"Error occurred: {str(e)}")
         return None
 
 
@@ -281,18 +294,18 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
         ISO date string of the last modification or None if not available
     """
     try:
-        print("\nDEBUG - Starting get_key_last_modification")
+        logger.debug("\nDEBUG - Starting get_key_last_modification")
         if not is_git_repository(file_path) or not os.path.exists(file_path):
-            print(f"DEBUG - Not a git repo or file doesn't exist: {file_path}")
+            logger.debug(f"DEBUG - Not a git repo or file doesn't exist: {file_path}")
             return None
             
         # Get the line number where the key is defined
         line_number = get_key_line_number(file_path, key)
         if not line_number:
-            print(f"DEBUG - Couldn't find line number for key: {key}")
+            logger.debug(f"DEBUG - Couldn't find line number for key: {key}")
             return None
         
-        print(f"DEBUG - Found line number: {line_number}")
+        logger.debug(f"DEBUG - Found line number: {line_number}")
         
         # Get directory and filename separately to avoid path duplication
         file_dir = os.path.dirname(file_path)
@@ -300,7 +313,7 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
             
         # Try git log first (which might be more reliable for getting dates)
         try:
-            print("DEBUG - Trying git log approach first")
+            logger.debug("DEBUG - Trying git log approach first")
             log_result = subprocess.run(
                 ['git', 'log', '-1', '--format=%aI', f'-L{line_number},{line_number}:{file_name}'],
                 cwd=file_dir,
@@ -309,23 +322,23 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
                 check=False
             )
             
-            print(f"DEBUG - Git log command: git log -1 --format=%aI -L{line_number},{line_number}:{file_name}")
-            print(f"DEBUG - Git log return code: {log_result.returncode}")
-            print(f"DEBUG - Git log stdout: {log_result.stdout}")
-            print(f"DEBUG - Git log stderr: {log_result.stderr}")
+            logger.debug(f"DEBUG - Git log command: git log -1 --format=%aI -L{line_number},{line_number}:{file_name}")
+            logger.debug(f"DEBUG - Git log return code: {log_result.returncode}")
+            logger.debug(f"DEBUG - Git log stdout: {log_result.stdout}")
+            logger.debug(f"DEBUG - Git log stderr: {log_result.stderr}")
             
             if log_result.returncode == 0 and log_result.stdout.strip():
                 iso_date = log_result.stdout.strip().split('\n')[0]
-                print(f"DEBUG - Found date using git log: {iso_date}")
+                logger.debug(f"DEBUG - Found date using git log: {iso_date}")
                 # If it looks like an ISO date, return it
                 if len(iso_date) >= 10 and iso_date[4] == '-' and iso_date[7] == '-':
                     return iso_date
         except Exception as e:
-            print(f"DEBUG - Error with git log approach: {str(e)}")
+            logger.debug(f"DEBUG - Error with git log approach: {str(e)}")
             # Continue to blame approach if log fails
             
         # Use git blame to find who changed this line last
-        print("DEBUG - Trying git blame approach")
+        logger.debug("DEBUG - Trying git blame approach")
         result = subprocess.run(
             ['git', 'blame', '-L', f'{line_number},{line_number}', '--date=iso', file_name],
             cwd=file_dir,
@@ -334,18 +347,18 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
             check=False
         )
         
-        print(f"DEBUG - Git blame command: git blame -L {line_number},{line_number} --date=iso {file_name}")
-        print(f"DEBUG - Git blame return code: {result.returncode}")
-        print(f"DEBUG - Git blame stderr: {result.stderr}")
+        logger.debug(f"DEBUG - Git blame command: git blame -L {line_number},{line_number} --date=iso {file_name}")
+        logger.debug(f"DEBUG - Git blame return code: {result.returncode}")
+        logger.debug(f"DEBUG - Git blame stderr: {result.stderr}")
         
         if result.returncode != 0 or not result.stdout.strip():
-            print(f"DEBUG - Git blame failed with return code: {result.returncode}")
-            print(f"DEBUG - Git blame stderr: {result.stderr}")
+            logger.debug(f"DEBUG - Git blame failed with return code: {result.returncode}")
+            logger.debug(f"DEBUG - Git blame stderr: {result.stderr}")
             return get_last_modified_date(file_path)
             
         # Parse the blame output to extract the date
         blame_line = result.stdout.strip()
-        print(f"DEBUG - Blame output: {blame_line}")
+        logger.debug(f"DEBUG - Blame output: {blame_line}")
         
         # Direct approach to extract date pattern from the blame line
         # Look for YYYY-MM-DD pattern
@@ -357,21 +370,21 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
             date_str = date_match.group(1)
             time_str = time_match.group(1)
             iso_datetime = f"{date_str}T{time_str}Z"
-            print(f"DEBUG - Extracted date and time: {iso_datetime}")
+            logger.debug(f"DEBUG - Extracted date and time: {iso_datetime}")
             return iso_datetime
         
         try:
             # Try original format: hash (author date timezone) line content
             if '(' in blame_line and ')' in blame_line:
-                print("DEBUG - Trying parentheses format")
+                logger.debug("DEBUG - Trying parentheses format")
                 date_part = blame_line.split('(')[1].split(')')[0]
                 date_components = date_part.strip().split()
-                print(f"DEBUG - Date components: {date_components}")
+                logger.debug(f"DEBUG - Date components: {date_components}")
             else:
                 # Alternative format: hash author date time timezone number) line content
-                print("DEBUG - Trying space-separated format")
+                logger.debug("DEBUG - Trying space-separated format")
                 parts = blame_line.split()
-                print(f"DEBUG - Blame parts: {parts}")
+                logger.debug(f"DEBUG - Blame parts: {parts}")
                 # Look for date patterns in the parts
                 date_components = []
                 for part in parts:
@@ -380,7 +393,7 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
                     elif re.match(r'\d{2}:\d{2}:\d{2}', part):
                         date_components.append(part)
                 
-                print(f"DEBUG - Found date components: {date_components}")
+                logger.debug(f"DEBUG - Found date components: {date_components}")
         
             # Extract only the ISO date part
             # Try to find something that looks like ISO date (YYYY-MM-DD)
@@ -389,12 +402,12 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
                     # This looks like a date
                     if 'T' in part or ' ' in part:
                         # This looks like a datetime
-                        print(f"DEBUG - Found ISO datetime: {part}")
+                        logger.debug(f"DEBUG - Found ISO datetime: {part}")
                         return part
                     
                     # For date-only format, add time to make it comparable
                     iso_date = f"{part}T00:00:00Z"
-                    print(f"DEBUG - Constructed ISO datetime: {iso_date}")
+                    logger.debug(f"DEBUG - Constructed ISO datetime: {iso_date}")
                     return iso_date
             
             # If we found date components but no valid date format,
@@ -406,17 +419,17 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
                     if (len(date_str) >= 10 and date_str[4] == '-' and date_str[7] == '-' and 
                         re.match(r'\d{2}:\d{2}:\d{2}', time_str)):
                         iso_datetime = f"{date_str}T{time_str}Z"
-                        print(f"DEBUG - Constructed ISO datetime from components: {iso_datetime}")
+                        logger.debug(f"DEBUG - Constructed ISO datetime from components: {iso_datetime}")
                         return iso_datetime
                 
             # Fallback to file's last modification date
-            print("DEBUG - Falling back to file's last modification date")
+            logger.debug("DEBUG - Falling back to file's last modification date")
             return get_last_modified_date(file_path)
         except Exception as e:
-            print(f"DEBUG - Error parsing blame: {str(e)}")
+            logger.debug(f"DEBUG - Error parsing blame: {str(e)}")
             return get_last_modified_date(file_path)
     except Exception as e:
-        print(f"DEBUG - Exception in get_key_last_modification: {str(e)}")
+        logger.error(f"DEBUG - Exception in get_key_last_modification: {str(e)}")
         import traceback
         traceback.print_exc()
         return None
@@ -574,7 +587,7 @@ def print_pretty_json(data: Any) -> None:
     Args:
         data: Data to print
     """
-    print(json.dumps(data, indent=2, sort_keys=True, default=str))
+    logger.info(json.dumps(data, indent=2, sort_keys=True, default=str))
 
 
 def show_all_keys(file_path: str) -> List[str]:
@@ -609,7 +622,7 @@ def main() -> None:
     """
     # Check if git is available
     if not is_git_available():
-        print("Error: Git is not available on your system.", file=sys.stderr)
+        logger.error("Git is not available on your system.")
         sys.exit(1)
     
     # Create the argument parser
@@ -656,41 +669,41 @@ def main() -> None:
         elif args.command == "find":
             results = find_outdated_translations(args.source, args.target)
             if "error" in results:
-                print(f"Error: {results['error']}", file=sys.stderr)
+                logger.error(f"Error: {results['error']}")
                 sys.exit(1)
             
             if not results:
-                print("No outdated translations found.")
+                logger.info("No outdated translations found.")
             else:
-                print(f"Found {len(results)} outdated translations:")
+                logger.info(f"Found {len(results)} outdated translations:")
                 print_pretty_json(results)
         
         elif args.command == "date":
             date = get_key_last_modification(args.file, args.key)
             line = get_key_line_number(args.file, args.key)
-            print(f"Key: {args.key}")
-            print(f"File: {args.file}")
-            print(f"Line: {line}")
+            logger.info(f"Key: {args.key}")
+            logger.info(f"File: {args.file}")
+            logger.info(f"Line: {line}")
 
             if not date:
-                print(f"Error: Could not determine last modification date for key '{args.key}'", file=sys.stderr)
+                logger.error(f"Could not determine last modification date for key '{args.key}'")
                 sys.exit(1)
             
-            print(f"Last modified: {date}")
+            logger.info(f"Last modified: {date}")
         
         elif args.command == "keys":
             all_keys = show_all_keys(args.file)
             
             if all_keys and all_keys[0].startswith("Error:"):
-                print(all_keys[0], file=sys.stderr)
+                logger.error(all_keys[0])
                 sys.exit(1)
             
-            print(f"Found {len(all_keys)} keys in {args.file}:")
+            logger.info(f"Found {len(all_keys)} keys in {args.file}:")
             for key in all_keys:
-                print(f"- {key}")
+                logger.info(f"- {key}")
     
     except Exception as e:
-        print(f"Error: {str(e)}", file=sys.stderr)
+        logger.error(f"Error: {str(e)}")
         sys.exit(1)
 
 
