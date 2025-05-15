@@ -9,13 +9,14 @@ from colorama import Fore
 from algebras.config import Config
 
 
-def execute(provider: str = None, model: str = None) -> None:
+def execute(provider: str = None, model: str = None, path_rules: str = None) -> None:
     """
     Configure your Algebras project settings.
     
     Args:
         provider: Set the API provider (e.g., 'openai', 'algebras-ai')
         model: Set the model for the provider (only applicable for some providers)
+        path_rules: Set the path rules for file patterns to process
     """
     config = Config()
     
@@ -58,14 +59,36 @@ def execute(provider: str = None, model: str = None) -> None:
         config.data["api"]["model"] = model
         click.echo(f"{Fore.GREEN}Model set to '{model}'.\x1b[0m")
     
+    # Handle path_rules change
+    if path_rules:
+        # Split by comma if provided as comma-separated list
+        if "," in path_rules:
+            rules = [rule.strip() for rule in path_rules.split(",")]
+        else:
+            # Otherwise treat as a single pattern
+            rules = [path_rules.strip()]
+        
+        config.data["path_rules"] = rules
+        click.echo(f"{Fore.GREEN}Path rules updated with {len(rules)} pattern(s).\x1b[0m")
+    
     # If no arguments provided, show current configuration
-    if not provider and not model:
+    if not provider and not model and not path_rules:
         click.echo(f"\nCurrent configuration:")
         click.echo(f"  Provider: {Fore.BLUE}{current_provider}\x1b[0m")
         click.echo(f"  Model: {Fore.BLUE}{config.data['api'].get('model', 'Not set')}\x1b[0m")
         
+        # Show path rules
+        path_rules_list = config.data.get('path_rules', [])
+        if path_rules_list:
+            click.echo(f"  Path rules:")
+            for rule in path_rules_list:
+                click.echo(f"    - {Fore.BLUE}{rule}\x1b[0m")
+        else:
+            click.echo(f"  Path rules: {Fore.BLUE}Not set\x1b[0m")
+        
         click.echo(f"\nTo change the provider, run: {Fore.BLUE}algebras configure --provider <provider>\x1b[0m")
         click.echo(f"To change the model, run: {Fore.BLUE}algebras configure --model <model>\x1b[0m")
+        click.echo(f"To set path rules, run: {Fore.BLUE}algebras configure --path-rules \"pattern1,pattern2,...\"\x1b[0m")
         return
     
     # Save configuration

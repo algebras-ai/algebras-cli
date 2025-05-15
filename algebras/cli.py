@@ -89,9 +89,10 @@ def status(language):
 @cli.command("configure")
 @click.option("--provider", help="Set the API provider (e.g., 'openai', 'algebras-ai').")
 @click.option("--model", help="Set the model for the provider (only applicable for some providers).")
-def configure(provider, model):
+@click.option("--path-rules", help="Set the path rules for file patterns to process (comma separated list or glob patterns).")
+def configure(provider, model, path_rules):
     """Configure your Algebras project settings."""
-    configure_command.execute(provider, model)
+    configure_command.execute(provider, model, path_rules)
 
 
 def main():
