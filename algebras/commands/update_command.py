@@ -15,7 +15,7 @@ from algebras.utils.lang_validator import validate_language_files, find_outdated
 from algebras.utils.git_utils import is_git_available, is_git_repository
 
 
-def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_validation: bool = False, ui_safe: bool = False) -> None:
+def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_validation: bool = False, ui_safe: bool = False, verbose: bool = False) -> None:
     """
     Update your translations.
     
@@ -24,6 +24,7 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
         only_missing: If True, only missing keys will be translated (default: True)
         skip_git_validation: If True, git validation will be skipped even if git is available (default: False)
         ui_safe: If True, ensure translations will not be longer than original text (default: False)
+        verbose: If True, show detailed logs of the update process (default: False)
     """
     config = Config()
     
@@ -33,9 +34,13 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
     
     # Load configuration
     config.load()
+    if verbose:
+        click.echo(f"{Fore.BLUE}Loaded configuration: {config.config_path}\x1b[0m")
     
     # Get languages
     all_languages = config.get_languages()
+    if verbose:
+        click.echo(f"{Fore.BLUE}Available languages: {', '.join(all_languages)}\x1b[0m")
     
     # Filter languages if specified
     if language:
@@ -43,10 +48,14 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
             click.echo(f"{Fore.RED}Language '{language}' is not configured in your project.\x1b[0m")
             return
         languages = [language]
+        if verbose:
+            click.echo(f"{Fore.BLUE}Selected language: {language}\x1b[0m")
     else:
         # Skip the source language
         source_lang = config.get_source_language()
         languages = [lang for lang in all_languages if lang != source_lang]
+        if verbose:
+            click.echo(f"{Fore.BLUE}Selected languages: {', '.join(languages)}\x1b[0m")
     
     if not languages:
         click.echo(f"{Fore.YELLOW}No target languages configured. Add languages with 'algebras add <language>'.\x1b[0m")
@@ -54,6 +63,8 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
     
     # Get source language
     source_language = config.get_source_language()
+    if verbose:
+        click.echo(f"{Fore.BLUE}Source language: {source_language}\x1b[0m")
     
     # Check if git is available for outdated key detection
     git_available = is_git_available() and not skip_git_validation
@@ -64,12 +75,27 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
     
     # Scan for files
     try:
+        if verbose:
+            click.echo(f"{Fore.BLUE}Scanning for translation files...\x1b[0m")
+        
         scanner = FileScanner()
         files_by_language = scanner.group_files_by_language()
-        print(f"files_by_language: {files_by_language}")
+        
+        if verbose:
+            click.echo(f"{Fore.BLUE}Found files by language: {files_by_language}\x1b[0m")
+        else:
+            print(f"files_by_language: {files_by_language}")
+            
         # Get source files
         source_files = files_by_language.get(source_language, [])
-        print(f"source_files: {source_files}")
+        
+        if verbose:
+            click.echo(f"{Fore.BLUE}Source files ({len(source_files)}):\x1b[0m")
+            for src_file in source_files:
+                click.echo(f"  - {src_file}")
+        else:
+            print(f"source_files: {source_files}")
+            
         if not source_files:
             click.echo(f"{Fore.YELLOW}No source files found for language '{source_language}'.\x1b[0m")
             return
@@ -80,12 +106,24 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
         outdated_keys_by_language = {}
         
         for lang in languages:
+            if verbose:
+                click.echo(f"\n{Fore.BLUE}Processing language: {lang}\x1b[0m")
+                
             lang_files = files_by_language.get(lang, [])
+            
+            if verbose:
+                click.echo(f"{Fore.BLUE}Found {len(lang_files)} files for language '{lang}':\x1b[0m")
+                for lang_file in lang_files:
+                    click.echo(f"  - {lang_file}")
+                    
             outdated_files = []
             missing_keys_files = []
             outdated_keys_files = []
             
             for lang_file in lang_files:
+                if verbose:
+                    click.echo(f"\n{Fore.BLUE}Analyzing file: {lang_file}\x1b[0m")
+                    
                 # Find corresponding source file
                 source_file = None
                 lang_basename = os.path.basename(lang_file)
@@ -130,7 +168,13 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                     if potential_source_file in source_files:
                         source_file = potential_source_file
                 
-                print(f"lang_file: {lang_file}, source_file: {source_file}")
+                if verbose:
+                    if source_file:
+                        click.echo(f"{Fore.BLUE}Matched with source file: {source_file}\x1b[0m")
+                    else:
+                        click.echo(f"{Fore.YELLOW}No matching source file found\x1b[0m")
+                else:
+                    print(f"lang_file: {lang_file}, source_file: {source_file}")
                 
                 if source_file:
                     # Check if file is outdated based on modification time
@@ -138,18 +182,36 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                     lang_mtime = os.path.getmtime(lang_file)
                     
                     if lang_mtime < source_mtime:
+                        if verbose:
+                            click.echo(f"{Fore.YELLOW}File is outdated based on modification time\x1b[0m")
+                            click.echo(f"  Source modified: {source_mtime}")
+                            click.echo(f"  Target modified: {lang_mtime}")
                         outdated_files.append((lang_file, source_file))
+                    elif verbose:
+                        click.echo(f"{Fore.GREEN}File is up to date based on modification time\x1b[0m")
                     
                     # Check if all keys from source language exist in target language
+                    if verbose:
+                        click.echo(f"{Fore.BLUE}Validating language file for missing keys...\x1b[0m")
                     is_valid, missing_keys = validate_language_files(source_file, lang_file)
                     if not is_valid:
+                        if verbose:
+                            click.echo(f"{Fore.YELLOW}Found {len(missing_keys)} missing keys\x1b[0m")
                         missing_keys_files.append((lang_file, missing_keys, source_file))
+                    elif verbose:
+                        click.echo(f"{Fore.GREEN}All keys present\x1b[0m")
                     
                     # Check for outdated keys using git history if available
                     if git_available and is_git_repository(os.path.dirname(source_file)):
+                        if verbose:
+                            click.echo(f"{Fore.BLUE}Checking for outdated keys using git history...\x1b[0m")
                         has_outdated_keys, outdated_keys = find_outdated_keys(source_file, lang_file)
                         if has_outdated_keys:
+                            if verbose:
+                                click.echo(f"{Fore.YELLOW}Found {len(outdated_keys)} outdated keys based on git history\x1b[0m")
                             outdated_keys_files.append((lang_file, outdated_keys, source_file))
+                        elif verbose:
+                            click.echo(f"{Fore.GREEN}No outdated keys found\x1b[0m")
             
             outdated_by_language[lang] = outdated_files
             missing_keys_by_language[lang] = missing_keys_files
@@ -195,6 +257,11 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
             
             click.echo(f"\n{Fore.BLUE}Updating {len(files_to_update)} files for language '{lang}'...{Fore.RESET}")
             
+            if verbose:
+                click.echo(f"{Fore.BLUE}Files that need updating:\x1b[0m")
+                for file_path in files_to_update:
+                    click.echo(f"  - {file_path}")
+            
             # For files with missing keys, print the missing keys
             for file_path, missing_keys, _ in missing_keys_files:
                 if missing_keys:
@@ -227,7 +294,8 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                     force=True, 
                     only_missing=True,
                     outdated_files=[(file_path, source_file)],
-                    ui_safe=ui_safe
+                    ui_safe=ui_safe,
+                    verbose=verbose
                 )
                 
             # For files with missing or outdated keys (from git), call translate command
@@ -239,7 +307,8 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                     only_missing=True,
                     missing_keys_files=missing_keys_files,
                     outdated_keys_files=outdated_keys_files,
-                    ui_safe=ui_safe
+                    ui_safe=ui_safe,
+                    verbose=verbose
                 )
         
         click.echo(f"\n{Fore.GREEN}Update completed.\x1b[0m")
@@ -247,14 +316,19 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
     
     except Exception as e:
         click.echo(f"{Fore.RED}Error: {str(e)}\x1b[0m")
+        if verbose:
+            import traceback
+            click.echo(f"{Fore.RED}Traceback:\x1b[0m")
+            click.echo(traceback.format_exc())
 
-def execute_ci(language: Optional[str] = None) -> int:
+def execute_ci(language: Optional[str] = None, verbose: bool = False) -> int:
     """
     Run CI checks for translations without performing translation.
     Always uses git validation for key changes.
     
     Args:
         language: Language to check (if None, check all languages)
+        verbose: If True, show detailed logs of the check process
         
     Returns:
         int: 0 if all checks pass, -1 if any errors are found
@@ -268,9 +342,13 @@ def execute_ci(language: Optional[str] = None) -> int:
     
     # Load configuration
     config.load()
+    if verbose:
+        click.echo(f"{Fore.BLUE}Loaded configuration: {config.config_path}\x1b[0m")
     
     # Get languages
     all_languages = config.get_languages()
+    if verbose:
+        click.echo(f"{Fore.BLUE}Available languages: {', '.join(all_languages)}\x1b[0m")
     
     # Filter languages if specified
     if language:
@@ -278,10 +356,14 @@ def execute_ci(language: Optional[str] = None) -> int:
             click.echo(f"{Fore.RED}Language '{language}' is not configured in your project.\x1b[0m")
             return -1
         languages = [language]
+        if verbose:
+            click.echo(f"{Fore.BLUE}Selected language: {language}\x1b[0m")
     else:
         # Skip the source language
         source_lang = config.get_source_language()
         languages = [lang for lang in all_languages if lang != source_lang]
+        if verbose:
+            click.echo(f"{Fore.BLUE}Selected languages: {', '.join(languages)}\x1b[0m")
     
     if not languages:
         click.echo(f"{Fore.YELLOW}No target languages configured. Add languages with 'algebras add <language>'.\x1b[0m")
@@ -289,6 +371,8 @@ def execute_ci(language: Optional[str] = None) -> int:
     
     # Get source language
     source_language = config.get_source_language()
+    if verbose:
+        click.echo(f"{Fore.BLUE}Source language: {source_language}\x1b[0m")
     
     # Check if git is available for outdated key detection
     git_available = is_git_available()
@@ -300,11 +384,22 @@ def execute_ci(language: Optional[str] = None) -> int:
     
     # Scan for files
     try:
+        if verbose:
+            click.echo(f"{Fore.BLUE}Scanning for translation files...\x1b[0m")
+            
         scanner = FileScanner()
         files_by_language = scanner.group_files_by_language()
         
+        if verbose:
+            click.echo(f"{Fore.BLUE}Found files by language: {files_by_language}\x1b[0m")
+        
         # Get source files
         source_files = files_by_language.get(source_language, [])
+        
+        if verbose:
+            click.echo(f"{Fore.BLUE}Source files ({len(source_files)}):\x1b[0m")
+            for src_file in source_files:
+                click.echo(f"  - {src_file}")
         
         if not source_files:
             click.echo(f"{Fore.RED}No source files found for language '{source_language}'.\x1b[0m")
@@ -315,11 +410,23 @@ def execute_ci(language: Optional[str] = None) -> int:
         outdated_keys_by_language = {}
         
         for lang in languages:
+            if verbose:
+                click.echo(f"\n{Fore.BLUE}Processing language: {lang}\x1b[0m")
+                
             lang_files = files_by_language.get(lang, [])
+            
+            if verbose:
+                click.echo(f"{Fore.BLUE}Found {len(lang_files)} files for language '{lang}':\x1b[0m")
+                for lang_file in lang_files:
+                    click.echo(f"  - {lang_file}")
+                    
             missing_keys_files = []
             outdated_keys_files = []
             
             for lang_file in lang_files:
+                if verbose:
+                    click.echo(f"\n{Fore.BLUE}Analyzing file: {lang_file}\x1b[0m")
+                    
                 # Find corresponding source file
                 source_file = None
                 lang_basename = os.path.basename(lang_file)
@@ -363,17 +470,37 @@ def execute_ci(language: Optional[str] = None) -> int:
                     if potential_source_file in source_files:
                         source_file = potential_source_file
                 
+                if verbose:
+                    if source_file:
+                        click.echo(f"{Fore.BLUE}Matched with source file: {source_file}\x1b[0m")
+                    else:
+                        click.echo(f"{Fore.YELLOW}No matching source file found\x1b[0m")
+                else:
+                    print(f"lang_file: {lang_file}, source_file: {source_file}")
+                
                 if source_file:
                     # Check if all keys from source language exist in target language
                     is_valid, missing_keys = validate_language_files(source_file, lang_file)
                     if not is_valid:
+                        if verbose:
+                            click.echo(f"{Fore.YELLOW}Found {len(missing_keys)} missing keys\x1b[0m")
                         missing_keys_files.append((lang_file, missing_keys, source_file))
+                    elif verbose:
+                        click.echo(f"{Fore.GREEN}All keys present\x1b[0m")
                     
                     # Check for outdated keys using git history
                     if is_git_repository(os.path.dirname(source_file)):
+                        if verbose:
+                            click.echo(f"{Fore.BLUE}Checking for outdated keys using git history...\x1b[0m")
                         has_outdated_keys, outdated_keys = find_outdated_keys(source_file, lang_file)
                         if has_outdated_keys:
+                            if verbose:
+                                click.echo(f"{Fore.YELLOW}Found {len(outdated_keys)} outdated keys based on git history\x1b[0m")
                             outdated_keys_files.append((lang_file, outdated_keys, source_file))
+                        elif verbose:
+                            click.echo(f"{Fore.GREEN}No outdated keys found\x1b[0m")
+                elif verbose:
+                    click.echo(f"{Fore.YELLOW}No matching source file found\x1b[0m")
             
             missing_keys_by_language[lang] = missing_keys_files
             outdated_keys_by_language[lang] = outdated_keys_files
@@ -423,4 +550,8 @@ def execute_ci(language: Optional[str] = None) -> int:
     
     except Exception as e:
         click.echo(f"{Fore.RED}CI Check Error: {str(e)}\x1b[0m")
+        if verbose:
+            import traceback
+            click.echo(f"{Fore.RED}Traceback:\x1b[0m")
+            click.echo(traceback.format_exc())
         return -1 

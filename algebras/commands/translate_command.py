@@ -21,7 +21,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
            outdated_files: List[Tuple[str, str]] = None, 
            missing_keys_files: List[Tuple[str, Set[str], str]] = None,
            outdated_keys_files: List[Tuple[str, Set[str], str]] = None,
-           ui_safe: bool = False) -> None:
+           ui_safe: bool = False, verbose: bool = False) -> None:
     """
     Translate your application.
     
@@ -33,6 +33,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         missing_keys_files: List of tuples (target_file, missing_keys, source_file)
         outdated_keys_files: List of tuples (target_file, outdated_keys, source_file)
         ui_safe: If True, ensure translations will not be longer than original text
+        verbose: If True, show detailed logs of the translation process
     """
     config = Config()
     
@@ -42,9 +43,14 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
     
     # Load configuration
     config.load()
+    if verbose:
+        click.echo(f"{Fore.BLUE}Loaded configuration: {config.config_path}\x1b[0m")
     
     # Get languages
     languages = config.get_languages()
+    if verbose:
+        click.echo(f"{Fore.BLUE}Available languages: {', '.join(languages)}\x1b[0m")
+        
     if len(languages) < 2:
         click.echo(f"{Fore.YELLOW}Only one language ({languages[0]}) is configured. Add more languages with 'algebras add <language>'.\x1b[0m")
         return
@@ -55,21 +61,32 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
             click.echo(f"{Fore.RED}Language '{language}' is not configured in your project.\x1b[0m")
             return
         target_languages = [language]
+        if verbose:
+            click.echo(f"{Fore.BLUE}Selected target language: {language}\x1b[0m")
     else:
         # Skip the source language
         source_lang = config.get_source_language()
         target_languages = [lang for lang in languages if lang != source_lang]
+        if verbose:
+            click.echo(f"{Fore.BLUE}Selected target languages: {', '.join(target_languages)}\x1b[0m")
     
     # Get source language
     source_language = config.get_source_language()
+    if verbose:
+        click.echo(f"{Fore.BLUE}Source language: {source_language}\x1b[0m")
     
     # Initialize translator
     translator = Translator()
+    if verbose:
+        click.echo(f"{Fore.BLUE}Initialized translator\x1b[0m")
     
     # Initialize lists if they're None
     outdated_files = outdated_files or []
     missing_keys_files = missing_keys_files or []
     outdated_keys_files = outdated_keys_files or []
+    
+    if verbose:
+        click.echo(f"{Fore.BLUE}Files to process: {len(outdated_files)} outdated, {len(missing_keys_files)} with missing keys, {len(outdated_keys_files)} with outdated keys\x1b[0m")
     
     # Check if we have specific files to update
     if outdated_files or missing_keys_files or outdated_keys_files:
