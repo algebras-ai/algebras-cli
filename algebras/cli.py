@@ -61,6 +61,14 @@ def update(language, full, use_git, ui_safe):
     update_command.execute(language, only_missing, not use_git, ui_safe=ui_safe)
 
 
+@cli.command("ci")
+@click.option("--language", "-l", help="Check only the specified language.")
+def ci(language):
+    """Run CI checks for translations (no translation, always uses git validation)."""
+    exit_code = update_command.execute_ci(language)
+    sys.exit(exit_code)
+
+
 @cli.command("review")
 @click.option("--language", "-l", help="Review only the specified language.")
 def review(language):
