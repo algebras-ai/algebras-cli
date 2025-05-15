@@ -273,14 +273,34 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                         click.echo(f"    - ... and {len(missing_keys) - 5} more")
             
             # For files with outdated keys, print the outdated keys
-            for file_path, outdated_keys, _ in outdated_keys_files:
+            for file_path, outdated_keys, source_file in outdated_keys_files:
                 if outdated_keys:
                     click.echo(f"  {Fore.YELLOW}File {os.path.basename(file_path)} has {len(outdated_keys)} outdated keys (git history):{Fore.RESET}")
-                    # Print up to 5 outdated keys as examples
-                    for key in list(outdated_keys)[:5]:
-                        click.echo(f"    - {key}")
-                    if len(outdated_keys) > 5:
-                        click.echo(f"    - ... and {len(outdated_keys) - 5} more")
+                    # Get detailed information for each outdated key
+                    for key in sorted(outdated_keys):
+                        source_info = get_key_last_modification(source_file, key)
+                        target_info = get_key_last_modification(file_path, key)
+                        
+                        # Get the values
+                        source_data = read_language_file(source_file)
+                        target_data = read_language_file(file_path)
+                        source_value = get_key_value(source_data, key)
+                        target_value = get_key_value(target_data, key)
+                        
+                        # Truncate values if too long
+                        source_value_short = source_value[:50] + "..." if len(source_value) > 50 else source_value
+                        target_value_short = target_value[:50] + "..." if len(target_value) > 50 else target_value
+                        
+                        click.echo(f"    - Key: {key}")
+                        click.echo(f"      Source: {source_value_short}")
+                        click.echo(f"        Date: {source_info.get('date', 'N/A')}")
+                        click.echo(f"        Commit: {source_info.get('commit_hash', 'N/A')}")
+                        click.echo(f"        Author: {source_info.get('author', 'N/A')}")
+                        click.echo(f"      Target: {target_value_short}")
+                        click.echo(f"        Date: {target_info.get('date', 'N/A')}")
+                        click.echo(f"        Commit: {target_info.get('commit_hash', 'N/A')}")
+                        click.echo(f"        Author: {target_info.get('author', 'N/A')}")
+                        click.echo("")  # Empty line for better readability
             
             # For outdated files based on modification time, extract potentially outdated keys
             # by comparing the content of both files
