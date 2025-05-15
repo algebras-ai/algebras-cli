@@ -106,31 +106,43 @@ def get_key_line_number(file_path: str, key: str) -> Optional[int]:
     Returns:
         Line number where the key is defined or None if not found
     """
+    print(f"\nSearching for key: {key}")
+    print(f"In file: {file_path}")
+    
     try:
         # First, check if the file exists
         if not os.path.exists(file_path):
+            print("File not found!")
             return None
             
         # Read the file content to parse the structure
+        print("Reading file content...")
         content = read_file_content(file_path)
         
         # Split the key into parts for nested access
         key_parts = key.split('.')
+        print(f"Split key into parts: {key_parts}")
         
         # For nested structures, we need to find the exact line where the value is defined
+        print("Opening file to read lines...")
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
+        print(f"Read {len(lines)} lines from file")
         
         # Different handling based on file format
         if file_path.endswith('.json'):
             # For JSON, we'll traverse the lines looking for the exact key pattern
+            print("Processing JSON file format")
             return _find_json_key_line(lines, key_parts)
         elif file_path.endswith(('.yaml', '.yml')):
             # For YAML, we need to handle indentation
+            print("Processing YAML file format")
             return _find_yaml_key_line(lines, key_parts)
         else:
+            print("Unsupported file format")
             return None
-    except Exception:
+    except Exception as e:
+        print(f"Error occurred: {str(e)}")
         return None
 
 
@@ -559,14 +571,14 @@ def main() -> None:
         elif args.command == "date":
             date = get_key_last_modification(args.file, args.key)
             line = get_key_line_number(args.file, args.key)
-            
+            print(f"Key: {args.key}")
+            print(f"File: {args.file}")
+            print(f"Line: {line}")
+
             if not date:
                 print(f"Error: Could not determine last modification date for key '{args.key}'", file=sys.stderr)
                 sys.exit(1)
             
-            print(f"Key: {args.key}")
-            print(f"File: {args.file}")
-            print(f"Line: {line}")
             print(f"Last modified: {date}")
         
         elif args.command == "keys":
