@@ -5,6 +5,7 @@ import sys
 from typing import Dict, Optional, Tuple, List, Any
 import json
 import yaml
+import re
 
 
 def is_git_available() -> bool:
@@ -280,48 +281,144 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
         ISO date string of the last modification or None if not available
     """
     try:
+        print("\nDEBUG - Starting get_key_last_modification")
         if not is_git_repository(file_path) or not os.path.exists(file_path):
+            print(f"DEBUG - Not a git repo or file doesn't exist: {file_path}")
             return None
             
         # Get the line number where the key is defined
         line_number = get_key_line_number(file_path, key)
         if not line_number:
+            print(f"DEBUG - Couldn't find line number for key: {key}")
             return None
+        
+        print(f"DEBUG - Found line number: {line_number}")
+        
+        # Get directory and filename separately to avoid path duplication
+        file_dir = os.path.dirname(file_path)
+        file_name = os.path.basename(file_path)
+            
+        # Try git log first (which might be more reliable for getting dates)
+        try:
+            print("DEBUG - Trying git log approach first")
+            log_result = subprocess.run(
+                ['git', 'log', '-1', '--format=%aI', f'-L{line_number},{line_number}:{file_name}'],
+                cwd=file_dir,
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            
+            print(f"DEBUG - Git log command: git log -1 --format=%aI -L{line_number},{line_number}:{file_name}")
+            print(f"DEBUG - Git log return code: {log_result.returncode}")
+            print(f"DEBUG - Git log stdout: {log_result.stdout}")
+            print(f"DEBUG - Git log stderr: {log_result.stderr}")
+            
+            if log_result.returncode == 0 and log_result.stdout.strip():
+                iso_date = log_result.stdout.strip().split('\n')[0]
+                print(f"DEBUG - Found date using git log: {iso_date}")
+                # If it looks like an ISO date, return it
+                if len(iso_date) >= 10 and iso_date[4] == '-' and iso_date[7] == '-':
+                    return iso_date
+        except Exception as e:
+            print(f"DEBUG - Error with git log approach: {str(e)}")
+            # Continue to blame approach if log fails
             
         # Use git blame to find who changed this line last
+        print("DEBUG - Trying git blame approach")
         result = subprocess.run(
-            ['git', 'blame', '-L', f'{line_number},{line_number}', '--date=iso', file_path],
-            cwd=os.path.dirname(file_path),
+            ['git', 'blame', '-L', f'{line_number},{line_number}', '--date=iso', file_name],
+            cwd=file_dir,
             capture_output=True,
             text=True,
             check=False
         )
         
+        print(f"DEBUG - Git blame command: git blame -L {line_number},{line_number} --date=iso {file_name}")
+        print(f"DEBUG - Git blame return code: {result.returncode}")
+        print(f"DEBUG - Git blame stderr: {result.stderr}")
+        
         if result.returncode != 0 or not result.stdout.strip():
+            print(f"DEBUG - Git blame failed with return code: {result.returncode}")
+            print(f"DEBUG - Git blame stderr: {result.stderr}")
             return get_last_modified_date(file_path)
             
         # Parse the blame output to extract the date
-        # Format: hash (author date timezone) line content
         blame_line = result.stdout.strip()
-        date_part = blame_line.split('(')[1].split(')')[0]
-        date_components = date_part.strip().split()
+        print(f"DEBUG - Blame output: {blame_line}")
         
-        # Extract only the ISO date part
-        # Format might vary by git configuration
-        # Try to find something that looks like ISO date (YYYY-MM-DD)
-        for part in date_components:
-            if len(part) >= 10 and part[4] == '-' and part[7] == '-':
-                # This looks like a date
-                if 'T' in part or ' ' in part:
-                    # This looks like a datetime
-                    return part
+        # Direct approach to extract date pattern from the blame line
+        # Look for YYYY-MM-DD pattern
+        date_match = re.search(r'(\d{4}-\d{2}-\d{2})', blame_line)
+        # Look for HH:MM:SS pattern
+        time_match = re.search(r'(\d{2}:\d{2}:\d{2})', blame_line)
+        
+        if date_match and time_match:
+            date_str = date_match.group(1)
+            time_str = time_match.group(1)
+            iso_datetime = f"{date_str}T{time_str}Z"
+            print(f"DEBUG - Extracted date and time: {iso_datetime}")
+            return iso_datetime
+        
+        try:
+            # Try original format: hash (author date timezone) line content
+            if '(' in blame_line and ')' in blame_line:
+                print("DEBUG - Trying parentheses format")
+                date_part = blame_line.split('(')[1].split(')')[0]
+                date_components = date_part.strip().split()
+                print(f"DEBUG - Date components: {date_components}")
+            else:
+                # Alternative format: hash author date time timezone number) line content
+                print("DEBUG - Trying space-separated format")
+                parts = blame_line.split()
+                print(f"DEBUG - Blame parts: {parts}")
+                # Look for date patterns in the parts
+                date_components = []
+                for part in parts:
+                    if len(part) >= 10 and part[4] == '-' and part[7] == '-':
+                        date_components.append(part)
+                    elif re.match(r'\d{2}:\d{2}:\d{2}', part):
+                        date_components.append(part)
                 
-                # For date-only format, add time to make it comparable
-                return f"{part}T00:00:00Z"
+                print(f"DEBUG - Found date components: {date_components}")
+        
+            # Extract only the ISO date part
+            # Try to find something that looks like ISO date (YYYY-MM-DD)
+            for part in date_components:
+                if len(part) >= 10 and part[4] == '-' and part[7] == '-':
+                    # This looks like a date
+                    if 'T' in part or ' ' in part:
+                        # This looks like a datetime
+                        print(f"DEBUG - Found ISO datetime: {part}")
+                        return part
+                    
+                    # For date-only format, add time to make it comparable
+                    iso_date = f"{part}T00:00:00Z"
+                    print(f"DEBUG - Constructed ISO datetime: {iso_date}")
+                    return iso_date
+            
+            # If we found date components but no valid date format,
+            # try to construct one from the components
+            if len(date_components) >= 2:
+                for i in range(len(date_components) - 1):
+                    date_str = date_components[i]
+                    time_str = date_components[i+1]
+                    if (len(date_str) >= 10 and date_str[4] == '-' and date_str[7] == '-' and 
+                        re.match(r'\d{2}:\d{2}:\d{2}', time_str)):
+                        iso_datetime = f"{date_str}T{time_str}Z"
+                        print(f"DEBUG - Constructed ISO datetime from components: {iso_datetime}")
+                        return iso_datetime
                 
-        # Fallback to file's last modification date
-        return get_last_modified_date(file_path)
-    except Exception:
+            # Fallback to file's last modification date
+            print("DEBUG - Falling back to file's last modification date")
+            return get_last_modified_date(file_path)
+        except Exception as e:
+            print(f"DEBUG - Error parsing blame: {str(e)}")
+            return get_last_modified_date(file_path)
+    except Exception as e:
+        print(f"DEBUG - Exception in get_key_last_modification: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
