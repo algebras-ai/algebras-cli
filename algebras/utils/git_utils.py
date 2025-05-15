@@ -1,6 +1,8 @@
 import os
 import subprocess
-from typing import Dict, Optional, Tuple, List
+import argparse
+import sys
+from typing import Dict, Optional, Tuple, List, Any
 import json
 import yaml
 
@@ -93,9 +95,134 @@ def read_file_content(file_path: str) -> Dict:
         raise ValueError(f"Unsupported file format: {file_path}")
 
 
+def get_key_line_number(file_path: str, key: str) -> Optional[int]:
+    """
+    Find the line number for a specific key in a translation file.
+    
+    Args:
+        file_path: Path to the file
+        key: The key to find (can be nested using dot notation)
+        
+    Returns:
+        Line number where the key is defined or None if not found
+    """
+    try:
+        # First, check if the file exists
+        if not os.path.exists(file_path):
+            return None
+            
+        # Read the file content to parse the structure
+        content = read_file_content(file_path)
+        
+        # Split the key into parts for nested access
+        key_parts = key.split('.')
+        
+        # For nested structures, we need to find the exact line where the value is defined
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        # Different handling based on file format
+        if file_path.endswith('.json'):
+            # For JSON, we'll traverse the lines looking for the exact key pattern
+            return _find_json_key_line(lines, key_parts)
+        elif file_path.endswith(('.yaml', '.yml')):
+            # For YAML, we need to handle indentation
+            return _find_yaml_key_line(lines, key_parts)
+        else:
+            return None
+    except Exception:
+        return None
+
+
+def _find_json_key_line(lines: List[str], key_parts: List[str]) -> Optional[int]:
+    """
+    Find the line number for a nested key in a JSON file.
+    
+    Args:
+        lines: File content as a list of lines
+        key_parts: Parts of the nested key
+        
+    Returns:
+        Line number where the key is defined or None if not found
+    """
+    # Start by looking for the first key part
+    nesting_level = 0
+    current_path = []
+    
+    for i, line in enumerate(lines):
+        # Track JSON structure with brackets
+        nesting_level += line.count('{') - line.count('}')
+        
+        # Look for key patterns
+        for part in key_parts:
+            # Check if this line contains the key part
+            pattern = f'"{part}":'
+            if pattern in line.strip():
+                # This line contains a key part we're looking for
+                current_path.append(part)
+                
+                # If we've found all parts of the key, return this line
+                if current_path == key_parts:
+                    return i + 1  # Line numbers are 1-indexed
+                
+                # If this is a higher-level key, continue to the next part
+                break
+        
+        # If we've exited the current object context, remove the last path component
+        if nesting_level < len(current_path):
+            current_path.pop()
+    
+    return None
+
+
+def _find_yaml_key_line(lines: List[str], key_parts: List[str]) -> Optional[int]:
+    """
+    Find the line number for a nested key in a YAML file.
+    
+    Args:
+        lines: File content as a list of lines
+        key_parts: Parts of the nested key
+        
+    Returns:
+        Line number where the key is defined or None if not found
+    """
+    # YAML uses indentation for nesting
+    current_path = []
+    current_indent = -1
+    
+    for i, line in enumerate(lines):
+        # Skip empty lines or comments
+        if not line.strip() or line.strip().startswith('#'):
+            continue
+            
+        # Calculate the indentation level
+        indent = len(line) - len(line.lstrip())
+        
+        # If we're at a lower indent, pop the path stack
+        while current_indent >= 0 and indent <= current_indent:
+            current_path.pop()
+            current_indent -= 2  # Assuming standard 2-space YAML indentation
+        
+        # Check if this line contains a key
+        stripped = line.strip()
+        if ':' in stripped:
+            key = stripped.split(':', 1)[0].strip()
+            
+            # If this key matches our current path level
+            if key == key_parts[len(current_path)]:
+                current_path.append(key)
+                current_indent = indent
+                
+                # If we've found all parts of the key, return this line
+                if current_path == key_parts:
+                    return i + 1  # Line numbers are 1-indexed
+    
+    return None
+
+
 def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
     """
-    Get the date when a specific key was last modified in the file.
+    Get the date when a specific key was last modified in the file using git blame.
     
     Args:
         file_path: Path to the file
@@ -105,41 +232,47 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
         ISO date string of the last modification or None if not available
     """
     try:
-        if not is_git_repository(file_path):
+        if not is_git_repository(file_path) or not os.path.exists(file_path):
             return None
             
-        key_parts = key.split('.')
-        
-        # Construct a grep pattern for the key
-        # This simplified approach works for most JSON/YAML files
-        # but might not be 100% accurate for all formats and structures
-        grep_pattern = '\\b' + '\\b.*\\b'.join([part for part in key_parts]) + '\\b'
-        
-        # Use git log with grep to find commits that modified the key
-        result = subprocess.run(
-            ['git', 'log', '--format=%aI', '-p', '--', file_path, '|', 'grep', '-E', grep_pattern, '|', 'head', '-n', '1'],
-            cwd=os.path.dirname(file_path),
-            capture_output=True,
-            text=True,
-            check=False,
-            shell=True
-        )
-        
-        if result.returncode != 0 or not result.stdout.strip():
-            # If grep didn't find anything, fall back to the file's last modification date
-            return get_last_modified_date(file_path)
+        # Get the line number where the key is defined
+        line_number = get_key_line_number(file_path, key)
+        if not line_number:
+            return None
             
-        # Try to find the last commit date with a different approach
+        # Use git blame to find who changed this line last
         result = subprocess.run(
-            ['git', 'log', '--format=%aI', '-G', grep_pattern, '--', file_path],
+            ['git', 'blame', '-L', f'{line_number},{line_number}', '--date=iso', file_path],
             cwd=os.path.dirname(file_path),
             capture_output=True,
             text=True,
             check=False
         )
         
-        date_lines = result.stdout.strip().split('\n')
-        return date_lines[0] if date_lines else None
+        if result.returncode != 0 or not result.stdout.strip():
+            return get_last_modified_date(file_path)
+            
+        # Parse the blame output to extract the date
+        # Format: hash (author date timezone) line content
+        blame_line = result.stdout.strip()
+        date_part = blame_line.split('(')[1].split(')')[0]
+        date_components = date_part.strip().split()
+        
+        # Extract only the ISO date part
+        # Format might vary by git configuration
+        # Try to find something that looks like ISO date (YYYY-MM-DD)
+        for part in date_components:
+            if len(part) >= 10 and part[4] == '-' and part[7] == '-':
+                # This looks like a date
+                if 'T' in part or ' ' in part:
+                    # This looks like a datetime
+                    return part
+                
+                # For date-only format, add time to make it comparable
+                return f"{part}T00:00:00Z"
+                
+        # Fallback to file's last modification date
+        return get_last_modified_date(file_path)
     except Exception:
         return None
 
@@ -165,4 +298,215 @@ def compare_key_modifications(source_file: str, target_file: str, key: str) -> T
         return False, source_date, target_date
         
     # Compare the dates to see if source is newer than target
-    return source_date > target_date, source_date, target_date 
+    return source_date > target_date, source_date, target_date
+
+
+def test_translation_key_tracking(source_file: str, target_file: str, keys: List[str]) -> Dict:
+    """
+    Test the key modification tracking logic for a list of translation keys.
+    This is useful for debugging or verifying the implementation works as expected.
+    
+    Args:
+        source_file: Path to the source language file (e.g., en.json)
+        target_file: Path to the target language file (e.g., ru.json)
+        keys: List of keys to check (can be nested using dot notation)
+        
+    Returns:
+        Dictionary with test results for each key
+    """
+    results = {}
+    
+    if not (is_git_repository(source_file) and is_git_repository(target_file)):
+        return {"error": "One or both paths are not in a Git repository"}
+        
+    # Check if files exist
+    if not os.path.exists(source_file):
+        return {"error": f"Source file {source_file} does not exist"}
+    if not os.path.exists(target_file):
+        return {"error": f"Target file {target_file} does not exist"}
+        
+    # Test each key
+    for key in keys:
+        # Get line numbers
+        source_line = get_key_line_number(source_file, key)
+        target_line = get_key_line_number(target_file, key)
+        
+        # Get modification dates
+        source_date = get_key_last_modification(source_file, key)
+        target_date = get_key_last_modification(target_file, key)
+        
+        # Check if outdated
+        is_outdated = False
+        if source_date and target_date:
+            is_outdated = source_date > target_date
+            
+        # Store results
+        results[key] = {
+            "source_file": source_file,
+            "target_file": target_file,
+            "source_line": source_line,
+            "target_line": target_line,
+            "source_date": source_date,
+            "target_date": target_date,
+            "is_outdated": is_outdated
+        }
+        
+    return results
+
+
+def find_outdated_translations(source_file: str, target_file: str) -> Dict[str, Dict]:
+    """
+    Find all outdated translations by comparing the source and target files.
+    This is a high-level utility that does a full comparison of all keys.
+    
+    Args:
+        source_file: Path to the source language file (e.g., en.json)
+        target_file: Path to the target language file (e.g., ru.json)
+        
+    Returns:
+        Dictionary of outdated keys with their modification information
+    """
+    outdated_keys = {}
+    
+    # Read both files
+    try:
+        source_content = read_file_content(source_file)
+        target_content = read_file_content(target_file)
+    except Exception as e:
+        return {"error": f"Failed to read files: {str(e)}"}
+        
+    # Extract all keys from the source file
+    all_keys = _extract_all_keys(source_content)
+    
+    # Check each key for outdated translations
+    for key in all_keys:
+        is_outdated, source_date, target_date = compare_key_modifications(source_file, target_file, key)
+        
+        if is_outdated:
+            outdated_keys[key] = {
+                "source_date": source_date,
+                "target_date": target_date
+            }
+            
+    return outdated_keys
+
+
+def _extract_all_keys(data: Dict, prefix: str = "", result: List[str] = None) -> List[str]:
+    """
+    Extract all keys from a nested dictionary, using dot notation for nested keys.
+    
+    Args:
+        data: Dictionary to extract keys from
+        prefix: Current key prefix (for recursion)
+        result: List to store the keys (for recursion)
+        
+    Returns:
+        List of all keys in dot notation
+    """
+    if result is None:
+        result = []
+        
+    if not isinstance(data, dict):
+        return result
+        
+    for key, value in data.items():
+        current_key = f"{prefix}.{key}" if prefix else key
+        
+        if isinstance(value, dict):
+            # Recursively process nested dictionaries
+            _extract_all_keys(value, current_key, result)
+        else:
+            # Add leaf key to the result
+            result.append(current_key)
+            
+    return result
+
+
+def print_pretty_json(data: Any) -> None:
+    """
+    Print data as pretty JSON.
+    
+    Args:
+        data: Data to print
+    """
+    print(json.dumps(data, indent=2, sort_keys=True, default=str))
+
+
+def main() -> None:
+    """
+    CLI entry point for the translation key tracking tools.
+    """
+    # Check if git is available
+    if not is_git_available():
+        print("Error: Git is not available on your system.", file=sys.stderr)
+        sys.exit(1)
+    
+    # Create the argument parser
+    parser = argparse.ArgumentParser(
+        description="Translation key tracking tools using Git blame"
+    )
+    
+    # Create subparsers for different commands
+    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+    
+    # Command to test specific keys
+    test_parser = subparsers.add_parser("test", help="Test specific translation keys")
+    test_parser.add_argument("source", help="Source language file (e.g., en.json)")
+    test_parser.add_argument("target", help="Target language file (e.g., ru.json)")
+    test_parser.add_argument("keys", nargs="+", help="Keys to test (dot notation for nested keys)")
+    
+    # Command to find all outdated keys
+    find_parser = subparsers.add_parser("find", help="Find all outdated translation keys")
+    find_parser.add_argument("source", help="Source language file (e.g., en.json)")
+    find_parser.add_argument("target", help="Target language file (e.g., ru.json)")
+    
+    # Command to get last modification date for a key
+    date_parser = subparsers.add_parser("date", help="Get last modification date for a key")
+    date_parser.add_argument("file", help="Language file")
+    date_parser.add_argument("key", help="Key to check (dot notation for nested keys)")
+    
+    # Parse arguments
+    args = parser.parse_args()
+    
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+    
+    # Execute the requested command
+    try:
+        if args.command == "test":
+            results = test_translation_key_tracking(args.source, args.target, args.keys)
+            print_pretty_json(results)
+        
+        elif args.command == "find":
+            results = find_outdated_translations(args.source, args.target)
+            if "error" in results:
+                print(f"Error: {results['error']}", file=sys.stderr)
+                sys.exit(1)
+            
+            if not results:
+                print("No outdated translations found.")
+            else:
+                print(f"Found {len(results)} outdated translations:")
+                print_pretty_json(results)
+        
+        elif args.command == "date":
+            date = get_key_last_modification(args.file, args.key)
+            line = get_key_line_number(args.file, args.key)
+            
+            if not date:
+                print(f"Error: Could not determine last modification date for key '{args.key}'", file=sys.stderr)
+                sys.exit(1)
+            
+            print(f"Key: {args.key}")
+            print(f"File: {args.file}")
+            print(f"Line: {line}")
+            print(f"Last modified: {date}")
+    
+    except Exception as e:
+        print(f"Error: {str(e)}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main() 
