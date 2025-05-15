@@ -145,32 +145,68 @@ def _find_json_key_line(lines: List[str], key_parts: List[str]) -> Optional[int]
     Returns:
         Line number where the key is defined or None if not found
     """
-    # Start by looking for the first key part
-    nesting_level = 0
+    # For better nested key detection, we'll track both nesting level and current path
     current_path = []
     
+    # Convert to a more lenient pattern match
     for i, line in enumerate(lines):
-        # Track JSON structure with brackets
-        nesting_level += line.count('{') - line.count('}')
+        stripped_line = line.strip()
         
-        # Look for key patterns
-        for part in key_parts:
-            # Check if this line contains the key part
-            pattern = f'"{part}":'
-            if pattern in line.strip():
-                # This line contains a key part we're looking for
-                current_path.append(part)
-                
-                # If we've found all parts of the key, return this line
-                if current_path == key_parts:
-                    return i + 1  # Line numbers are 1-indexed
-                
-                # If this is a higher-level key, continue to the next part
-                break
+        # Skip empty lines
+        if not stripped_line:
+            continue
         
-        # If we've exited the current object context, remove the last path component
-        if nesting_level < len(current_path):
-            current_path.pop()
+        # Check if this line contains a key pattern
+        if ':' in stripped_line and '"' in stripped_line:
+            # Extract the key from the line (between quotes)
+            line_parts = stripped_line.split(':', 1)
+            if len(line_parts) < 2:
+                continue
+                
+            key_part = line_parts[0].strip()
+            
+            # Remove quotes
+            if key_part.startswith('"') and key_part.endswith('"'):
+                key_part = key_part[1:-1]
+            
+            # Check bracket counts to determine if we're entering or exiting objects
+            open_brackets = stripped_line.count('{')
+            close_brackets = stripped_line.count('}')
+            
+            # If we're exiting objects, pop from the path
+            if close_brackets > open_brackets:
+                # Pop from the path based on number of closing brackets
+                for _ in range(close_brackets - open_brackets):
+                    if current_path:
+                        current_path.pop()
+            
+            # If we find a key, process it
+            if key_part:
+                # Check if this key is part of our search path
+                if len(current_path) < len(key_parts) and key_part == key_parts[len(current_path)]:
+                    current_path.append(key_part)
+                    
+                    # If we've found all parts of the key, return this line
+                    if current_path == key_parts:
+                        return i + 1  # Line numbers are 1-indexed
+                
+                # If we found a different key at this level, update the path
+                elif len(current_path) > 0 and current_path[-1] != key_part and key_part in key_parts:
+                    # We found a different key at this level
+                    current_path = [key_part]
+            
+            # If we're entering a new object and we're on the right path
+            if open_brackets > 0 and not ':' in stripped_line.split('{', 1)[1]:
+                # We're entering a new object in the right path
+                continue
+        
+        # Check for closing brackets that might pop our path
+        elif '}' in stripped_line:
+            count = stripped_line.count('}')
+            # Pop from the path based on number of closing brackets
+            for _ in range(count):
+                if current_path:
+                    current_path.pop()
     
     return None
 
@@ -432,6 +468,32 @@ def print_pretty_json(data: Any) -> None:
     print(json.dumps(data, indent=2, sort_keys=True, default=str))
 
 
+def show_all_keys(file_path: str) -> List[str]:
+    """
+    Extract and display all keys from a translation file.
+    
+    Args:
+        file_path: Path to the translation file
+        
+    Returns:
+        List of all keys in the file in dot notation
+    """
+    try:
+        # Check if file exists
+        if not os.path.exists(file_path):
+            return [f"Error: File {file_path} does not exist"]
+            
+        # Read file content
+        content = read_file_content(file_path)
+        
+        # Extract all keys
+        all_keys = _extract_all_keys(content)
+        
+        return sorted(all_keys)
+    except Exception as e:
+        return [f"Error: {str(e)}"]
+
+
 def main() -> None:
     """
     CLI entry point for the translation key tracking tools.
@@ -464,6 +526,10 @@ def main() -> None:
     date_parser = subparsers.add_parser("date", help="Get last modification date for a key")
     date_parser.add_argument("file", help="Language file")
     date_parser.add_argument("key", help="Key to check (dot notation for nested keys)")
+    
+    # Command to show all keys in a file
+    keys_parser = subparsers.add_parser("keys", help="Show all keys in a translation file")
+    keys_parser.add_argument("file", help="Language file")
     
     # Parse arguments
     args = parser.parse_args()
@@ -502,6 +568,17 @@ def main() -> None:
             print(f"File: {args.file}")
             print(f"Line: {line}")
             print(f"Last modified: {date}")
+        
+        elif args.command == "keys":
+            all_keys = show_all_keys(args.file)
+            
+            if all_keys and all_keys[0].startswith("Error:"):
+                print(all_keys[0], file=sys.stderr)
+                sys.exit(1)
+            
+            print(f"Found {len(all_keys)} keys in {args.file}:")
+            for key in all_keys:
+                print(f"- {key}")
     
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)
