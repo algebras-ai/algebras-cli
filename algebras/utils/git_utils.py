@@ -10,12 +10,12 @@ import logging
 
 # Configure logger
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.ERROR)
 
 # Create console handler if not already exists
 if not logger.handlers:
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(logging.ERROR)
     formatter = logging.Formatter('%(levelname)s: %(message)s')
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
@@ -314,15 +314,16 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
         # Try git log first (which might be more reliable for getting dates)
         try:
             logger.debug("DEBUG - Trying git log approach first")
+            # Use --no-patch to avoid including diff output
             log_result = subprocess.run(
-                ['git', 'log', '-1', '--format=%aI', f'-L{line_number},{line_number}:{file_name}'],
+                ['git', 'log', '-1', '--format=%aI', '--no-patch', f'-L{line_number},{line_number}:{file_name}'],
                 cwd=file_dir,
                 capture_output=True,
                 text=True,
                 check=False
             )
             
-            logger.debug(f"DEBUG - Git log command: git log -1 --format=%aI -L{line_number},{line_number}:{file_name}")
+            logger.debug(f"DEBUG - Git log command: git log -1 --format=%aI --no-patch -L{line_number},{line_number}:{file_name}")
             logger.debug(f"DEBUG - Git log return code: {log_result.returncode}")
             logger.debug(f"DEBUG - Git log stdout: {log_result.stdout}")
             logger.debug(f"DEBUG - Git log stderr: {log_result.stderr}")
@@ -579,6 +580,53 @@ def show_all_keys(file_path: str) -> List[str]:
         return sorted(all_keys)
     except Exception as e:
         return [f"Error: {str(e)}"]
+
+
+def get_key_commit_info(file_path: str, key: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Get the commit SHA and author who last modified a specific key in the file.
+    
+    Args:
+        file_path: Path to the file
+        key: The key to check (can be nested using dot notation)
+        
+    Returns:
+        Tuple of (commit_sha, author_name) or (None, None) if not available
+    """
+    try:
+        if not is_git_repository(file_path) or not os.path.exists(file_path):
+            return None, None
+            
+        # Get the line number where the key is defined
+        line_number = get_key_line_number(file_path, key)
+        if not line_number:
+            return None, None
+        
+        # Get directory and filename separately to avoid path duplication
+        file_dir = os.path.dirname(file_path)
+        file_name = os.path.basename(file_path)
+            
+        # Use git log to get commit info with --no-patch to avoid diff output
+        result = subprocess.run(
+            ['git', 'log', '-1', '--format=%H%n%an', '--no-patch', f'-L{line_number},{line_number}:{file_name}'],
+            cwd=file_dir,
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        
+        if result.returncode != 0 or not result.stdout.strip():
+            return None, None
+            
+        # Parse the output - first line is commit SHA, second line is author
+        lines = result.stdout.strip().split('\n')
+        if len(lines) >= 2:
+            return lines[0], lines[1]
+            
+        return None, None
+    except Exception as e:
+        logger.error(f"Error getting commit info for key: {str(e)}")
+        return None, None
 
 
 def main() -> None:

@@ -12,7 +12,12 @@ from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
 from algebras.commands import translate_command
 from algebras.utils.lang_validator import validate_language_files, find_outdated_keys
-from algebras.utils.git_utils import is_git_available, is_git_repository
+from algebras.utils.git_utils import (
+    is_git_available,
+    is_git_repository,
+    compare_key_modifications,
+    get_key_commit_info
+)
 
 
 def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_validation: bool = False, ui_safe: bool = False, verbose: bool = False) -> None:
@@ -171,10 +176,6 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                 if verbose:
                     if source_file:
                         click.echo(f"{Fore.BLUE}Matched with source file: {source_file}\x1b[0m")
-                    else:
-                        click.echo(f"{Fore.YELLOW}No matching source file found\x1b[0m")
-                else:
-                    print(f"lang_file: {lang_file}, source_file: {source_file}")
                 
                 if source_file:
                     # Check if file is outdated based on modification time
@@ -466,10 +467,6 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False) -> int:
                 if verbose:
                     if source_file:
                         click.echo(f"{Fore.BLUE}Matched with source file: {source_file}\x1b[0m")
-                    else:
-                        click.echo(f"{Fore.YELLOW}No matching source file found\x1b[0m")
-                else:
-                    print(f"lang_file: {lang_file}, source_file: {source_file}")
                 
                 if source_file:
                     # Check if all keys from source language exist in target language
@@ -535,9 +532,27 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False) -> int:
                 for file_path, outdated_keys, source_file in outdated_keys_files:
                     click.echo(f"  {Fore.RED}File: {file_path}\x1b[0m")
                     click.echo(f"  {Fore.RED}Outdated {len(outdated_keys)} keys from source: {source_file}\x1b[0m")
-                    # Print all outdated keys
+                    
+                    # Add a separator for better readability
+                    click.echo(f"  {Fore.YELLOW}{'-' * 40}\x1b[0m")
+                    
+                    # Print all outdated keys with their details in a more organized format
                     for key in sorted(outdated_keys):
-                        click.echo(f"    - {key}")
+                        is_outdated, source_date, target_date = compare_key_modifications(source_file, file_path, key)
+                        if is_outdated:
+                            source_commit, source_author = get_key_commit_info(source_file, key)
+                            target_commit, target_author = get_key_commit_info(file_path, key)
+                            
+                            click.echo(f"  {Fore.BLUE}Key: {key}\x1b[0m")
+                            click.echo(f"    {Fore.GREEN}Source:{Fore.RESET}")
+                            click.echo(f"      Last modified: {source_date}")
+                            if source_commit and source_author:
+                                click.echo(f"      Commit: {source_commit[:8]} by {source_author}")
+                            click.echo(f"    {Fore.GREEN}Target:{Fore.RESET}")
+                            click.echo(f"      Last modified: {target_date}")
+                            if target_commit and target_author:
+                                click.echo(f"      Commit: {target_commit[:8]} by {target_author}")
+                            click.echo(f"  {Fore.YELLOW}{'-' * 40}\x1b[0m")
         
         return -1 if errors_found else 0
     
