@@ -282,7 +282,7 @@ def _find_yaml_key_line(lines: List[str], key_parts: List[str]) -> Optional[int]
     return None
 
 
-def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
+def get_key_last_modification(file_path: str, key: str) -> Optional[Dict]:
     """
     Get the date when a specific key was last modified in the file using git blame.
     
@@ -291,7 +291,11 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
         key: The key to check (can be nested using dot notation)
         
     Returns:
-        ISO date string of the last modification or None if not available
+        Dictionary containing:
+        - date: ISO date string of the last modification
+        - commit_hash: The commit hash that last modified this key
+        - author: The author who last modified this key
+        Or None if not available
     """
     try:
         logger.debug("\nDEBUG - Starting get_key_last_modification")
@@ -315,24 +319,32 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
         try:
             logger.debug("DEBUG - Trying git log approach first")
             log_result = subprocess.run(
-                ['git', 'log', '-1', '--format=%aI', f'-L{line_number},{line_number}:{file_name}'],
+                ['git', 'log', '-1', '--format=%H%n%an%n%aI', f'-L{line_number},{line_number}:{file_name}'],
                 cwd=file_dir,
                 capture_output=True,
                 text=True,
                 check=False
             )
             
-            logger.debug(f"DEBUG - Git log command: git log -1 --format=%aI -L{line_number},{line_number}:{file_name}")
+            logger.debug(f"DEBUG - Git log command: git log -1 --format=%H%n%an%n%aI -L{line_number},{line_number}:{file_name}")
             logger.debug(f"DEBUG - Git log return code: {log_result.returncode}")
             logger.debug(f"DEBUG - Git log stdout: {log_result.stdout}")
             logger.debug(f"DEBUG - Git log stderr: {log_result.stderr}")
             
             if log_result.returncode == 0 and log_result.stdout.strip():
-                iso_date = log_result.stdout.strip().split('\n')[0]
-                logger.debug(f"DEBUG - Found date using git log: {iso_date}")
-                # If it looks like an ISO date, return it
-                if len(iso_date) >= 10 and iso_date[4] == '-' and iso_date[7] == '-':
-                    return iso_date
+                lines = log_result.stdout.strip().split('\n')
+                if len(lines) >= 3:
+                    commit_hash = lines[0]
+                    author = lines[1]
+                    iso_date = lines[2]
+                    logger.debug(f"DEBUG - Found date using git log: {iso_date}")
+                    # If it looks like an ISO date, return it
+                    if len(iso_date) >= 10 and iso_date[4] == '-' and iso_date[7] == '-':
+                        return {
+                            "date": iso_date,
+                            "commit_hash": commit_hash,
+                            "author": author
+                        }
         except Exception as e:
             logger.debug(f"DEBUG - Error with git log approach: {str(e)}")
             # Continue to blame approach if log fails
@@ -354,16 +366,27 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
         if result.returncode != 0 or not result.stdout.strip():
             logger.debug(f"DEBUG - Git blame failed with return code: {result.returncode}")
             logger.debug(f"DEBUG - Git blame stderr: {result.stderr}")
-            return get_last_modified_date(file_path)
+            # Fallback to just getting the date
+            date = get_last_modified_date(file_path)
+            if date:
+                return {"date": date, "commit_hash": None, "author": None}
+            return None
             
-        # Parse the blame output to extract the date
+        # Parse the blame output to extract the date, commit hash and author
         blame_line = result.stdout.strip()
         logger.debug(f"DEBUG - Blame output: {blame_line}")
         
-        # Direct approach to extract date pattern from the blame line
-        # Look for YYYY-MM-DD pattern
+        # Extract commit hash (first part before space)
+        commit_hash = blame_line.split()[0]
+        
+        # Extract author (between parentheses)
+        author = None
+        if '(' in blame_line and ')' in blame_line:
+            author_part = blame_line.split('(')[1].split(')')[0]
+            author = author_part.split()[0]  # First word is usually the author name
+        
+        # Extract date
         date_match = re.search(r'(\d{4}-\d{2}-\d{2})', blame_line)
-        # Look for HH:MM:SS pattern
         time_match = re.search(r'(\d{2}:\d{2}:\d{2})', blame_line)
         
         if date_match and time_match:
@@ -371,92 +394,23 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
             time_str = time_match.group(1)
             iso_datetime = f"{date_str}T{time_str}Z"
             logger.debug(f"DEBUG - Extracted date and time: {iso_datetime}")
-            return iso_datetime
+            return {
+                "date": iso_datetime,
+                "commit_hash": commit_hash,
+                "author": author
+            }
         
-        try:
-            # Try original format: hash (author date timezone) line content
-            if '(' in blame_line and ')' in blame_line:
-                logger.debug("DEBUG - Trying parentheses format")
-                date_part = blame_line.split('(')[1].split(')')[0]
-                date_components = date_part.strip().split()
-                logger.debug(f"DEBUG - Date components: {date_components}")
-            else:
-                # Alternative format: hash author date time timezone number) line content
-                logger.debug("DEBUG - Trying space-separated format")
-                parts = blame_line.split()
-                logger.debug(f"DEBUG - Blame parts: {parts}")
-                # Look for date patterns in the parts
-                date_components = []
-                for part in parts:
-                    if len(part) >= 10 and part[4] == '-' and part[7] == '-':
-                        date_components.append(part)
-                    elif re.match(r'\d{2}:\d{2}:\d{2}', part):
-                        date_components.append(part)
-                
-                logger.debug(f"DEBUG - Found date components: {date_components}")
-        
-            # Extract only the ISO date part
-            # Try to find something that looks like ISO date (YYYY-MM-DD)
-            for part in date_components:
-                if len(part) >= 10 and part[4] == '-' and part[7] == '-':
-                    # This looks like a date
-                    if 'T' in part or ' ' in part:
-                        # This looks like a datetime
-                        logger.debug(f"DEBUG - Found ISO datetime: {part}")
-                        return part
-                    
-                    # For date-only format, add time to make it comparable
-                    iso_date = f"{part}T00:00:00Z"
-                    logger.debug(f"DEBUG - Constructed ISO datetime: {iso_date}")
-                    return iso_date
-            
-            # If we found date components but no valid date format,
-            # try to construct one from the components
-            if len(date_components) >= 2:
-                for i in range(len(date_components) - 1):
-                    date_str = date_components[i]
-                    time_str = date_components[i+1]
-                    if (len(date_str) >= 10 and date_str[4] == '-' and date_str[7] == '-' and 
-                        re.match(r'\d{2}:\d{2}:\d{2}', time_str)):
-                        iso_datetime = f"{date_str}T{time_str}Z"
-                        logger.debug(f"DEBUG - Constructed ISO datetime from components: {iso_datetime}")
-                        return iso_datetime
-                
-            # Fallback to file's last modification date
-            logger.debug("DEBUG - Falling back to file's last modification date")
-            return get_last_modified_date(file_path)
-        except Exception as e:
-            logger.debug(f"DEBUG - Error parsing blame: {str(e)}")
-            return get_last_modified_date(file_path)
+        # Fallback to file's last modification date
+        logger.debug("DEBUG - Falling back to file's last modification date")
+        date = get_last_modified_date(file_path)
+        if date:
+            return {"date": date, "commit_hash": commit_hash, "author": author}
+        return None
     except Exception as e:
         logger.error(f"DEBUG - Exception in get_key_last_modification: {str(e)}")
         import traceback
         traceback.print_exc()
         return None
-
-
-def compare_key_modifications(source_file: str, target_file: str, key: str) -> Tuple[bool, Optional[str], Optional[str]]:
-    """
-    Compare when a key was last modified in source and target files.
-    
-    Args:
-        source_file: Path to the source language file
-        target_file: Path to the target language file
-        key: The key to compare
-        
-    Returns:
-        Tuple of (is_outdated, source_date, target_date)
-        is_outdated is True if the source file key is more recent than the target file key
-    """
-    source_date = get_key_last_modification(source_file, key)
-    target_date = get_key_last_modification(target_file, key)
-    
-    # If we couldn't get the dates, we can't determine if it's outdated
-    if not source_date or not target_date:
-        return False, source_date, target_date
-        
-    # Compare the dates to see if source is newer than target
-    return source_date > target_date, source_date, target_date
 
 
 def test_translation_key_tracking(source_file: str, target_file: str, keys: List[str]) -> Dict:
@@ -489,14 +443,14 @@ def test_translation_key_tracking(source_file: str, target_file: str, keys: List
         source_line = get_key_line_number(source_file, key)
         target_line = get_key_line_number(target_file, key)
         
-        # Get modification dates
-        source_date = get_key_last_modification(source_file, key)
-        target_date = get_key_last_modification(target_file, key)
+        # Get modification info
+        source_info = get_key_last_modification(source_file, key)
+        target_info = get_key_last_modification(target_file, key)
         
         # Check if outdated
         is_outdated = False
-        if source_date and target_date:
-            is_outdated = source_date > target_date
+        if source_info and target_info:
+            is_outdated = source_info["date"] > target_info["date"]
             
         # Store results
         results[key] = {
@@ -504,8 +458,12 @@ def test_translation_key_tracking(source_file: str, target_file: str, keys: List
             "target_file": target_file,
             "source_line": source_line,
             "target_line": target_line,
-            "source_date": source_date,
-            "target_date": target_date,
+            "source_date": source_info["date"] if source_info else None,
+            "target_date": target_info["date"] if target_info else None,
+            "source_commit": source_info["commit_hash"] if source_info else None,
+            "source_author": source_info["author"] if source_info else None,
+            "target_commit": target_info["commit_hash"] if target_info else None,
+            "target_author": target_info["author"] if target_info else None,
             "is_outdated": is_outdated
         }
         
@@ -522,7 +480,13 @@ def find_outdated_translations(source_file: str, target_file: str) -> Dict[str, 
         target_file: Path to the target language file (e.g., ru.json)
         
     Returns:
-        Dictionary of outdated keys with their modification information
+        Dictionary of outdated keys with their modification information including:
+        - source_date: Last modification date of the key in source file
+        - target_date: Last modification date of the key in target file
+        - source_commit: Commit hash that last modified the key in source file
+        - source_author: Author who last modified the key in source file
+        - target_commit: Commit hash that last modified the key in target file
+        - target_author: Author who last modified the key in target file
     """
     outdated_keys = {}
     
@@ -538,12 +502,21 @@ def find_outdated_translations(source_file: str, target_file: str) -> Dict[str, 
     
     # Check each key for outdated translations
     for key in all_keys:
-        is_outdated, source_date, target_date = compare_key_modifications(source_file, target_file, key)
+        source_info = get_key_last_modification(source_file, key)
+        target_info = get_key_last_modification(target_file, key)
         
-        if is_outdated:
+        if not source_info or not target_info:
+            continue
+            
+        # Compare the dates to see if source is newer than target
+        if source_info["date"] > target_info["date"]:
             outdated_keys[key] = {
-                "source_date": source_date,
-                "target_date": target_date
+                "source_date": source_info["date"],
+                "target_date": target_info["date"],
+                "source_commit": source_info["commit_hash"],
+                "source_author": source_info["author"],
+                "target_commit": target_info["commit_hash"],
+                "target_author": target_info["author"]
             }
             
     return outdated_keys
