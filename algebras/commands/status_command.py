@@ -56,6 +56,7 @@ def execute(language: Optional[str] = None) -> None:
         click.echo(f"\n{click.style('Translation Status', fg='blue')}")
         click.echo(click.style('=' * 80, fg='blue'))
         click.echo(f"Source language: {source_language} ({len(source_files)} files)")
+        click.echo(f"Source files: {source_files}")
         click.echo(click.style('-' * 80, fg='blue'))
         
         # Calculate expected file count for each language

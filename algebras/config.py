@@ -178,8 +178,13 @@ class Config:
                 return "en"
             self.load()
         
-        # Return the explicitly defined source language, or default to the first language
-        return self.data.get("source_language", self.get_languages()[0] if self.get_languages() else "en")
+        # Explicitly check for source_language in the config and prioritize it
+        if "source_language" in self.data:
+            return self.data["source_language"]
+            
+        # If no explicit source_language, return the first language or default to "en"
+        languages = self.get_languages()
+        return languages[0] if languages else "en"
     
     def add_language(self, language: str) -> None:
         """Add a new language to the configuration."""
