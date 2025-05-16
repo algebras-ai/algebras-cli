@@ -7,6 +7,7 @@ import click
 import sys
 from colorama import Fore
 from typing import Optional, Dict, List, Tuple, Set
+from tqdm import tqdm
 
 from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
@@ -212,7 +213,7 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                                 click.echo(f"{Fore.YELLOW}Found {len(outdated_keys)} outdated keys based on git history\x1b[0m")
                             outdated_keys_files.append((lang_file, outdated_keys, source_file))
                         elif verbose:
-                            click.echo(f"{Fore.GREEN}No outdated keys found\x1b[0m")
+                            click.echo(f"{Fore.GREEN}No outdated keys found based on git history\x1b[0m")
             
             outdated_by_language[lang] = outdated_files
             missing_keys_by_language[lang] = missing_keys_files
@@ -498,7 +499,7 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False) -> int:
                                 click.echo(f"{Fore.YELLOW}Found {len(outdated_keys)} outdated keys based on git history\x1b[0m")
                             outdated_keys_files.append((lang_file, outdated_keys, source_file))
                         elif verbose:
-                            click.echo(f"{Fore.GREEN}No outdated keys found\x1b[0m")
+                            click.echo(f"{Fore.GREEN}No outdated keys found based on git history\x1b[0m")
                 elif verbose:
                     click.echo(f"{Fore.YELLOW}No matching source file found\x1b[0m")
             missing_keys_by_language[lang] = missing_keys_files

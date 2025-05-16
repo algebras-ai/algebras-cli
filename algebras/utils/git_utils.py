@@ -7,6 +7,7 @@ import json
 import yaml
 import re
 import logging
+from tqdm import tqdm
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -434,31 +435,34 @@ def test_translation_key_tracking(source_file: str, target_file: str, keys: List
     if not os.path.exists(target_file):
         return {"error": f"Target file {target_file} does not exist"}
         
-    # Test each key
-    for key in keys:
-        # Get line numbers
-        source_line = get_key_line_number(source_file, key)
-        target_line = get_key_line_number(target_file, key)
-        
-        # Get modification info
-        source_info = get_key_last_modification(source_file, key)
-        target_info = get_key_last_modification(target_file, key)
-        
-        # Check if outdated
-        is_outdated = False
-        if source_info and target_info:
-            is_outdated = source_info > target_info
+    # Test each key with progress bar
+    with tqdm(total=len(keys), desc="Testing keys with git") as pbar:
+        for key in keys:
+            # Get line numbers
+            source_line = get_key_line_number(source_file, key)
+            target_line = get_key_line_number(target_file, key)
             
-        # Store results
-        results[key] = {
-            "source_file": source_file,
-            "target_file": target_file,
-            "source_line": source_line,
-            "target_line": target_line,
-            "source_date": source_info,
-            "target_date": target_info,
-            "is_outdated": is_outdated
-        }
+            # Get modification info
+            source_info = get_key_last_modification(source_file, key)
+            target_info = get_key_last_modification(target_file, key)
+            
+            # Check if outdated
+            is_outdated = False
+            if source_info and target_info:
+                is_outdated = source_info > target_info
+                
+            # Store results
+            results[key] = {
+                "source_file": source_file,
+                "target_file": target_file,
+                "source_line": source_line,
+                "target_line": target_line,
+                "source_date": source_info,
+                "target_date": target_info,
+                "is_outdated": is_outdated
+            }
+            
+            pbar.update(1)
         
     return results
 
@@ -493,24 +497,28 @@ def find_outdated_translations(source_file: str, target_file: str) -> Dict[str, 
     # Extract all keys from the source file
     all_keys = _extract_all_keys(source_content)
     
-    # Check each key for outdated translations
-    for key in all_keys:
-        source_info = get_key_last_modification(source_file, key)
-        target_info = get_key_last_modification(target_file, key)
-        
-        if not source_info or not target_info:
-            continue
+    # Check each key for outdated translations with progress bar
+    with tqdm(total=len(all_keys), desc="Checking translations with git") as pbar:
+        for key in all_keys:
+            source_info = get_key_last_modification(source_file, key)
+            target_info = get_key_last_modification(target_file, key)
             
-        # Compare the dates to see if source is newer than target
-        if source_info > target_info:
-            outdated_keys[key] = {
-                "source_date": source_info,
-                "target_date": target_info,
-                "source_commit": None,
-                "source_author": None,
-                "target_commit": None,
-                "target_author": None
-            }
+            if not source_info or not target_info:
+                pbar.update(1)
+                continue
+                
+            # Compare the dates to see if source is newer than target
+            if source_info > target_info:
+                outdated_keys[key] = {
+                    "source_date": source_info,
+                    "target_date": target_info,
+                    "source_commit": None,
+                    "source_author": None,
+                    "target_commit": None,
+                    "target_author": None
+                }
+            
+            pbar.update(1)
             
     return outdated_keys
 

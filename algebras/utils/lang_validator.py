@@ -2,6 +2,7 @@ import os
 import json
 import yaml
 from typing import Dict, Any, Set, List, Tuple
+from tqdm import tqdm
 from algebras.utils.git_utils import is_git_available, is_git_repository, get_key_last_modification, compare_key_modifications
 
 
@@ -126,18 +127,23 @@ def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[st
         
         outdated_keys = set()
         
-        for key in common_keys:
-            source_value = get_key_value(source_data, key)
-            target_value = get_key_value(target_data, key)
-            
-            # Skip if the values are the same
-            if source_value == target_value:
-                continue
-            
-            # Use compare_key_modifications for robust patching/testing
-            is_outdated, _, _ = compare_key_modifications(source_file, target_file, key)
-            if is_outdated:
-                outdated_keys.add(key)
+        # Display progress bar for git operations
+        with tqdm(total=len(common_keys), desc="Checking keys with git") as pbar:
+            for key in common_keys:
+                source_value = get_key_value(source_data, key)
+                target_value = get_key_value(target_data, key)
+                
+                # Skip if the values are the same
+                if source_value == target_value:
+                    pbar.update(1)
+                    continue
+                
+                # Use compare_key_modifications for robust patching/testing
+                is_outdated, _, _ = compare_key_modifications(source_file, target_file, key)
+                if is_outdated:
+                    outdated_keys.add(key)
+                
+                pbar.update(1)
         
         return len(outdated_keys) > 0, outdated_keys
     except Exception as e:

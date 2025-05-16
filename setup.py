@@ -11,6 +11,7 @@ setup(
         "pyyaml>=6.0",
         "openai>=1.0.0",
         "requests>=2.32.3",
+        "tqdm>=4.65.0",
     ],
     entry_points={
         "console_scripts": [
