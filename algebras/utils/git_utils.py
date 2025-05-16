@@ -8,6 +8,7 @@ import yaml
 import re
 import logging
 from tqdm import tqdm
+from functools import lru_cache
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -20,6 +21,11 @@ if not logger.handlers:
     formatter = logging.Formatter('%(levelname)s: %(message)s')
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
+
+# Cache for git operation results
+_git_file_cache = {}
+_git_key_cache = {}
+_git_blame_cache = {}  # For caching git blame results
 
 
 def is_git_available() -> bool:
@@ -110,9 +116,11 @@ def read_file_content(file_path: str) -> Dict:
         raise ValueError(f"Unsupported file format: {file_path}")
 
 
+@lru_cache(maxsize=1024)
 def get_key_line_number(file_path: str, key: str) -> Optional[int]:
     """
     Find the line number for a specific key in a translation file.
+    Uses LRU cache to avoid redundant lookups.
     
     Args:
         file_path: Path to the file
@@ -283,9 +291,125 @@ def _find_yaml_key_line(lines: List[str], key_parts: List[str]) -> Optional[int]
     return None
 
 
+def get_blame_info_batch(file_path: str, line_numbers: List[int]) -> Dict[int, Tuple[str, str]]:
+    """
+    Get git blame information for multiple lines in a file with a single git command.
+    This is much more efficient than running git blame for each line separately.
+    
+    Args:
+        file_path: Path to the file
+        line_numbers: List of line numbers to get blame info for
+        
+    Returns:
+        Dictionary mapping line numbers to tuples of (date, author)
+    """
+    # Check cache first
+    file_key = os.path.abspath(file_path)
+    if file_key in _git_blame_cache:
+        # Return cached results that match requested line numbers
+        cached_results = {ln: _git_blame_cache[file_key].get(ln) 
+                         for ln in line_numbers 
+                         if ln in _git_blame_cache[file_key]}
+        
+        # If all line numbers are in cache, return the cached results
+        if len(cached_results) == len(line_numbers):
+            return cached_results
+    else:
+        _git_blame_cache[file_key] = {}
+        cached_results = {}
+    
+    # Get the missing line numbers
+    missing_lines = [ln for ln in line_numbers if ln not in cached_results]
+    if not missing_lines:
+        return cached_results
+    
+    results = {}
+    try:
+        if not is_git_repository(file_path) or not os.path.exists(file_path):
+            return {}
+            
+        # Get directory and filename separately
+        file_dir = os.path.dirname(file_path)
+        file_name = os.path.basename(file_path)
+        
+        # Use git blame to get information for all requested lines
+        # Combine the line ranges to minimize git commands
+        line_ranges = []
+        current_range = []
+        
+        # Sort the line numbers to make consecutive range detection easier
+        sorted_lines = sorted(missing_lines)
+        
+        for line in sorted_lines:
+            if not current_range or line == current_range[-1] + 1:
+                current_range.append(line)
+            else:
+                line_ranges.append(current_range)
+                current_range = [line]
+        
+        if current_range:
+            line_ranges.append(current_range)
+        
+        # Process each range of consecutive line numbers
+        for line_range in line_ranges:
+            range_start = line_range[0]
+            range_end = line_range[-1]
+            
+            # Run git blame on the range
+            blame_cmd = [
+                'git', 'blame', '-L', f'{range_start},{range_end}', 
+                '--date=iso', '--', file_name
+            ]
+            
+            result = subprocess.run(
+                blame_cmd,
+                cwd=file_dir,
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            
+            if result.returncode != 0:
+                continue
+                
+            # Parse each line of the blame output
+            blame_lines = result.stdout.strip().split('\n')
+            for i, blame_line in enumerate(blame_lines):
+                line_num = range_start + i
+                
+                # Extract date and author
+                date_match = re.search(r'(\d{4}-\d{2}-\d{2})', blame_line)
+                author_match = re.search(r'\((.+?)\s+\d{4}-\d{2}-\d{2}', blame_line)
+                
+                if date_match and author_match:
+                    date_str = date_match.group(1)
+                    author = author_match.group(1).strip()
+                    
+                    # Also extract time if available
+                    time_match = re.search(r'(\d{2}:\d{2}:\d{2})', blame_line)
+                    if time_match:
+                        time_str = time_match.group(1)
+                        date_str = f"{date_str}T{time_str}Z"
+                    
+                    results[line_num] = (date_str, author)
+                    
+                    # Update the cache
+                    _git_blame_cache[file_key][line_num] = (date_str, author)
+        
+        # Combine with cached results
+        results.update(cached_results)
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error in batch blame operation: {str(e)}")
+        return cached_results
+
+
+@lru_cache(maxsize=1024)
 def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
     """
     Get the date when a specific key was last modified in the file using git blame.
+    Uses LRU cache to avoid redundant git operations.
     
     Args:
         file_path: Path to the file
@@ -308,6 +432,13 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
         
         logger.debug(f"DEBUG - Found line number: {line_number}")
         
+        # Use the batch blame cache if available
+        file_key = os.path.abspath(file_path)
+        if file_key in _git_blame_cache and line_number in _git_blame_cache[file_key]:
+            date_str, _ = _git_blame_cache[file_key][line_number]
+            return date_str
+            
+        # Otherwise, perform the traditional git operations
         # Get directory and filename separately to avoid path duplication
         file_dir = os.path.dirname(file_path)
         file_name = os.path.basename(file_path)
@@ -334,6 +465,10 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
                 logger.debug(f"DEBUG - Found date using git log: {iso_date}")
                 # If it looks like an ISO date, return it
                 if len(iso_date) >= 10 and iso_date[4] == '-' and iso_date[7] == '-':
+                    # Update the blame cache
+                    if file_key not in _git_blame_cache:
+                        _git_blame_cache[file_key] = {}
+                    _git_blame_cache[file_key][line_number] = (iso_date, "Unknown")
                     return iso_date
         except Exception as e:
             logger.debug(f"DEBUG - Error with git log approach: {str(e)}")
@@ -372,6 +507,16 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
             time_str = time_match.group(1)
             iso_datetime = f"{date_str}T{time_str}Z"
             logger.debug(f"DEBUG - Extracted date and time: {iso_datetime}")
+            
+            # Update the blame cache
+            if file_key not in _git_blame_cache:
+                _git_blame_cache[file_key] = {}
+            
+            # Extract author information if available
+            author_match = re.search(r'\((.+?)\s+\d{4}-\d{2}-\d{2}', blame_line)
+            author = author_match.group(1).strip() if author_match else "Unknown"
+            
+            _git_blame_cache[file_key][line_number] = (iso_datetime, author)
             return iso_datetime
         
         # Fallback to file's last modification date
@@ -384,9 +529,11 @@ def get_key_last_modification(file_path: str, key: str) -> Optional[str]:
         return None
 
 
+@lru_cache(maxsize=1024)
 def compare_key_modifications(source_file: str, target_file: str, key: str) -> Tuple[bool, Optional[str], Optional[str]]:
     """
     Compare the last modification dates of a key between source and target files.
+    Uses LRU cache to avoid redundant comparisons.
     
     Args:
         source_file: Path to the source file
@@ -635,6 +782,41 @@ def get_key_commit_info(file_path: str, key: str) -> Tuple[Optional[str], Option
     except Exception as e:
         logger.error(f"Error getting commit info for key: {str(e)}")
         return None, None
+
+
+def get_keys_last_modifications_batch(file_path: str, keys: List[str]) -> Dict[str, str]:
+    """
+    Get the dates when multiple keys were last modified in a file using a batch approach.
+    
+    Args:
+        file_path: Path to the file
+        keys: List of keys to check
+        
+    Returns:
+        Dictionary mapping keys to their last modification dates
+    """
+    results = {}
+    
+    # Get line numbers for all keys
+    line_numbers = {}
+    for key in keys:
+        line_num = get_key_line_number(file_path, key)
+        if line_num:
+            line_numbers[key] = line_num
+    
+    if not line_numbers:
+        return results
+    
+    # Get blame info for all line numbers in one batch
+    blame_info = get_blame_info_batch(file_path, list(line_numbers.values()))
+    
+    # Map the blame info back to keys
+    for key, line_num in line_numbers.items():
+        if line_num in blame_info:
+            date_str, _ = blame_info[line_num]
+            results[key] = date_str
+    
+    return results
 
 
 def main() -> None:
