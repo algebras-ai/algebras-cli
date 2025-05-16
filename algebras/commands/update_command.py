@@ -8,6 +8,7 @@ import sys
 from colorama import Fore
 from typing import Optional, Dict, List, Tuple, Set
 from tqdm import tqdm
+import concurrent.futures
 
 from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
@@ -19,6 +20,276 @@ from algebras.utils.git_utils import (
     compare_key_modifications,
     get_key_commit_info
 )
+
+
+def find_matching_source_file(lang_file: str, source_files: List[str], lang: str, source_language: str) -> Optional[str]:
+    """
+    Find the corresponding source file for a language file.
+    
+    Args:
+        lang_file: Path to the language file
+        source_files: List of source files
+        lang: Language of the file
+        source_language: Source language
+        
+    Returns:
+        Optional[str]: Path to the matching source file, or None if not found
+    """
+    source_file = None
+    lang_basename = os.path.basename(lang_file)
+    lang_dirname = os.path.dirname(lang_file)
+    
+    # Check for language in path first
+    if f"/{lang}/" in lang_file or f"\\{lang}\\" in lang_file:
+        potential_source_file = lang_file.replace(f"/{lang}/", f"/{source_language}/").replace(f"\\{lang}\\", f"\\{source_language}\\")
+        if potential_source_file in source_files:
+            return potential_source_file
+    
+    # Handle simple case where filename is just "language.json"
+    if lang_basename == f"{lang}.json" and f"{source_language}.json" in [os.path.basename(f) for f in source_files]:
+        source_basename = f"{source_language}.json"
+        
+        # Find the exact source file path
+        for src_file in source_files:
+            if os.path.basename(src_file) == source_basename:
+                return src_file
+                
+    # More complex cases with language suffixes
+    elif "." in lang_basename:
+        name_parts = lang_basename.split(".")
+        ext = name_parts.pop()
+        base = ".".join(name_parts)
+        
+        # Replace language marker with source language marker
+        if f".{lang}" in base:
+            base_source = base.replace(f".{lang}", f".{source_language}")
+        elif f"-{lang}" in base:
+            base_source = base.replace(f"-{lang}", f"-{source_language}")
+        elif f"_{lang}" in base:
+            base_source = base.replace(f"_{lang}", f"_{source_language}")
+        else:
+            # Remove language suffix
+            base_source = base.replace(f".{lang}", "")
+        
+        source_basename = f"{base_source}.{ext}"
+        potential_source_file = os.path.join(lang_dirname, source_basename)
+        
+        if potential_source_file in source_files:
+            return potential_source_file
+    else:
+        source_basename = lang_basename.replace(f".{lang}", "")
+        potential_source_file = os.path.join(lang_dirname, source_basename)
+        
+        if potential_source_file in source_files:
+            return potential_source_file
+    
+    return None
+
+
+def identify_translation_issues(
+    languages: List[str], 
+    source_language: str, 
+    files_by_language: Dict[str, List[str]], 
+    check_modification_time: bool = True, 
+    check_missing_keys: bool = True, 
+    check_git_outdated_keys: bool = True,
+    concurrent_processing: bool = False,
+    verbose: bool = False
+) -> Tuple[Dict[str, List[Tuple[str, str]]], Dict[str, List[Tuple[str, Set[str], str]]], Dict[str, List[Tuple[str, Set[str], str]]]]:
+    """
+    Identify all translation issues across specified languages.
+    
+    Args:
+        languages: List of languages to check
+        source_language: The source language
+        files_by_language: Dictionary mapping languages to lists of files
+        check_modification_time: Whether to check file modification times
+        check_missing_keys: Whether to check for missing keys
+        check_git_outdated_keys: Whether to check for outdated keys using git
+        concurrent_processing: Whether to use concurrent processing
+        verbose: Whether to show detailed logs
+        
+    Returns:
+        Tuple containing dictionaries of:
+        - outdated_by_language: Files outdated by modification time
+        - missing_keys_by_language: Files with missing keys
+        - outdated_keys_by_language: Files with outdated keys based on git
+    """
+    source_files = files_by_language.get(source_language, [])
+    
+    outdated_by_language = {lang: [] for lang in languages}
+    missing_keys_by_language = {lang: [] for lang in languages}
+    outdated_keys_by_language = {lang: [] for lang in languages}
+    
+    # Check if git is available
+    git_available = check_git_outdated_keys and is_git_available()
+    if check_git_outdated_keys and not git_available:
+        click.echo(f"{Fore.YELLOW}Git is not available. Skipping detection of updated keys.\x1b[0m")
+    
+    if concurrent_processing:
+        # Prepare batch processing of all file pairs
+        all_file_pairs = []
+        lang_file_map = {}  # Keep track of which language each file pair belongs to
+        
+        for lang in languages:
+            if verbose:
+                click.echo(f"\n{Fore.BLUE}Processing language: {lang}\x1b[0m")
+                
+            lang_files = files_by_language.get(lang, [])
+            
+            if verbose:
+                click.echo(f"{Fore.BLUE}Found {len(lang_files)} files for language '{lang}':\x1b[0m")
+                for lang_file in lang_files:
+                    click.echo(f"  - {lang_file}")
+            
+            for lang_file in lang_files:
+                source_file = find_matching_source_file(lang_file, source_files, lang, source_language)
+                
+                if verbose and source_file:
+                    click.echo(f"{Fore.BLUE}Matched with source file: {source_file}\x1b[0m")
+                
+                if source_file and (not check_git_outdated_keys or not git_available or is_git_repository(os.path.dirname(source_file))):
+                    all_file_pairs.append((source_file, lang_file))
+                    lang_file_map[(source_file, lang_file)] = lang
+        
+        # Define check function
+        def check_file_pair(pair):
+            src_file, tgt_file = pair
+            lang = lang_file_map[pair]
+            
+            results = {
+                "outdated_time": False,
+                "missing_keys": set(),
+                "outdated_keys": set()
+            }
+            
+            # Check if file is outdated based on modification time
+            if check_modification_time:
+                source_mtime = os.path.getmtime(src_file)
+                lang_mtime = os.path.getmtime(tgt_file)
+                results["outdated_time"] = lang_mtime < source_mtime
+            
+            # Check for missing keys
+            if check_missing_keys:
+                is_valid, missing_keys = validate_language_files(src_file, tgt_file)
+                if not is_valid:
+                    results["missing_keys"] = missing_keys
+            
+            # Check for outdated keys using git history
+            if check_git_outdated_keys and git_available and is_git_repository(os.path.dirname(src_file)):
+                has_outdated_keys, outdated_keys = find_outdated_keys(src_file, tgt_file)
+                if has_outdated_keys:
+                    results["outdated_keys"] = outdated_keys
+            
+            return results
+        
+        # Process all file pairs with progress bar
+        with tqdm(total=len(all_file_pairs), desc="Checking translations") as pbar:
+            results = []
+            
+            # Use ThreadPoolExecutor for I/O bound operations
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future_to_pair = {executor.submit(check_file_pair, pair): pair for pair in all_file_pairs}
+                
+                for future in concurrent.futures.as_completed(future_to_pair):
+                    pair = future_to_pair[future]
+                    try:
+                        result = future.result()
+                        results.append((pair, result))
+                    except Exception as e:
+                        if verbose:
+                            click.echo(f"{Fore.RED}Error checking file pair {pair}: {str(e)}\x1b[0m")
+                    finally:
+                        pbar.update(1)
+        
+        # Process the results and organize by language
+        for (pair, result) in results:
+            src_file, tgt_file = pair
+            lang = lang_file_map[pair]
+            
+            # Add to outdated files if needed
+            if check_modification_time and result["outdated_time"]:
+                outdated_by_language[lang].append((tgt_file, src_file))
+            
+            # Add to missing keys if any
+            if check_missing_keys and result["missing_keys"]:
+                missing_keys_by_language[lang].append((tgt_file, result["missing_keys"], src_file))
+            
+            # Add to outdated keys if any
+            if check_git_outdated_keys and result["outdated_keys"]:
+                outdated_keys_by_language[lang].append((tgt_file, result["outdated_keys"], src_file))
+    
+    else:
+        # Sequential processing
+        for lang in languages:
+            if verbose:
+                click.echo(f"\n{Fore.BLUE}Processing language: {lang}\x1b[0m")
+                
+            lang_files = files_by_language.get(lang, [])
+            
+            if verbose:
+                click.echo(f"{Fore.BLUE}Found {len(lang_files)} files for language '{lang}':\x1b[0m")
+                for lang_file in lang_files:
+                    click.echo(f"  - {lang_file}")
+            
+            outdated_files = []
+            missing_keys_files = []
+            outdated_keys_files = []
+            
+            for lang_file in lang_files:
+                if verbose:
+                    click.echo(f"\n{Fore.BLUE}Analyzing file: {lang_file}\x1b[0m")
+                
+                source_file = find_matching_source_file(lang_file, source_files, lang, source_language)
+                
+                if verbose:
+                    if source_file:
+                        click.echo(f"{Fore.BLUE}Matched with source file: {source_file}\x1b[0m")
+                
+                if source_file:
+                    # Check if file is outdated based on modification time
+                    if check_modification_time:
+                        source_mtime = os.path.getmtime(source_file)
+                        lang_mtime = os.path.getmtime(lang_file)
+                        
+                        if lang_mtime < source_mtime:
+                            if verbose:
+                                click.echo(f"{Fore.YELLOW}File is outdated based on modification time\x1b[0m")
+                                click.echo(f"  Source modified: {source_mtime}")
+                                click.echo(f"  Target modified: {lang_mtime}")
+                            outdated_files.append((lang_file, source_file))
+                        elif verbose:
+                            click.echo(f"{Fore.GREEN}File is up to date based on modification time\x1b[0m")
+                    
+                    # Check for missing keys
+                    if check_missing_keys:
+                        if verbose:
+                            click.echo(f"{Fore.BLUE}Validating language file for missing keys...\x1b[0m")
+                        is_valid, missing_keys = validate_language_files(source_file, lang_file)
+                        if not is_valid:
+                            if verbose:
+                                click.echo(f"{Fore.YELLOW}Found {len(missing_keys)} missing keys\x1b[0m")
+                            missing_keys_files.append((lang_file, missing_keys, source_file))
+                        elif verbose:
+                            click.echo(f"{Fore.GREEN}All keys present\x1b[0m")
+                    
+                    # Check for outdated keys using git history
+                    if check_git_outdated_keys and git_available and is_git_repository(os.path.dirname(source_file)):
+                        if verbose:
+                            click.echo(f"{Fore.BLUE}Checking for outdated keys using git history...\x1b[0m")
+                        has_outdated_keys, outdated_keys = find_outdated_keys(source_file, lang_file)
+                        if has_outdated_keys:
+                            if verbose:
+                                click.echo(f"{Fore.YELLOW}Found {len(outdated_keys)} outdated keys based on git history\x1b[0m")
+                            outdated_keys_files.append((lang_file, outdated_keys, source_file))
+                        elif verbose:
+                            click.echo(f"{Fore.GREEN}No outdated keys found based on git history\x1b[0m")
+            
+            outdated_by_language[lang] = outdated_files
+            missing_keys_by_language[lang] = missing_keys_files
+            outdated_keys_by_language[lang] = outdated_keys_files
+    
+    return outdated_by_language, missing_keys_by_language, outdated_keys_by_language
 
 
 def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_validation: bool = False, ui_safe: bool = False, verbose: bool = False) -> None:
@@ -73,11 +344,7 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
         click.echo(f"{Fore.BLUE}Source language: {source_language}\x1b[0m")
     
     # Check if git is available for outdated key detection
-    git_available = is_git_available() and not skip_git_validation
-    if git_available:
-        click.echo(f"{Fore.BLUE}Using git for key validation. This may take some time...\x1b[0m")
-    else:
-        click.echo(f"{Fore.YELLOW}Git is not available. Skipping detection of updated keys.\x1b[0m")
+    git_validation = not skip_git_validation
     
     # Scan for files
     try:
@@ -106,118 +373,17 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
             click.echo(f"{Fore.YELLOW}No source files found for language '{source_language}'.\x1b[0m")
             return
         
-        # Find outdated files and files with missing keys
-        outdated_by_language = {}
-        missing_keys_by_language = {}
-        outdated_keys_by_language = {}
-        
-        for lang in languages:
-            if verbose:
-                click.echo(f"\n{Fore.BLUE}Processing language: {lang}\x1b[0m")
-                
-            lang_files = files_by_language.get(lang, [])
-            
-            if verbose:
-                click.echo(f"{Fore.BLUE}Found {len(lang_files)} files for language '{lang}':\x1b[0m")
-                for lang_file in lang_files:
-                    click.echo(f"  - {lang_file}")
-                    
-            outdated_files = []
-            missing_keys_files = []
-            outdated_keys_files = []
-            
-            for lang_file in lang_files:
-                if verbose:
-                    click.echo(f"\n{Fore.BLUE}Analyzing file: {lang_file}\x1b[0m")
-                    
-                # Find corresponding source file
-                source_file = None
-                lang_basename = os.path.basename(lang_file)
-                lang_dirname = os.path.dirname(lang_file)
-                
-                # Handle simple case where filename is just "language.json"
-                if lang_basename == f"{lang}.json" and f"{source_language}.json" in [os.path.basename(f) for f in source_files]:
-                    source_basename = f"{source_language}.json"
-                    potential_source_file = os.path.join(lang_dirname, source_basename)
-                    
-                    # Find the exact source file path
-                    for src_file in source_files:
-                        if os.path.basename(src_file) == source_basename:
-                            source_file = src_file
-                            break
-                # More complex cases with language suffixes
-                elif "." in lang_basename:
-                    name_parts = lang_basename.split(".")
-                    ext = name_parts.pop()
-                    base = ".".join(name_parts)
-                    
-                    # Replace language marker with source language marker
-                    if f".{lang}" in base:
-                        base_source = base.replace(f".{lang}", f".{source_language}")
-                    elif f"-{lang}" in base:
-                        base_source = base.replace(f"-{lang}", f"-{source_language}")
-                    elif f"_{lang}" in base:
-                        base_source = base.replace(f"_{lang}", f"_{source_language}")
-                    else:
-                        # Remove language suffix
-                        base_source = base.replace(f".{lang}", "")
-                    
-                    source_basename = f"{base_source}.{ext}"
-                    potential_source_file = os.path.join(lang_dirname, source_basename)
-                    
-                    if potential_source_file in source_files:
-                        source_file = potential_source_file
-                else:
-                    source_basename = lang_basename.replace(f".{lang}", "")
-                    potential_source_file = os.path.join(lang_dirname, source_basename)
-                    
-                    if potential_source_file in source_files:
-                        source_file = potential_source_file
-                
-                if verbose:
-                    if source_file:
-                        click.echo(f"{Fore.BLUE}Matched with source file: {source_file}\x1b[0m")
-                
-                if source_file:
-                    # Check if file is outdated based on modification time
-                    source_mtime = os.path.getmtime(source_file)
-                    lang_mtime = os.path.getmtime(lang_file)
-                    
-                    if lang_mtime < source_mtime:
-                        if verbose:
-                            click.echo(f"{Fore.YELLOW}File is outdated based on modification time\x1b[0m")
-                            click.echo(f"  Source modified: {source_mtime}")
-                            click.echo(f"  Target modified: {lang_mtime}")
-                        outdated_files.append((lang_file, source_file))
-                    elif verbose:
-                        click.echo(f"{Fore.GREEN}File is up to date based on modification time\x1b[0m")
-                    
-                    # Check if all keys from source language exist in target language
-                    if verbose:
-                        click.echo(f"{Fore.BLUE}Validating language file for missing keys...\x1b[0m")
-                    is_valid, missing_keys = validate_language_files(source_file, lang_file)
-                    if not is_valid:
-                        if verbose:
-                            click.echo(f"{Fore.YELLOW}Found {len(missing_keys)} missing keys\x1b[0m")
-                        missing_keys_files.append((lang_file, missing_keys, source_file))
-                    elif verbose:
-                        click.echo(f"{Fore.GREEN}All keys present\x1b[0m")
-                    
-                    # Check for outdated keys using git history if available
-                    if git_available and is_git_repository(os.path.dirname(source_file)):
-                        if verbose:
-                            click.echo(f"{Fore.BLUE}Checking for outdated keys using git history...\x1b[0m")
-                        has_outdated_keys, outdated_keys = find_outdated_keys(source_file, lang_file)
-                        if has_outdated_keys:
-                            if verbose:
-                                click.echo(f"{Fore.YELLOW}Found {len(outdated_keys)} outdated keys based on git history\x1b[0m")
-                            outdated_keys_files.append((lang_file, outdated_keys, source_file))
-                        elif verbose:
-                            click.echo(f"{Fore.GREEN}No outdated keys found based on git history\x1b[0m")
-            
-            outdated_by_language[lang] = outdated_files
-            missing_keys_by_language[lang] = missing_keys_files
-            outdated_keys_by_language[lang] = outdated_keys_files
+        # Use the shared function to identify translation issues
+        outdated_by_language, missing_keys_by_language, outdated_keys_by_language = identify_translation_issues(
+            languages=languages,
+            source_language=source_language,
+            files_by_language=files_by_language,
+            check_modification_time=True,
+            check_missing_keys=True,
+            check_git_outdated_keys=git_validation,
+            concurrent_processing=False,  # Keep sequential for backward compatibility
+            verbose=verbose
+        )
         
         # Count outdated and missing keys files
         total_outdated = sum(len(files) for files in outdated_by_language.values())
@@ -370,17 +536,6 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False, only_misse
     if verbose:
         click.echo(f"{Fore.BLUE}Source language: {source_language}\x1b[0m")
     
-    # Check if git is available for outdated key detection (only if not using only_missed_keys)
-    git_available = False
-    if not only_missed_keys:
-        git_available = is_git_available()
-        if not git_available:
-            click.echo(f"{Fore.YELLOW}Git is not available but required for comprehensive checks. Will only check for missing keys.\x1b[0m")
-        else:
-            click.echo(f"{Fore.BLUE}Running CI checks using git for key validation...\x1b[0m")
-    else:
-        click.echo(f"{Fore.BLUE}Running CI checks for missing keys only (skipping git validation)...\x1b[0m")
-    
     # Scan for files
     try:
         if verbose:
@@ -404,131 +559,19 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False, only_misse
             click.echo(f"{Fore.RED}No source files found for language '{source_language}'.\x1b[0m")
             return -1
         
-        # Find outdated files and files with missing keys
-        missing_keys_by_language = {}
-        outdated_keys_by_language = {}
+        # Use the shared function to identify translation issues
+        _, missing_keys_by_language, outdated_keys_by_language = identify_translation_issues(
+            languages=languages,
+            source_language=source_language,
+            files_by_language=files_by_language,
+            check_modification_time=False,  # CI doesn't care about modification time
+            check_missing_keys=True,
+            check_git_outdated_keys=not only_missed_keys,
+            concurrent_processing=True,  # Use concurrent processing for CI
+            verbose=verbose
+        )
         
-        # First, build a batch job of all file pairs that need checking
-        all_file_pairs = []
-        lang_file_map = {}  # Keep track of which language each file pair belongs to
-        
-        for lang in languages:
-            lang_files = files_by_language.get(lang, [])
-            missing_keys_by_language[lang] = []
-            outdated_keys_by_language[lang] = []
-            
-            if verbose:
-                click.echo(f"\n{Fore.BLUE}Processing language: {lang}\x1b[0m")
-                click.echo(f"{Fore.BLUE}Found {len(lang_files)} files for language '{lang}':\x1b[0m")
-            
-            for lang_file in lang_files:
-                # Find corresponding source file (existing file matching logic)
-                source_file = None
-                lang_basename = os.path.basename(lang_file)
-                lang_dirname = os.path.dirname(lang_file)
-                
-                # Check for language in path first
-                if f"/{lang}/" in lang_file or f"\\{lang}\\" in lang_file:
-                    potential_source_file = lang_file.replace(f"/{lang}/", f"/{source_language}/").replace(f"\\{lang}\\", f"\\{source_language}\\")
-                    if potential_source_file in source_files:
-                        source_file = potential_source_file
-                
-                # Handle simple case where filename is just "language.json"
-                elif lang_basename == f"{lang}.json" and f"{source_language}.json" in [os.path.basename(f) for f in source_files]:
-                    source_basename = f"{source_language}.json"
-                    
-                    # Find the exact source file path
-                    for src_file in source_files:
-                        if os.path.basename(src_file) == source_basename:
-                            source_file = src_file
-                            break
-                # More complex cases with language suffixes
-                elif "." in lang_basename:
-                    name_parts = lang_basename.split(".")
-                    ext = name_parts.pop()
-                    base = ".".join(name_parts)
-                    
-                    # Replace language marker with source language marker
-                    if f".{lang}" in base:
-                        base_source = base.replace(f".{lang}", f".{source_language}")
-                    elif f"-{lang}" in base:
-                        base_source = base.replace(f"-{lang}", f"-{source_language}")
-                    elif f"_{lang}" in base:
-                        base_source = base.replace(f"_{lang}", f"_{source_language}")
-                    else:
-                        # Remove language suffix
-                        base_source = base.replace(f".{lang}", "")
-                    
-                    source_basename = f"{base_source}.{ext}"
-                    potential_source_file = os.path.join(lang_dirname, source_basename)
-                    
-                    if potential_source_file in source_files:
-                        source_file = potential_source_file
-                else:
-                    source_basename = lang_basename.replace(f".{lang}", "")
-                    potential_source_file = os.path.join(lang_dirname, source_basename)
-                    
-                    if potential_source_file in source_files:
-                        source_file = potential_source_file
-                
-                # Only check with git if git_available and not only_missed_keys
-                if source_file and (only_missed_keys or not git_available or is_git_repository(os.path.dirname(source_file))):
-                    # Add the file pair to the batch processing queue
-                    all_file_pairs.append((source_file, lang_file))
-                    lang_file_map[(source_file, lang_file)] = lang
-        
-        # Now process file pairs in batches for better performance
-        import concurrent.futures
-        
-        # Function to check a file pair for missing and outdated keys
-        def check_file_pair(pair):
-            src_file, tgt_file = pair
-            
-            # Check for missing keys
-            is_valid, missing_keys = validate_language_files(src_file, tgt_file)
-            
-            # Check for outdated keys only if git is available and not using only_missed_keys
-            has_outdated_keys = False
-            outdated_keys = []
-            if not only_missed_keys and git_available and is_git_repository(os.path.dirname(src_file)):
-                has_outdated_keys, outdated_keys = find_outdated_keys(src_file, tgt_file)
-            
-            return (tgt_file, missing_keys, src_file, has_outdated_keys, outdated_keys)
-        
-        # Process all file pairs with progress bar
-        with tqdm(total=len(all_file_pairs), desc="Checking keys") as pbar:
-            results = []
-            
-            # Use ThreadPoolExecutor for I/O bound operations
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future_to_pair = {executor.submit(check_file_pair, pair): pair for pair in all_file_pairs}
-                
-                for future in concurrent.futures.as_completed(future_to_pair):
-                    pair = future_to_pair[future]
-                    try:
-                        result = future.result()
-                        results.append((pair, result))
-                    except Exception as e:
-                        if verbose:
-                            click.echo(f"{Fore.RED}Error checking file pair {pair}: {str(e)}\x1b[0m")
-                    finally:
-                        pbar.update(1)
-        
-        # Process the results and organize by language
-        for (pair, result) in results:
-            src_file, tgt_file = pair
-            lang = lang_file_map[(src_file, tgt_file)]
-            tgt_file, missing_keys, src_file, has_outdated_keys, outdated_keys = result
-            
-            # Add to missing keys if any
-            if missing_keys:
-                missing_keys_by_language[lang].append((tgt_file, missing_keys, src_file))
-            
-            # Add to outdated keys if any
-            if has_outdated_keys:
-                outdated_keys_by_language[lang].append((tgt_file, outdated_keys, src_file))
-        
-        # Count outdated and missing keys files
+        # Count missing and outdated keys files
         total_missing_keys = sum(len(files) for files in missing_keys_by_language.values())
         total_outdated_keys = sum(len(files) for files in outdated_keys_by_language.values())
         
