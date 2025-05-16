@@ -469,15 +469,15 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
             click.echo(f"{Fore.RED}Traceback:\x1b[0m")
             click.echo(traceback.format_exc())
 
-def execute_ci(language: Optional[str] = None, verbose: bool = False, only_missed_keys: bool = False) -> int:
+def execute_ci(language: Optional[str] = None, verbose: bool = False, only_missing: bool = False) -> int:
     """
     Run CI checks for translations without performing translation.
-    Always uses git validation for key changes unless only_missed_keys is set.
+    Always uses git validation for key changes unless only_missing is set.
     
     Args:
         language: Language to check (if None, check all languages)
         verbose: If True, show detailed logs of the check process
-        only_missed_keys: If True, only check for missing keys, skip git validation for outdated keys
+        only_missing: If True, only check for missing keys, skip git validation for outdated keys
         
     Returns:
         int: 0 if all checks pass, -1 if any errors are found
@@ -553,7 +553,7 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False, only_misse
             files_by_language=files_by_language,
             check_modification_time=False,  # CI doesn't care about modification time
             check_missing_keys=True,
-            check_git_outdated_keys=not only_missed_keys,
+            check_git_outdated_keys=not only_missing,
             concurrent_processing=True,  # Use concurrent processing for CI
             verbose=verbose
         )
