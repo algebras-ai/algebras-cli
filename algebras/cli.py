@@ -54,13 +54,15 @@ def translate(language, force, only_missing, ui_safe, verbose):
 @cli.command("update")
 @click.option("--language", "-l", help="Update only the specified language.")
 @click.option("--full", is_flag=True, help="Translate the entire file, not just missing keys.")
-@click.option("--use-git", is_flag=True, help="Use git for key validation (slower but more thorough).")
+@click.option("--only-missing", is_flag=True, help="Only translate keys that are missing in the target files.")
 @click.option("--ui-safe", is_flag=True, help="Ensure translations will not exceed the original text length.")
 @click.option("--verbose", is_flag=True, help="Show detailed logs of the update process.")
-def update(language, full, use_git, ui_safe, verbose):
+def update(language, full, only_missing, ui_safe, verbose):
     """Update your translations."""
-    only_missing = not full
-    update_command.execute(language, only_missing, not use_git, ui_safe=ui_safe, verbose=verbose)
+    # If both flags are provided, --only-missing takes precedence
+    # If neither flag is provided, only_missing defaults to True (current behavior)
+    only_missing_value = only_missing if only_missing else not full
+    update_command.execute(language, only_missing_value, skip_git_validation=only_missing, ui_safe=ui_safe, verbose=verbose)
 
 
 @cli.command("ci")

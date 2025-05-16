@@ -155,7 +155,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         )
                     
                     # Translate modified keys
-                    if modified_keys:
+                    if modified_keys and not only_missing:
                         click.echo(f"  {Fore.GREEN}Translating {len(modified_keys)} outdated keys...{Fore.RESET}")
                         target_content = translator.translate_outdated_keys(
                             source_content,
@@ -242,7 +242,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 target_content = yaml.safe_load(f)
                         
                         # Translate outdated keys
-                        if outdated_keys:
+                        if outdated_keys and not only_missing:
                             click.echo(f"  {Fore.GREEN}Translating {len(outdated_keys)} outdated keys...{Fore.RESET}")
                             target_content = translator.translate_outdated_keys(
                                 source_content,

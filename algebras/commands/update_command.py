@@ -456,20 +456,7 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                         only_missing=True,
                         missing_keys_files=[(file_path, missing_keys, source_file)],
                         ui_safe=ui_safe,
-                        verbose=verbose
-                    )
-
-            # For files with outdated keys, call translate_command for each file
-            for file_path, outdated_keys, source_file in outdated_keys_files:
-                if outdated_keys:
-                    click.echo(f"  {Fore.YELLOW}File {os.path.basename(file_path)} has {len(outdated_keys)} outdated keys (git history):{Fore.RESET}")
-                    translate_command.execute(
-                        lang,
-                        force=True,
-                        only_missing=True,
-                        outdated_keys_files=[(file_path, outdated_keys, source_file)],
-                        ui_safe=ui_safe,
-                        verbose=verbose
+                        verbose=verbose,
                     )
         
         click.echo(f"\n{Fore.GREEN}Update completed.\x1b[0m")
