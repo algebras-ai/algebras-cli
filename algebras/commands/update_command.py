@@ -424,10 +424,20 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False) -> int:
                 # Find corresponding source file
                 source_file = None
                 lang_basename = os.path.basename(lang_file)
+                if verbose:
+                    click.echo(f"lang_basename: {lang_basename}")
                 lang_dirname = os.path.dirname(lang_file)
+                if verbose:
+                    click.echo(f"lang_dirname: {lang_dirname}")
+
+                # Check for language in path first
+                if f"/{lang}/" in lang_file or f"\\{lang}\\" in lang_file:
+                    potential_source_file = lang_file.replace(f"/{lang}/", f"/{source_language}/").replace(f"\\{lang}\\", f"\\{source_language}\\")
+                    if potential_source_file in source_files:
+                        source_file = potential_source_file
                 
                 # Handle simple case where filename is just "language.json"
-                if lang_basename == f"{lang}.json" and f"{source_language}.json" in [os.path.basename(f) for f in source_files]:
+                elif lang_basename == f"{lang}.json" and f"{source_language}.json" in [os.path.basename(f) for f in source_files]:
                     source_basename = f"{source_language}.json"
                     
                     # Find the exact source file path
@@ -491,7 +501,6 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False) -> int:
                             click.echo(f"{Fore.GREEN}No outdated keys found\x1b[0m")
                 elif verbose:
                     click.echo(f"{Fore.YELLOW}No matching source file found\x1b[0m")
-            
             missing_keys_by_language[lang] = missing_keys_files
             outdated_keys_by_language[lang] = outdated_keys_files
         
