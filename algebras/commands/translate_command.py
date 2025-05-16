@@ -36,7 +36,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         verbose: If True, show detailed logs of the translation process
     """
     config = Config()
-    
+
     if not config.exists():
         click.echo(f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.\x1b[0m")
         return
@@ -184,44 +184,45 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
             
             # Process files with specific missing keys
             for target_file, missing_keys, source_file in missing_keys_files:
-                if os.path.basename(target_file).startswith(target_lang):
-                    click.echo(f"\n{Fore.BLUE}Processing file with missing keys {os.path.basename(target_file)}...{Fore.RESET}")
+                click.echo(f"\n{Fore.BLUE}Processing file with missing keys {os.path.basename(target_file)}...{Fore.RESET}")
+                
+                try:
+                    # Load both source and target files
+                    if source_file.endswith(".json"):
+                        with open(source_file, "r", encoding="utf-8") as f:
+                            source_content = json.load(f)
+                        with open(target_file, "r", encoding="utf-8") as f:
+                            target_content = json.load(f)
+                    elif source_file.endswith((".yaml", ".yml")):
+                        with open(source_file, "r", encoding="utf-8") as f:
+                            source_content = yaml.safe_load(f)
+                        with open(target_file, "r", encoding="utf-8") as f:
+                            target_content = yaml.safe_load(f)
                     
-                    try:
-                        # Load both source and target files
-                        if source_file.endswith(".json"):
-                            with open(source_file, "r", encoding="utf-8") as f:
-                                source_content = json.load(f)
-                            with open(target_file, "r", encoding="utf-8") as f:
-                                target_content = json.load(f)
-                        elif source_file.endswith((".yaml", ".yml")):
-                            with open(source_file, "r", encoding="utf-8") as f:
-                                source_content = yaml.safe_load(f)
-                            with open(target_file, "r", encoding="utf-8") as f:
-                                target_content = yaml.safe_load(f)
+                    print(f"Source content: {source_content}")
+                    print(f"Target content: {target_content}")
+                    # Translate missing keys
+                    if missing_keys:
+                        click.echo(f"  {Fore.GREEN}Translating {len(missing_keys)} missing keys...{Fore.RESET}")
+                        target_content = translator.translate_missing_keys(
+                            source_content, 
+                            target_content, 
+                            list(missing_keys), 
+                            target_lang,
+                            ui_safe
+                        )
                         
-                        # Translate missing keys
-                        if missing_keys:
-                            click.echo(f"  {Fore.GREEN}Translating {len(missing_keys)} missing keys...{Fore.RESET}")
-                            target_content = translator.translate_missing_keys(
-                                source_content, 
-                                target_content, 
-                                list(missing_keys), 
-                                target_lang,
-                                ui_safe
-                            )
-                            
-                            # Save updated content
-                            if target_file.endswith(".json"):
-                                with open(target_file, "w", encoding="utf-8") as f:
-                                    json.dump(target_content, f, ensure_ascii=False, indent=2)
-                            elif target_file.endswith((".yaml", ".yml")):
-                                with open(target_file, "w", encoding="utf-8") as f:
-                                    yaml.dump(target_content, f, default_flow_style=False, allow_unicode=True)
-                            
-                            click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
-                    except Exception as e:
-                        click.echo(f"  {Fore.RED}Error processing file with missing keys {os.path.basename(target_file)}: {str(e)}\x1b[0m")
+                        # Save updated content
+                        if target_file.endswith(".json"):
+                            with open(target_file, "w", encoding="utf-8") as f:
+                                json.dump(target_content, f, ensure_ascii=False, indent=2)
+                        elif target_file.endswith((".yaml", ".yml")):
+                            with open(target_file, "w", encoding="utf-8") as f:
+                                yaml.dump(target_content, f, default_flow_style=False, allow_unicode=True)
+                        
+                        click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
+                except Exception as e:
+                    click.echo(f"  {Fore.RED}Error processing file with missing keys {os.path.basename(target_file)}: {str(e)}\x1b[0m")
             
             # Process files with outdated keys
             for target_file, outdated_keys, source_file in outdated_keys_files:
