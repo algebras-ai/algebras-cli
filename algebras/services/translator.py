@@ -10,6 +10,7 @@ from typing import Dict, Any, List, Optional
 from openai import OpenAI
 
 from algebras.config import Config
+from algebras.utils.lang_validator import map_language_code
 
 
 class Translator:
@@ -45,6 +46,10 @@ class Translator:
         """
         provider = self.api_config.get("provider", "openai")
         
+        # Map language codes to ISO 2-letter format
+        source_lang = map_language_code(source_lang)
+        target_lang = map_language_code(target_lang)
+        
         if provider == "openai":
             return self._translate_with_openai(text, source_lang, target_lang)
         elif provider == "algebras-ai":
@@ -58,8 +63,8 @@ class Translator:
         
         Args:
             text: Text to translate
-            source_lang: Source language code
-            target_lang: Target language code
+            source_lang: Source language code (already mapped to ISO 2-letter format)
+            target_lang: Target language code (already mapped to ISO 2-letter format)
             
         Returns:
             Translated text
@@ -95,8 +100,8 @@ class Translator:
         
         Args:
             text: Text to translate
-            source_lang: Source language code (use 'auto' for automatic detection)
-            target_lang: Target language code
+            source_lang: Source language code (already mapped to ISO 2-letter format, use 'auto' for automatic detection)
+            target_lang: Target language code (already mapped to ISO 2-letter format)
             ui_safe: If True, ensures translation will be no more characters than original text
             
         Returns:

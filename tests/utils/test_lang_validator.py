@@ -8,7 +8,8 @@ from algebras.utils.lang_validator import (
     extract_all_keys,
     get_key_value,
     validate_language_files,
-    find_outdated_keys
+    find_outdated_keys,
+    map_language_code
 )
 
 
@@ -212,6 +213,24 @@ class TestLangValidator(unittest.TestCase):
         mock_is_git_available.assert_called_once()
         mock_is_git_repo.assert_called_once_with(self.source_file)
         mock_read_file.assert_called_once()
+
+    def test_map_language_code(self):
+        # Test already 2-letter codes
+        self.assertEqual(map_language_code("en"), "en")
+        self.assertEqual(map_language_code("pt"), "pt")
+        
+        # Test codes with separators
+        self.assertEqual(map_language_code("pt-BR"), "pt")
+        self.assertEqual(map_language_code("en-US"), "en")
+        self.assertEqual(map_language_code("fr_FR"), "fr")
+        
+        # Test case insensitivity
+        self.assertEqual(map_language_code("PT-BR"), "pt")
+        self.assertEqual(map_language_code("EN_US"), "en")
+        
+        # Test codes without separators
+        self.assertEqual(map_language_code("eng"), "en")
+        self.assertEqual(map_language_code("port"), "po")
 
 
 if __name__ == "__main__":

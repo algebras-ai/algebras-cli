@@ -182,4 +182,28 @@ def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[st
         return len(outdated_keys) > 0, outdated_keys
     except Exception as e:
         print(f"Error finding outdated keys: {str(e)}")
-        return False, set() 
+        return False, set()
+
+
+def map_language_code(lang_code: str) -> str:
+    """
+    Map a language code to its ISO 2-letter format.
+    For example: 'pt-BR' -> 'pt', 'en-US' -> 'en'
+    
+    Args:
+        lang_code: Language code to map
+        
+    Returns:
+        ISO 2-letter language code
+    """
+    # If the code is already 2 letters, return it as is
+    if len(lang_code) == 2:
+        return lang_code.lower()
+    
+    # Split by common separators and take the first part
+    for separator in ['-', '_']:
+        if separator in lang_code:
+            return lang_code.split(separator)[0].lower()
+    
+    # If no separator found, return the first two characters
+    return lang_code[:2].lower() 
