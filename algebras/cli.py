@@ -66,9 +66,10 @@ def update(language, full, use_git, ui_safe, verbose):
 @cli.command("ci")
 @click.option("--language", "-l", help="Check only the specified language.")
 @click.option("--verbose", is_flag=True, help="Show detailed logs of the check process.")
-def ci(language, verbose):
+@click.option("--only-missed-keys", is_flag=True, help="Only check for missing keys, ignore git validation for outdated keys.")
+def ci(language, verbose, only_missed_keys):
     """Run CI checks for translations (no translation, always uses git validation)."""
-    exit_code = update_command.execute_ci(language, verbose=verbose)
+    exit_code = update_command.execute_ci(language, verbose=verbose, only_missed_keys=only_missed_keys)
     sys.exit(exit_code)
 
 

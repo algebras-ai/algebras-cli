@@ -316,14 +316,15 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
             click.echo(f"{Fore.RED}Traceback:\x1b[0m")
             click.echo(traceback.format_exc())
 
-def execute_ci(language: Optional[str] = None, verbose: bool = False) -> int:
+def execute_ci(language: Optional[str] = None, verbose: bool = False, only_missed_keys: bool = False) -> int:
     """
     Run CI checks for translations without performing translation.
-    Always uses git validation for key changes.
+    Always uses git validation for key changes unless only_missed_keys is set.
     
     Args:
         language: Language to check (if None, check all languages)
         verbose: If True, show detailed logs of the check process
+        only_missed_keys: If True, only check for missing keys, skip git validation for outdated keys
         
     Returns:
         int: 0 if all checks pass, -1 if any errors are found
@@ -369,13 +370,16 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False) -> int:
     if verbose:
         click.echo(f"{Fore.BLUE}Source language: {source_language}\x1b[0m")
     
-    # Check if git is available for outdated key detection
-    git_available = is_git_available()
-    if not git_available:
-        click.echo(f"{Fore.RED}Git is required for CI checks but is not available.\x1b[0m")
-        return -1
-        
-    click.echo(f"{Fore.BLUE}Running CI checks using git for key validation...\x1b[0m")
+    # Check if git is available for outdated key detection (only if not using only_missed_keys)
+    git_available = False
+    if not only_missed_keys:
+        git_available = is_git_available()
+        if not git_available:
+            click.echo(f"{Fore.YELLOW}Git is not available but required for comprehensive checks. Will only check for missing keys.\x1b[0m")
+        else:
+            click.echo(f"{Fore.BLUE}Running CI checks using git for key validation...\x1b[0m")
+    else:
+        click.echo(f"{Fore.BLUE}Running CI checks for missing keys only (skipping git validation)...\x1b[0m")
     
     # Scan for files
     try:
@@ -467,7 +471,8 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False) -> int:
                     if potential_source_file in source_files:
                         source_file = potential_source_file
                 
-                if source_file and is_git_repository(os.path.dirname(source_file)):
+                # Only check with git if git_available and not only_missed_keys
+                if source_file and (only_missed_keys or not git_available or is_git_repository(os.path.dirname(source_file))):
                     # Add the file pair to the batch processing queue
                     all_file_pairs.append((source_file, lang_file))
                     lang_file_map[(source_file, lang_file)] = lang
@@ -482,13 +487,16 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False) -> int:
             # Check for missing keys
             is_valid, missing_keys = validate_language_files(src_file, tgt_file)
             
-            # Check for outdated keys
-            has_outdated_keys, outdated_keys = find_outdated_keys(src_file, tgt_file)
+            # Check for outdated keys only if git is available and not using only_missed_keys
+            has_outdated_keys = False
+            outdated_keys = []
+            if not only_missed_keys and git_available and is_git_repository(os.path.dirname(src_file)):
+                has_outdated_keys, outdated_keys = find_outdated_keys(src_file, tgt_file)
             
             return (tgt_file, missing_keys, src_file, has_outdated_keys, outdated_keys)
         
         # Process all file pairs with progress bar
-        with tqdm(total=len(all_file_pairs), desc="Checking keys with git") as pbar:
+        with tqdm(total=len(all_file_pairs), desc="Checking keys") as pbar:
             results = []
             
             # Use ThreadPoolExecutor for I/O bound operations
