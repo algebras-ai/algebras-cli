@@ -8,8 +8,10 @@ import yaml
 import requests
 import hashlib
 import pickle
+import asyncio
+import concurrent.futures
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 from functools import lru_cache
 from openai import OpenAI
 
@@ -100,6 +102,11 @@ class Translator:
         
         self.config.load()
         self.api_config = self.config.get_api_config()
+        
+        # Get batch size from environment or config, default to 5
+        self.batch_size = int(os.environ.get("ALGEBRAS_BATCH_SIZE", 5))
+        if self.config.has_setting("batch_size"):
+            self.batch_size = int(self.config.get_setting("batch_size"))
         
         # Set up OpenAI client if available
         openai_api_key = os.environ.get("OPENAI_API_KEY")
@@ -404,16 +411,92 @@ class Translator:
         Returns:
             Translated dictionary
         """
+        # Collect all string values that need translation
+        string_items = []
+        paths = []
+        
+        def collect_strings(current_data, current_path=None):
+            if current_path is None:
+                current_path = []
+                
+            for key, value in current_data.items():
+                path = current_path + [key]
+                if isinstance(value, dict):
+                    collect_strings(value, path)
+                elif isinstance(value, str):
+                    string_items.append(value)
+                    paths.append(path)
+        
+        # Collect all strings that need translation
+        collect_strings(data)
+        
+        # Split into batches
+        total_strings = len(string_items)
+        num_batches = (total_strings + self.batch_size - 1) // self.batch_size
+        
+        print(f"Processing {total_strings} text items in {num_batches} batches (batch size: {self.batch_size})")
+        
+        # Translate in batches
+        translated_values = {}
+        
+        for i in range(0, total_strings, self.batch_size):
+            batch = string_items[i:i + self.batch_size]
+            batch_paths = paths[i:i + self.batch_size]
+            batch_idx = i // self.batch_size + 1
+            
+            print(f"Processing batch {batch_idx}/{num_batches} ({len(batch)} items)")
+            
+            # Use ThreadPoolExecutor for parallel processing within the batch
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.batch_size) as executor:
+                # Create translation tasks
+                futures = {}
+                for j, text in enumerate(batch):
+                    future = executor.submit(
+                        self.translate_text,
+                        text,
+                        source_lang,
+                        target_lang,
+                        ui_safe
+                    )
+                    futures[j] = future
+                
+                # Collect results
+                for j, future in futures.items():
+                    try:
+                        translated_text = future.result()
+                        path_key = tuple(batch_paths[j])  # Convert list to tuple for dict key
+                        translated_values[path_key] = translated_text
+                        print(f"  ✓ Translated: {'.'.join(str(p) for p in batch_paths[j])}")
+                    except Exception as e:
+                        print(f"  ✗ Error translating {batch[j]}: {str(e)}")
+            
+            print(f"Completed batch {batch_idx}/{num_batches}")
+        
+        # Build the result dictionary with translations
         result = {}
         
-        for key, value in data.items():
-            if isinstance(value, dict):
-                result[key] = self._translate_nested_dict(value, source_lang, target_lang, ui_safe)
-            elif isinstance(value, str):
-                # Use translate_text which now uses caching
-                result[key] = self.translate_text(value, source_lang, target_lang, ui_safe)
-            else:
-                result[key] = value
+        def build_result(src_data, dest_data, current_path=None):
+            if current_path is None:
+                current_path = []
+                
+            for key, value in src_data.items():
+                path = current_path + [key]
+                if isinstance(value, dict):
+                    if key not in dest_data:
+                        dest_data[key] = {}
+                    build_result(value, dest_data[key], path)
+                elif isinstance(value, str):
+                    path_key = tuple(path)
+                    if path_key in translated_values:
+                        dest_data[key] = translated_values[path_key]
+                    else:
+                        # Fallback to direct translation if not in batch results
+                        dest_data[key] = self.translate_text(value, source_lang, target_lang, ui_safe)
+                else:
+                    dest_data[key] = value
+        
+        # Build the translated dictionary
+        build_result(data, result)
         
         return result
     
@@ -462,4 +545,152 @@ class Translator:
                 loaded_count += 1
         
         print(f"Preloaded {loaded_count} items into translation cache")
-        return loaded_count 
+        return loaded_count
+    
+    def translate_missing_keys_batch(self, source_content: Dict[str, Any], target_content: Dict[str, Any],
+                                    missing_keys: List[str], target_lang: str, ui_safe: bool = False) -> Dict[str, Any]:
+        """
+        Translate missing keys in batches to avoid overloading the API.
+        
+        Args:
+            source_content: Source language content as a dictionary
+            target_content: Target language content as a dictionary (with missing keys)
+            missing_keys: List of dot-notation keys that are missing
+            target_lang: Target language code
+            ui_safe: If True, ensure translations will not be longer than original text
+            
+        Returns:
+            Updated target content with translated missing keys
+        """
+        # Make a deep copy of the target content to avoid modifying it directly
+        updated_content = target_content.copy()
+        
+        # Get source language
+        source_lang = self.config.get_source_language()
+        
+        # Split keys into batches
+        total_keys = len(missing_keys)
+        num_batches = (total_keys + self.batch_size - 1) // self.batch_size
+        
+        # Create batches
+        batches = []
+        for i in range(0, total_keys, self.batch_size):
+            batch = missing_keys[i:i + self.batch_size]
+            batches.append(batch)
+        
+        print(f"Processing {total_keys} keys in {num_batches} batches (batch size: {self.batch_size})")
+        
+        # Process each batch
+        for batch_idx, batch in enumerate(batches, 1):
+            print(f"Processing batch {batch_idx}/{num_batches} ({len(batch)} keys)")
+            
+            # Use ThreadPoolExecutor for parallel processing within each batch
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.batch_size) as executor:
+                # Create tasks for each key in the batch
+                futures = {}
+                for key_path in batch:
+                    # Split the key path into individual parts
+                    key_parts = key_path.split('.')
+                    
+                    # Get the value from the source content
+                    source_value = self._get_nested_value(source_content, key_parts)
+                    
+                    if isinstance(source_value, str):
+                        # Create a translation task
+                        future = executor.submit(
+                            self.translate_text,
+                            source_value,
+                            source_lang,
+                            target_lang,
+                            ui_safe
+                        )
+                        futures[key_path] = (future, key_parts)
+                
+                # Collect results and update content
+                for key_path, (future, key_parts) in futures.items():
+                    try:
+                        translated_value = future.result()
+                        # Update the target content with the translated value
+                        self._set_nested_value(updated_content, key_parts, translated_value)
+                        print(f"  ✓ Translated: {key_path}")
+                    except Exception as e:
+                        print(f"  ✗ Error translating {key_path}: {str(e)}")
+                        # Continue with other keys on error
+            
+            print(f"Completed batch {batch_idx}/{num_batches}")
+        
+        return updated_content
+    
+    def translate_outdated_keys_batch(self, source_content: Dict[str, Any], target_content: Dict[str, Any],
+                                     outdated_keys: List[str], target_lang: str, ui_safe: bool = False) -> Dict[str, Any]:
+        """
+        Translate outdated keys in batches to avoid overloading the API.
+        
+        Args:
+            source_content: Source language content as a dictionary
+            target_content: Target language content as a dictionary
+            outdated_keys: List of dot-notation keys that are outdated
+            target_lang: Target language code
+            ui_safe: If True, ensure translations will not be longer than original text
+            
+        Returns:
+            Updated target content with translated outdated keys
+        """
+        # Make a deep copy of the target content to avoid modifying it directly
+        updated_content = target_content.copy()
+        
+        # Get source language
+        source_lang = self.config.get_source_language()
+        
+        # Split keys into batches
+        total_keys = len(outdated_keys)
+        num_batches = (total_keys + self.batch_size - 1) // self.batch_size
+        
+        # Create batches
+        batches = []
+        for i in range(0, total_keys, self.batch_size):
+            batch = outdated_keys[i:i + self.batch_size]
+            batches.append(batch)
+        
+        print(f"Processing {total_keys} outdated keys in {num_batches} batches (batch size: {self.batch_size})")
+        
+        # Process each batch
+        for batch_idx, batch in enumerate(batches, 1):
+            print(f"Processing batch {batch_idx}/{num_batches} ({len(batch)} keys)")
+            
+            # Use ThreadPoolExecutor for parallel processing within each batch
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.batch_size) as executor:
+                # Create tasks for each key in the batch
+                futures = {}
+                for key_path in batch:
+                    # Split the key path into individual parts
+                    key_parts = key_path.split('.')
+                    
+                    # Get the value from the source content
+                    source_value = self._get_nested_value(source_content, key_parts)
+                    
+                    if isinstance(source_value, str):
+                        # Create a translation task
+                        future = executor.submit(
+                            self.translate_text,
+                            source_value,
+                            source_lang,
+                            target_lang,
+                            ui_safe
+                        )
+                        futures[key_path] = (future, key_parts)
+                
+                # Collect results and update content
+                for key_path, (future, key_parts) in futures.items():
+                    try:
+                        translated_value = future.result()
+                        # Update the target content with the translated value
+                        self._set_nested_value(updated_content, key_parts, translated_value)
+                        print(f"  ✓ Translated: {key_path}")
+                    except Exception as e:
+                        print(f"  ✗ Error translating {key_path}: {str(e)}")
+                        # Continue with other keys on error
+            
+            print(f"Completed batch {batch_idx}/{num_batches}")
+        
+        return updated_content 

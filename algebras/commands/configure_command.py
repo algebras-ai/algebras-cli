@@ -9,7 +9,7 @@ from colorama import Fore
 from algebras.config import Config
 
 
-def execute(provider: str = None, model: str = None, path_rules: str = None) -> None:
+def execute(provider: str = None, model: str = None, path_rules: str = None, batch_size: int = None) -> None:
     """
     Configure your Algebras project settings.
     
@@ -17,6 +17,7 @@ def execute(provider: str = None, model: str = None, path_rules: str = None) -> 
         provider: Set the API provider (e.g., 'openai', 'algebras-ai')
         model: Set the model for the provider (only applicable for some providers)
         path_rules: Set the path rules for file patterns to process
+        batch_size: Set the batch size for translation processing
     """
     config = Config()
     
@@ -61,18 +62,23 @@ def execute(provider: str = None, model: str = None, path_rules: str = None) -> 
     
     # Handle path_rules change
     if path_rules:
-        # Split by comma if provided as comma-separated list
-        if "," in path_rules:
-            rules = [rule.strip() for rule in path_rules.split(",")]
-        else:
-            # Otherwise treat as a single pattern
-            rules = [path_rules.strip()]
+        # Split the path rules by comma
+        rules_list = [rule.strip() for rule in path_rules.split(",")]
+        config.data["path_rules"] = rules_list
+        click.echo(f"{Fore.GREEN}Path rules updated.\x1b[0m")
+        click.echo(f"New rules: {', '.join(rules_list)}")
+    
+    # Handle batch_size change
+    if batch_size is not None:
+        if batch_size < 1:
+            click.echo(f"{Fore.RED}Batch size must be at least 1.\x1b[0m")
+            return
         
-        config.data["path_rules"] = rules
-        click.echo(f"{Fore.GREEN}Path rules updated with {len(rules)} pattern(s).\x1b[0m")
+        config.set_setting("batch_size", batch_size)
+        click.echo(f"{Fore.GREEN}Batch size set to {batch_size}.\x1b[0m")
     
     # If no arguments provided, show current configuration
-    if not provider and not model and not path_rules:
+    if not provider and not model and not path_rules and batch_size is None:
         click.echo(f"\nCurrent configuration:")
         click.echo(f"  Provider: {Fore.BLUE}{current_provider}\x1b[0m")
         click.echo(f"  Model: {Fore.BLUE}{config.data['api'].get('model', 'Not set')}\x1b[0m")
@@ -85,6 +91,26 @@ def execute(provider: str = None, model: str = None, path_rules: str = None) -> 
                 click.echo(f"    - {Fore.BLUE}{rule}\x1b[0m")
         else:
             click.echo(f"  Path rules: {Fore.BLUE}Not set\x1b[0m")
+        
+        # Show batch size if set
+        batch_size_value = config.get_setting('batch_size', os.environ.get('ALGEBRAS_BATCH_SIZE', 5))
+        click.echo(f"  Batch size: {Fore.BLUE}{batch_size_value}\x1b[0m")
+        
+        # Show environment variable status
+        if current_provider == "openai":
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if api_key:
+                masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "****"
+                click.echo(f"  OPENAI_API_KEY: {Fore.GREEN}Set ({masked_key})\x1b[0m")
+            else:
+                click.echo(f"  OPENAI_API_KEY: {Fore.RED}Not set\x1b[0m")
+        elif current_provider == "algebras-ai":
+            api_key = os.environ.get("ALGEBRAS_API_KEY")
+            if api_key:
+                masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "****"
+                click.echo(f"  ALGEBRAS_API_KEY: {Fore.GREEN}Set ({masked_key})\x1b[0m")
+            else:
+                click.echo(f"  ALGEBRAS_API_KEY: {Fore.RED}Not set\x1b[0m")
         
         click.echo(f"\nTo change the provider, run: {Fore.BLUE}algebras configure --provider <provider>\x1b[0m")
         click.echo(f"To change the model, run: {Fore.BLUE}algebras configure --model <model>\x1b[0m")

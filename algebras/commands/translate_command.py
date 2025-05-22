@@ -21,7 +21,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
            outdated_files: List[Tuple[str, str]] = None, 
            missing_keys_files: List[Tuple[str, Set[str], str]] = None,
            outdated_keys_files: List[Tuple[str, Set[str], str]] = None,
-           ui_safe: bool = False, verbose: bool = False) -> None:
+           ui_safe: bool = False, verbose: bool = False, batch_size: Optional[int] = None) -> None:
     """
     Translate your application.
     
@@ -34,6 +34,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         outdated_keys_files: List of tuples (target_file, outdated_keys, source_file)
         ui_safe: If True, ensure translations will not be longer than original text
         verbose: If True, show detailed logs of the translation process
+        batch_size: Override the batch size for translation processing
     """
     config = Config()
 
@@ -79,6 +80,17 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
     translator = Translator()
     if verbose:
         click.echo(f"{Fore.BLUE}Initialized translator\x1b[0m")
+    
+    # Override batch size if specified
+    if batch_size is not None:
+        if batch_size < 1:
+            click.echo(f"{Fore.RED}Batch size must be at least 1. Using default batch size.\x1b[0m")
+        else:
+            translator.batch_size = batch_size
+            if verbose:
+                click.echo(f"{Fore.BLUE}Using batch size: {batch_size}\x1b[0m")
+    elif verbose:
+        click.echo(f"{Fore.BLUE}Using default batch size: {translator.batch_size}\x1b[0m")
     
     # Initialize lists if they're None
     outdated_files = outdated_files or []
@@ -146,7 +158,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     # Translate missing keys
                     if missing_keys:
                         click.echo(f"  {Fore.GREEN}Translating {len(missing_keys)} missing keys...{Fore.RESET}")
-                        target_content = translator.translate_missing_keys(
+                        target_content = translator.translate_missing_keys_batch(
                             source_content, 
                             target_content, 
                             list(missing_keys), 
@@ -157,7 +169,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     # Translate modified keys
                     if modified_keys and not only_missing:
                         click.echo(f"  {Fore.GREEN}Translating {len(modified_keys)} outdated keys...{Fore.RESET}")
-                        target_content = translator.translate_outdated_keys(
+                        target_content = translator.translate_outdated_keys_batch(
                             source_content,
                             target_content,
                             modified_keys,
@@ -204,7 +216,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     # Translate missing keys
                     if missing_keys:
                         click.echo(f"  {Fore.GREEN}Translating {len(missing_keys)} missing keys...{Fore.RESET}")
-                        target_content = translator.translate_missing_keys(
+                        target_content = translator.translate_missing_keys_batch(
                             source_content, 
                             target_content, 
                             list(missing_keys), 
@@ -245,7 +257,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         # Translate outdated keys
                         if outdated_keys and not only_missing:
                             click.echo(f"  {Fore.GREEN}Translating {len(outdated_keys)} outdated keys...{Fore.RESET}")
-                            target_content = translator.translate_outdated_keys(
+                            target_content = translator.translate_outdated_keys_batch(
                                 source_content,
                                 target_content,
                                 list(outdated_keys),
@@ -402,7 +414,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 
                         # Translate the missing keys
                         if missing_keys:
-                            translated_content = translator.translate_missing_keys(
+                            translated_content = translator.translate_missing_keys_batch(
                                 source_content, 
                                 target_content, 
                                 list(missing_keys), 
@@ -415,7 +427,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         # Translate outdated keys if needed
                         if has_outdated_keys and not only_missing:
                             click.echo(f"  {Fore.GREEN}Translating {len(outdated_keys)} outdated keys in {target_basename}...\x1b[0m")
-                            translated_content = translator.translate_outdated_keys(
+                            translated_content = translator.translate_outdated_keys_batch(
                                 source_content,
                                 translated_content,
                                 list(outdated_keys),

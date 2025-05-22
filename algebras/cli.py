@@ -46,9 +46,10 @@ def add(language):
 @click.option("--only-missing", is_flag=True, help="Only translate keys that are missing in the target files.")
 @click.option("--ui-safe", is_flag=True, help="Ensure translations will not exceed the original text length.")
 @click.option("--verbose", is_flag=True, help="Show detailed logs of the translation process.")
-def translate(language, force, only_missing, ui_safe, verbose):
+@click.option("--batch-size", type=int, help="Override the batch size for translation processing.")
+def translate(language, force, only_missing, ui_safe, verbose, batch_size):
     """Translate your application."""
-    translate_command.execute(language, force, only_missing, ui_safe=ui_safe, verbose=verbose)
+    translate_command.execute(language, force, only_missing, ui_safe=ui_safe, verbose=verbose, batch_size=batch_size)
 
 
 @cli.command("update")
@@ -93,9 +94,10 @@ def status(language):
 @click.option("--provider", help="Set the API provider (e.g., 'openai', 'algebras-ai').")
 @click.option("--model", help="Set the model for the provider (only applicable for some providers).")
 @click.option("--path-rules", help="Set the path rules for file patterns to process (comma separated list or glob patterns).")
-def configure(provider, model, path_rules):
+@click.option("--batch-size", type=int, help="Set the batch size for translation processing (default: 5).")
+def configure(provider, model, path_rules, batch_size):
     """Configure your Algebras project settings."""
-    configure_command.execute(provider, model, path_rules)
+    configure_command.execute(provider, model, path_rules, batch_size)
 
 
 def main():
