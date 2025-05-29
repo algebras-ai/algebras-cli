@@ -23,14 +23,27 @@ def read_ts_translation_file(file_path: str) -> Dict[str, Any]:
     
     # Find the export statement
     # Look for patterns like: export const en = { ... }
-    export_pattern = r'export\s+const\s+(\w+)\s*=\s*({.*?});?$'
-    match = re.search(export_pattern, content, re.DOTALL | re.MULTILINE)
+    export_pattern = r'export\s+const\s+(\w+)\s*=\s*'
+    match = re.search(export_pattern, content, re.MULTILINE)
     
     if not match:
         raise ValueError(f"No valid TypeScript export found in {file_path}")
     
     export_name = match.group(1)
-    object_content = match.group(2)
+    start_pos = match.end()
+    
+    # Find the opening brace
+    content_from_start = content[start_pos:]
+    brace_pos = content_from_start.find('{')
+    if brace_pos == -1:
+        raise ValueError(f"No opening brace found after export statement in {file_path}")
+    
+    # Extract the object content by counting braces
+    object_start = start_pos + brace_pos
+    object_content = _extract_balanced_braces(content, object_start)
+    
+    if not object_content:
+        raise ValueError(f"Could not extract balanced object content from {file_path}")
     
     # Convert the JavaScript object to Python dict
     # This is a simplified approach - for complex objects, you might want to use a proper JS parser
@@ -145,4 +158,50 @@ def _python_dict_to_ts_object(obj: Any, indent: int = 0) -> str:
     
     else:
         # For numbers and other types
-        return str(obj) 
+        return str(obj)
+
+
+def _extract_balanced_braces(content: str, start_pos: int) -> str:
+    """
+    Extract content between balanced braces starting from start_pos.
+    
+    Args:
+        content: Full content string
+        start_pos: Position of the opening brace
+        
+    Returns:
+        Content between balanced braces including the braces
+    """
+    if start_pos >= len(content) or content[start_pos] != '{':
+        return ""
+    
+    brace_count = 0
+    in_string = False
+    escape_next = False
+    string_delimiter = None
+    
+    for i, char in enumerate(content[start_pos:], start_pos):
+        if escape_next:
+            escape_next = False
+            continue
+            
+        if char == '\\':
+            escape_next = True
+            continue
+            
+        if not in_string:
+            if char in ['"', "'", '`']:
+                in_string = True
+                string_delimiter = char
+            elif char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    return content[start_pos:i+1]
+        else:
+            if char == string_delimiter:
+                in_string = False
+                string_delimiter = None
+    
+    return ""  # Unbalanced braces 
