@@ -489,6 +489,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith((".yaml", ".yml")):
                             with open(target_file, "w", encoding="utf-8") as f:
                                 yaml.dump(translated_content, f, default_flow_style=False, allow_unicode=True)
+                        elif source_file.endswith(".ts"):
+                            write_ts_translation_file(target_file, translated_content)
                         
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     except Exception as e:
