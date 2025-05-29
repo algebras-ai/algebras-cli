@@ -130,7 +130,9 @@ def _python_dict_to_ts_object(obj: Any, indent: int = 0) -> str:
         lines = ['{']
         for key, value in obj.items():
             ts_value = _python_dict_to_ts_object(value, indent + 1)
-            lines.append(f'{inner_spaces}{key}: {ts_value},')
+            # Check if key needs to be quoted for TypeScript
+            formatted_key = _format_ts_key(key)
+            lines.append(f'{inner_spaces}{formatted_key}: {ts_value},')
         lines.append(f'{spaces}}}')
         return '\n'.join(lines)
     
@@ -159,6 +161,26 @@ def _python_dict_to_ts_object(obj: Any, indent: int = 0) -> str:
     else:
         # For numbers and other types
         return str(obj)
+
+
+def _format_ts_key(key: str) -> str:
+    """
+    Format a key for TypeScript object syntax, adding quotes if necessary.
+    
+    Args:
+        key: The object key
+        
+    Returns:
+        Formatted key, quoted if necessary
+    """
+    # Check if the key is a valid JavaScript identifier
+    # Valid identifiers: start with letter, $, or _, followed by letters, digits, $, or _
+    if re.match(r'^[a-zA-Z_$][a-zA-Z0-9_$]*$', key):
+        return key
+    else:
+        # Key contains special characters, needs to be quoted
+        escaped = key.replace('\\', '\\\\').replace('"', '\\"')
+        return f'"{escaped}"'
 
 
 def _extract_balanced_braces(content: str, start_pos: int) -> str:
