@@ -14,9 +14,15 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
 from functools import lru_cache
 from openai import OpenAI
+import re
+import time
+
+import click
+from colorama import Fore
 
 from algebras.config import Config
 from algebras.utils.lang_validator import map_language_code
+from algebras.utils.ts_handler import read_ts_translation_file, write_ts_translation_file
 
 
 class TranslationCache:
@@ -271,6 +277,8 @@ class Translator:
         elif file_path.endswith((".yaml", ".yml")):
             with open(file_path, "r", encoding="utf-8") as f:
                 content = yaml.safe_load(f)
+        elif file_path.endswith(".ts"):
+            content = read_ts_translation_file(file_path)
         else:
             raise ValueError(f"Unsupported file format: {file_path}")
         
@@ -518,6 +526,8 @@ class Translator:
         elif file_path.endswith((".yaml", ".yml")):
             with open(file_path, "r", encoding="utf-8") as f:
                 content = yaml.safe_load(f)
+        elif file_path.endswith(".ts"):
+            content = read_ts_translation_file(file_path)
         else:
             raise ValueError(f"Unsupported file format: {file_path}")
         

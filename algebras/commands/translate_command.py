@@ -15,6 +15,7 @@ from algebras.services.file_scanner import FileScanner
 from algebras.utils.path_utils import determine_target_path
 from algebras.utils.lang_validator import validate_language_files, find_outdated_keys, extract_all_keys
 from algebras.utils.git_utils import is_git_available, is_git_repository
+from algebras.utils.ts_handler import read_ts_translation_file, write_ts_translation_file
 
 
 def execute(language: Optional[str] = None, force: bool = False, only_missing: bool = False,
@@ -121,6 +122,11 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             source_content = yaml.safe_load(f)
                         with open(target_file, "r", encoding="utf-8") as f:
                             target_content = yaml.safe_load(f)
+                    elif source_file.endswith(".ts"):
+                        source_content = read_ts_translation_file(source_file)
+                        target_content = read_ts_translation_file(target_file)
+                    else:
+                        raise ValueError(f"Unsupported file format: {source_file}")
                     
                     # Extract all keys from both files
                     source_keys = extract_all_keys(source_content)
@@ -185,6 +191,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif target_file.endswith((".yaml", ".yml")):
                             with open(target_file, "w", encoding="utf-8") as f:
                                 yaml.dump(target_content, f, default_flow_style=False, allow_unicode=True)
+                        elif target_file.endswith(".ts"):
+                            write_ts_translation_file(target_file, target_content)
                         
                         updated_count = len(missing_keys) + len(modified_keys)
                         click.echo(f"  {Fore.GREEN}✓ Updated {updated_count} keys in {target_file}\x1b[0m")
@@ -210,6 +218,11 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             source_content = yaml.safe_load(f)
                         with open(target_file, "r", encoding="utf-8") as f:
                             target_content = yaml.safe_load(f)
+                    elif source_file.endswith(".ts"):
+                        source_content = read_ts_translation_file(source_file)
+                        target_content = read_ts_translation_file(target_file)
+                    else:
+                        raise ValueError(f"Unsupported file format: {source_file}")
                     
                     print(f"Source content: {source_content}")
                     print(f"Target content: {target_content}")
@@ -231,6 +244,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif target_file.endswith((".yaml", ".yml")):
                             with open(target_file, "w", encoding="utf-8") as f:
                                 yaml.dump(target_content, f, default_flow_style=False, allow_unicode=True)
+                        elif target_file.endswith(".ts"):
+                            write_ts_translation_file(target_file, target_content)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                 except Exception as e:
@@ -253,6 +268,11 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 source_content = yaml.safe_load(f)
                             with open(target_file, "r", encoding="utf-8") as f:
                                 target_content = yaml.safe_load(f)
+                        elif source_file.endswith(".ts"):
+                            source_content = read_ts_translation_file(source_file)
+                            target_content = read_ts_translation_file(target_file)
+                        else:
+                            raise ValueError(f"Unsupported file format: {source_file}")
                         
                         # Translate outdated keys
                         if outdated_keys and not only_missing:
@@ -272,6 +292,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             elif target_file.endswith((".yaml", ".yml")):
                                 with open(target_file, "w", encoding="utf-8") as f:
                                     yaml.dump(target_content, f, default_flow_style=False, allow_unicode=True)
+                            elif target_file.endswith(".ts"):
+                                write_ts_translation_file(target_file, target_content)
                             
                             click.echo(f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -411,7 +433,12 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 source_content = yaml.safe_load(f)
                             with open(target_file, "r", encoding="utf-8") as f:
                                 target_content = yaml.safe_load(f)
-                                
+                        elif source_file.endswith(".ts"):
+                            source_content = read_ts_translation_file(source_file)
+                            target_content = read_ts_translation_file(target_file)
+                        else:
+                            raise ValueError(f"Unsupported file format: {source_file}")
+                        
                         # Translate the missing keys
                         if missing_keys:
                             translated_content = translator.translate_missing_keys_batch(
@@ -442,6 +469,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith((".yaml", ".yml")):
                             with open(target_file, "w", encoding="utf-8") as f:
                                 yaml.dump(translated_content, f, default_flow_style=False, allow_unicode=True)
+                        elif source_file.endswith(".ts"):
+                            write_ts_translation_file(target_file, translated_content)
                         
                         updated_count = len(missing_keys) + (len(outdated_keys) if has_outdated_keys and not only_missing else 0)
                         click.echo(f"  {Fore.GREEN}✓ Updated {updated_count} keys in {target_file}\x1b[0m")
