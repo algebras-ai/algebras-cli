@@ -10,6 +10,7 @@ from algebras.utils.git_utils import (
     compare_key_modifications,
     get_keys_last_modifications_batch
 )
+from algebras.utils.ts_handler import read_ts_translation_file
 
 
 def read_language_file(file_path: str) -> Dict[str, Any]:
@@ -28,6 +29,8 @@ def read_language_file(file_path: str) -> Dict[str, Any]:
     elif file_path.endswith(('.yaml', '.yml')):
         with open(file_path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f) or {}
+    elif file_path.endswith('.ts'):
+        return read_ts_translation_file(file_path)
     else:
         raise ValueError(f"Unsupported file format: {file_path}")
 
