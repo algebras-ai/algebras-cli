@@ -408,18 +408,13 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     # Check which keys are missing in the target file
                     is_valid, missing_keys = validate_language_files(source_file, target_file)
                     
-                    # Check if there are outdated keys
-                    has_outdated_keys = False
-                    outdated_keys = set()
-                    if git_available and is_git_repository(os.path.dirname(source_file)):
-                        has_outdated_keys, outdated_keys = find_outdated_keys(source_file, target_file)
-                    
-                    if not missing_keys and not has_outdated_keys:
+                    # When --only-missing is specified, we skip outdated key detection to avoid git overhead
+                    # The user explicitly wants only missing keys, not outdated ones
+                    if not missing_keys:
                         click.echo(f"  {Fore.GREEN}No missing keys in {target_basename}. Nothing to translate.\x1b[0m")
                         continue
                     
-                    if missing_keys:
-                        click.echo(f"  {Fore.GREEN}Translating {len(missing_keys)} missing keys in {target_basename}...\x1b[0m")
+                    click.echo(f"  {Fore.GREEN}Translating {len(missing_keys)} missing keys in {target_basename}...\x1b[0m")
                     
                     try:
                         # Load both source and target files
@@ -439,28 +434,14 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
-                        # Translate the missing keys
-                        if missing_keys:
-                            translated_content = translator.translate_missing_keys_batch(
-                                source_content, 
-                                target_content, 
-                                list(missing_keys), 
-                                target_lang,
-                                ui_safe
-                            )
-                        else:
-                            translated_content = target_content
-                            
-                        # Translate outdated keys if needed
-                        if has_outdated_keys and not only_missing:
-                            click.echo(f"  {Fore.GREEN}Translating {len(outdated_keys)} outdated keys in {target_basename}...\x1b[0m")
-                            translated_content = translator.translate_outdated_keys_batch(
-                                source_content,
-                                translated_content,
-                                list(outdated_keys),
-                                target_lang,
-                                ui_safe
-                            )
+                        # Translate only the missing keys
+                        translated_content = translator.translate_missing_keys_batch(
+                            source_content, 
+                            target_content, 
+                            list(missing_keys), 
+                            target_lang,
+                            ui_safe
+                        )
                         
                         # Save updated content
                         if source_file.endswith(".json"):
@@ -472,8 +453,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".ts"):
                             write_ts_translation_file(target_file, translated_content)
                         
-                        updated_count = len(missing_keys) + (len(outdated_keys) if has_outdated_keys and not only_missing else 0)
-                        click.echo(f"  {Fore.GREEN}✓ Updated {updated_count} keys in {target_file}\x1b[0m")
+                        click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
                         click.echo(f"  {Fore.RED}Error translating keys in {source_basename}: {str(e)}\x1b[0m")
                 else:

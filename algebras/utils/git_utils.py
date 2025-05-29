@@ -797,7 +797,10 @@ def get_keys_last_modifications_batch(file_path: str, keys: List[str]) -> Dict[s
     """
     results = {}
     
-    # Get line numbers for all keys
+    if not keys:
+        return results
+    
+    # Get line numbers for all keys in a single pass
     line_numbers = {}
     for key in keys:
         line_num = get_key_line_number(file_path, key)
@@ -807,7 +810,7 @@ def get_keys_last_modifications_batch(file_path: str, keys: List[str]) -> Dict[s
     if not line_numbers:
         return results
     
-    # Get blame info for all line numbers in one batch
+    # Get blame info for all line numbers in one batch operation
     blame_info = get_blame_info_batch(file_path, list(line_numbers.values()))
     
     # Map the blame info back to keys
@@ -815,6 +818,16 @@ def get_keys_last_modifications_batch(file_path: str, keys: List[str]) -> Dict[s
         if line_num in blame_info:
             date_str, _ = blame_info[line_num]
             results[key] = date_str
+        else:
+            # If blame info is missing, try to get it using a fallback method
+            # but don't use the slow compare_key_modifications
+            try:
+                date_str = get_key_last_modification(file_path, key)
+                if date_str:
+                    results[key] = date_str
+            except Exception:
+                # If all methods fail, skip this key rather than causing delays
+                continue
     
     return results
 
