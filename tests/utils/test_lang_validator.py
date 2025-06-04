@@ -141,8 +141,8 @@ class TestLangValidator(unittest.TestCase):
     @patch('algebras.utils.lang_validator.is_git_available')
     @patch('algebras.utils.lang_validator.is_git_repository')
     @patch('algebras.utils.lang_validator.read_language_file')
-    @patch('algebras.utils.lang_validator.compare_key_modifications')
-    def test_find_outdated_keys_with_outdated(self, mock_compare, mock_read_file, mock_is_git_repo, mock_is_git_available):
+    @patch('algebras.utils.lang_validator.get_keys_last_modifications_batch')
+    def test_find_outdated_keys_with_outdated(self, mock_get_keys_batch, mock_read_file, mock_is_git_repo, mock_is_git_available):
         # Update test data to include same keys but different values
         target_data_with_diff = self.target_data.copy()
         target_data_with_diff["welcome"] = "Old welcome text"  # Different from source
@@ -152,14 +152,17 @@ class TestLangValidator(unittest.TestCase):
         mock_is_git_repo.return_value = True
         mock_read_file.side_effect = [self.source_data, target_data_with_diff]
         
-        # Create a custom side effect function that returns True only for the "welcome" key
-        def compare_side_effect(source_file, target_file, key):
-            if key == "welcome":
-                return True, self.newer_date, self.older_date
-            return False, self.older_date, self.older_date
+        # Mock the batch function to return dates for the "welcome" key
+        def batch_side_effect(file_path, keys):
+            if "welcome" in keys:
+                if "en.json" in file_path:  # source file
+                    return {"welcome": self.newer_date}
+                else:  # target file
+                    return {"welcome": self.older_date}
+            return {}
         
-        # Set the side effect for mock_compare
-        mock_compare.side_effect = compare_side_effect
+        # Set the side effect for mock_get_keys_batch
+        mock_get_keys_batch.side_effect = batch_side_effect
         
         has_outdated, outdated_keys = find_outdated_keys(self.source_file, self.target_file)
         
@@ -168,8 +171,8 @@ class TestLangValidator(unittest.TestCase):
         mock_is_git_available.assert_called_once()
         mock_is_git_repo.assert_called_once_with(self.source_file)
         mock_read_file.assert_called()
-        # Verify compare_key_modifications was called for the welcome key
-        mock_compare.assert_any_call(self.source_file, self.target_file, "welcome")
+        # Verify get_keys_last_modifications_batch was called for both files
+        self.assertEqual(mock_get_keys_batch.call_count, 2)
 
     @patch('algebras.utils.lang_validator.is_git_available')
     @patch('algebras.utils.lang_validator.is_git_repository')

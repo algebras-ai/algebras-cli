@@ -96,7 +96,7 @@ class TestFileScanner:
             "messages.fr.json",
             "locales/en.yaml",
             "locales/de.yaml",
-            "generic.json"  # No language marker, should be grouped with default language
+            "generic.json"  # No language marker, should not be grouped with any language
         ]
         
         # Mock Config
@@ -119,6 +119,6 @@ class TestFileScanner:
         
         # Verify the grouping
         assert set(result.keys()) == {"en", "fr", "de"}
-        assert set(result["en"]) == {"messages.en.json", "locales/en.yaml", "generic.json"}
+        assert set(result["en"]) == {"messages.en.json", "locales/en.yaml"}
         assert set(result["fr"]) == {"messages.fr.json"}
         assert set(result["de"]) == {"locales/de.yaml"} 
