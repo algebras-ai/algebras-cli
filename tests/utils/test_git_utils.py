@@ -27,6 +27,12 @@ class TestGitUtils(unittest.TestCase):
         # Fixed date strings (ISO format) without milliseconds for consistent tests
         self.older_date = "2023-01-01T12:00:00"
         self.newer_date = "2023-02-01T12:00:00"
+        
+        # Clear LRU caches to ensure clean state between tests
+        from algebras.utils.git_utils import compare_key_modifications, get_key_last_modification, get_key_line_number
+        compare_key_modifications.cache_clear()
+        get_key_last_modification.cache_clear()
+        get_key_line_number.cache_clear()
 
     def tearDown(self):
         # Clean up test files if they exist

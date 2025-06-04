@@ -3,6 +3,7 @@ import json
 import yaml
 from typing import Dict, Any, Set, List, Tuple
 from tqdm import tqdm
+from datetime import datetime
 from algebras.utils.git_utils import (
     is_git_available, 
     is_git_repository, 
@@ -10,6 +11,7 @@ from algebras.utils.git_utils import (
     compare_key_modifications,
     get_keys_last_modifications_batch
 )
+from algebras.utils.ts_handler import read_ts_translation_file
 
 
 def read_language_file(file_path: str) -> Dict[str, Any]:
@@ -28,6 +30,8 @@ def read_language_file(file_path: str) -> Dict[str, Any]:
     elif file_path.endswith(('.yaml', '.yml')):
         with open(file_path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f) or {}
+    elif file_path.endswith('.ts'):
+        return read_ts_translation_file(file_path)
     else:
         raise ValueError(f"Unsupported file format: {file_path}")
 
@@ -147,37 +151,33 @@ def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[st
         
         outdated_keys = set()
         
-        # Use batch git operations for better performance
-        with tqdm(total=len(different_value_keys), desc="Checking keys with git") as pbar:
-            # Get last modification dates for all keys in a batch
-            source_dates = get_keys_last_modifications_batch(source_file, different_value_keys)
-            target_dates = get_keys_last_modifications_batch(target_file, different_value_keys)
-            
-            # Compare the dates for each key
-            for key in different_value_keys:
-                source_date = source_dates.get(key)
-                target_date = target_dates.get(key)
-                
-                # If both dates are available, compare them
-                if source_date and target_date:
-                    is_outdated = source_date > target_date
-                    if is_outdated:
-                        outdated_keys.add(key)
-                
-                pbar.update(1)
+        # Use batch git operations for O(1) performance - single operation for all keys
+        print(f"Checking {len(different_value_keys)} keys for outdated status...")
         
-        # Fall back to serial processing for any keys missing batch results
-        if len(different_value_keys) > len(outdated_keys):
-            missing_keys = [k for k in different_value_keys if k not in outdated_keys and (k not in source_dates or k not in target_dates)]
+        # Get last modification dates for all keys in a single batch operation
+        source_dates = get_keys_last_modifications_batch(source_file, different_value_keys)
+        target_dates = get_keys_last_modifications_batch(target_file, different_value_keys)
+        
+        # Compare the dates for each key - this is O(n) but very fast since it's just dict lookups
+        for key in different_value_keys:
+            source_date = source_dates.get(key)
+            target_date = target_dates.get(key)
             
-            # Process any keys that didn't get processed in the batch operation
-            if missing_keys:
-                with tqdm(total=len(missing_keys), desc="Checking remaining keys") as pbar:
-                    for key in missing_keys:
-                        is_outdated, _, _ = compare_key_modifications(source_file, target_file, key)
-                        if is_outdated:
-                            outdated_keys.add(key)
-                        pbar.update(1)
+            # If both dates are available, compare them
+            if source_date and target_date:
+                # Parse dates for comparison
+                try:
+                    # Handle different date formats that might come from git
+                    source_dt = datetime.fromisoformat(source_date.replace('Z', '+00:00'))
+                    target_dt = datetime.fromisoformat(target_date.replace('Z', '+00:00'))
+                    
+                    if source_dt > target_dt:
+                        outdated_keys.add(key)
+                except (ValueError, AttributeError):
+                    # If date parsing fails, skip this key rather than falling back to slow operations
+                    continue
+            # If either date is missing, we can't determine if it's outdated
+            # Skip rather than falling back to slow serial processing
                     
         return len(outdated_keys) > 0, outdated_keys
     except Exception as e:

@@ -157,7 +157,8 @@ class Config:
                 "provider": "algebras-ai",  # Default provider
                 "model": "gpt-4",     # Default model (for OpenAI)
                 # Provider options include: "openai", "algebras-ai"
-            }
+            },
+            "batch_size": 5  # Default batch size
         }
         
         self.save()
@@ -215,4 +216,30 @@ class Config:
                 return {}
             self.load()
         
-        return self.data.get("api", {}) 
+        return self.data.get("api", {})
+    
+    def has_setting(self, key: str) -> bool:
+        """Check if a setting exists in the configuration."""
+        if not self.data:
+            if not self.exists():
+                return False
+            self.load()
+        
+        return key in self.data
+    
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        """Get a setting from the configuration."""
+        if not self.data:
+            if not self.exists():
+                return default
+            self.load()
+        
+        return self.data.get(key, default)
+    
+    def set_setting(self, key: str, value: Any) -> None:
+        """Set a setting in the configuration."""
+        if not self.data:
+            self.load()
+        
+        self.data[key] = value
+        self.save() 

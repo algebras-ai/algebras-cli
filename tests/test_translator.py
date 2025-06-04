@@ -104,6 +104,11 @@ class TestTranslator:
         # Patch Config class
         monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
 
+        # Mock the cache to return None (cache miss)
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None
+        monkeypatch.setattr("algebras.services.translator.TranslationCache", lambda: mock_cache)
+
         # Initialize Translator
         translator = Translator()
 
@@ -125,6 +130,11 @@ class TestTranslator:
         # Ensure no API key in environment
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         
+        # Mock the cache to return None (cache miss)
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None
+        monkeypatch.setattr("algebras.services.translator.TranslationCache", lambda: mock_cache)
+
         # Set client to None
         monkeypatch.setattr("algebras.services.translator.OpenAI", lambda api_key: None)
 
@@ -396,6 +406,11 @@ class TestTranslator:
         # Ensure no API key in environment
         monkeypatch.delenv("ALGEBRAS_API_KEY", raising=False)
 
+        # Mock the cache to return None (cache miss)
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None
+        monkeypatch.setattr("algebras.services.translator.TranslationCache", lambda: mock_cache)
+
         # Initialize Translator
         translator = Translator()
 
@@ -416,6 +431,11 @@ class TestTranslator:
 
         # Mock environment variable
         monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        # Mock the cache to return None (cache miss)
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None
+        monkeypatch.setattr("algebras.services.translator.TranslationCache", lambda: mock_cache)
 
         # Mock requests.post to return an error
         mock_response = MagicMock()
