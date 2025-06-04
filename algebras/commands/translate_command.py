@@ -22,7 +22,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
            outdated_files: List[Tuple[str, str]] = None, 
            missing_keys_files: List[Tuple[str, Set[str], str]] = None,
            outdated_keys_files: List[Tuple[str, Set[str], str]] = None,
-           ui_safe: bool = False, verbose: bool = False, batch_size: Optional[int] = None) -> None:
+           ui_safe: bool = False, verbose: bool = False, batch_size: Optional[int] = None, 
+           glossary_id: Optional[str] = None) -> None:
     """
     Translate your application.
     
@@ -36,6 +37,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         ui_safe: If True, ensure translations will not be longer than original text
         verbose: If True, show detailed logs of the translation process
         batch_size: Override the batch size for translation processing
+        glossary_id: ID of the glossary to use for translation
     """
     config = Config()
 
@@ -169,7 +171,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             target_content, 
                             list(missing_keys), 
                             target_lang,
-                            ui_safe
+                            ui_safe,
+                            glossary_id
                         )
                     
                     # Translate modified keys
@@ -180,7 +183,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             target_content,
                             modified_keys,
                             target_lang,
-                            ui_safe
+                            ui_safe,
+                            glossary_id
                         )
                     
                     # Save updated content if there were changes
@@ -234,7 +238,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             target_content, 
                             list(missing_keys), 
                             target_lang,
-                            ui_safe
+                            ui_safe,
+                            glossary_id
                         )
                         
                         # Save updated content
@@ -282,7 +287,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 target_content,
                                 list(outdated_keys),
                                 target_lang,
-                                ui_safe
+                                ui_safe,
+                                glossary_id
                             )
                             
                             # Save updated content
@@ -440,7 +446,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             target_content, 
                             list(missing_keys), 
                             target_lang,
-                            ui_safe
+                            ui_safe,
+                            glossary_id
                         )
                         
                         # Save updated content
@@ -460,7 +467,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     # Translate the full file
                     click.echo(f"  {Fore.GREEN}Translating {source_basename} to {target_basename}...\x1b[0m")
                     try:
-                        translated_content = translator.translate_file(source_file, target_lang, ui_safe)
+                        translated_content = translator.translate_file(source_file, target_lang, ui_safe, glossary_id)
                         
                         # Save translated content
                         if source_file.endswith(".json"):

@@ -124,7 +124,7 @@ class Translator:
         # Initialize the translation cache
         self.cache = TranslationCache()
         
-    def translate_text(self, text: str, source_lang: str, target_lang: str, ui_safe: bool = False) -> str:
+    def translate_text(self, text: str, source_lang: str, target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> str:
         """
         Translate a text from source language to target language.
         
@@ -133,10 +133,15 @@ class Translator:
             source_lang: Source language code
             target_lang: Target language code
             ui_safe: If True, ensure translation will not be longer than the original text
+            glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
             
         Returns:
             Translated text
         """
+        # Resolve glossary_id from config if not provided
+        if glossary_id is None:
+            glossary_id = self.config.get_setting("api.glossary_id", "")
+        
         # Map language codes to ISO 2-letter format
         source_lang = map_language_code(source_lang)
         target_lang = map_language_code(target_lang)
@@ -154,7 +159,7 @@ class Translator:
         if provider == "openai":
             translation = self._translate_with_openai(text, source_lang, target_lang)
         elif provider == "algebras-ai":
-            translation = self._translate_with_algebras_ai(text, source_lang, target_lang, ui_safe)
+            translation = self._translate_with_algebras_ai(text, source_lang, target_lang, ui_safe, glossary_id)
         else:
             raise ValueError(f"Unsupported provider: {provider}")
         
@@ -201,7 +206,7 @@ class Translator:
         
         return response.choices[0].message.content.strip()
     
-    def _translate_with_algebras_ai(self, text: str, source_lang: str, target_lang: str, ui_safe: bool = False) -> str:
+    def _translate_with_algebras_ai(self, text: str, source_lang: str, target_lang: str, ui_safe: bool = False, glossary_id: str = "") -> str:
         """
         Translate text using Algebras AI API.
         
@@ -210,6 +215,7 @@ class Translator:
             source_lang: Source language code (already mapped to ISO 2-letter format, use 'auto' for automatic detection)
             target_lang: Target language code (already mapped to ISO 2-letter format)
             ui_safe: If True, ensures translation will be no more characters than original text
+            glossary_id: Glossary ID to use for translation
             
         Returns:
             Translated text
@@ -232,7 +238,7 @@ class Translator:
             "targetLanguage": target_lang,
             "textContent": text,
             "fileContent": "",
-            "glossaryId": "",
+            "glossaryId": glossary_id,
             "prompt": "",
             "flag": "true" if ui_safe else "false"
         }
@@ -258,7 +264,7 @@ class Translator:
         except Exception as e:
             raise Exception(f"Failed to translate with Algebras AI: {str(e)}")
     
-    def translate_file(self, file_path: str, target_lang: str, ui_safe: bool = False) -> Dict[str, Any]:
+    def translate_file(self, file_path: str, target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Translate a localization file to the target language.
         
@@ -266,6 +272,7 @@ class Translator:
             file_path: Path to the localization file
             target_lang: Target language code
             ui_safe: If True, ensure translations will not be longer than original text
+            glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
             
         Returns:
             Translated content as a dictionary
@@ -286,12 +293,12 @@ class Translator:
         source_lang = self.config.get_languages()[0]
         
         # Translate the content
-        translated = self._translate_nested_dict(content, source_lang, target_lang, ui_safe)
+        translated = self._translate_nested_dict(content, source_lang, target_lang, ui_safe, glossary_id)
         
         return translated
     
     def translate_missing_keys(self, source_content: Dict[str, Any], target_content: Dict[str, Any], 
-                              missing_keys: List[str], target_lang: str, ui_safe: bool = False) -> Dict[str, Any]:
+                              missing_keys: List[str], target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Translate only the missing keys in a target dictionary.
         
@@ -301,6 +308,7 @@ class Translator:
             missing_keys: List of dot-notation keys that are missing
             target_lang: Target language code
             ui_safe: If True, ensure translations will not be longer than original text
+            glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
             
         Returns:
             Updated target content with translated missing keys
@@ -321,7 +329,7 @@ class Translator:
             
             if isinstance(source_value, str):
                 # Translate the value
-                translated_value = self.translate_text(source_value, source_lang, target_lang, ui_safe)
+                translated_value = self.translate_text(source_value, source_lang, target_lang, ui_safe, glossary_id)
                 
                 # Update the target content with the translated value
                 self._set_nested_value(updated_content, key_parts, translated_value)
@@ -329,7 +337,7 @@ class Translator:
         return updated_content
     
     def translate_outdated_keys(self, source_content: Dict[str, Any], target_content: Dict[str, Any],
-                               outdated_keys: List[str], target_lang: str, ui_safe: bool = False) -> Dict[str, Any]:
+                               outdated_keys: List[str], target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Translate only the outdated keys in a target dictionary.
         
@@ -339,6 +347,7 @@ class Translator:
             outdated_keys: List of dot-notation keys that are outdated
             target_lang: Target language code
             ui_safe: If True, ensure translations will not be longer than original text
+            glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
             
         Returns:
             Updated target content with translated outdated keys
@@ -359,7 +368,7 @@ class Translator:
             
             if isinstance(source_value, str):
                 # Translate the value
-                translated_value = self.translate_text(source_value, source_lang, target_lang, ui_safe)
+                translated_value = self.translate_text(source_value, source_lang, target_lang, ui_safe, glossary_id)
                 
                 # Update the target content with the translated value
                 self._set_nested_value(updated_content, key_parts, translated_value)
@@ -406,7 +415,7 @@ class Translator:
                     current[part] = {}
                 current = current[part]
     
-    def _translate_nested_dict(self, data: Dict[str, Any], source_lang: str, target_lang: str, ui_safe: bool = False) -> Dict[str, Any]:
+    def _translate_nested_dict(self, data: Dict[str, Any], source_lang: str, target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Recursively translate a nested dictionary.
         
@@ -415,6 +424,7 @@ class Translator:
             source_lang: Source language code
             target_lang: Target language code
             ui_safe: If True, ensures translation will be no more characters than original text
+            glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
             
         Returns:
             Translated dictionary
@@ -464,7 +474,8 @@ class Translator:
                         text,
                         source_lang,
                         target_lang,
-                        ui_safe
+                        ui_safe,
+                        glossary_id
                     )
                     futures[j] = future
                 
@@ -499,7 +510,7 @@ class Translator:
                         dest_data[key] = translated_values[path_key]
                     else:
                         # Fallback to direct translation if not in batch results
-                        dest_data[key] = self.translate_text(value, source_lang, target_lang, ui_safe)
+                        dest_data[key] = self.translate_text(value, source_lang, target_lang, ui_safe, glossary_id)
                 else:
                     dest_data[key] = value
         
@@ -558,7 +569,7 @@ class Translator:
         return loaded_count
     
     def translate_missing_keys_batch(self, source_content: Dict[str, Any], target_content: Dict[str, Any],
-                                    missing_keys: List[str], target_lang: str, ui_safe: bool = False) -> Dict[str, Any]:
+                                    missing_keys: List[str], target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Translate missing keys in batches to avoid overloading the API.
         
@@ -568,6 +579,7 @@ class Translator:
             missing_keys: List of dot-notation keys that are missing
             target_lang: Target language code
             ui_safe: If True, ensure translations will not be longer than original text
+            glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
             
         Returns:
             Updated target content with translated missing keys
@@ -612,7 +624,8 @@ class Translator:
                             source_value,
                             source_lang,
                             target_lang,
-                            ui_safe
+                            ui_safe,
+                            glossary_id
                         )
                         futures[key_path] = (future, key_parts)
                 
@@ -632,7 +645,7 @@ class Translator:
         return updated_content
     
     def translate_outdated_keys_batch(self, source_content: Dict[str, Any], target_content: Dict[str, Any],
-                                     outdated_keys: List[str], target_lang: str, ui_safe: bool = False) -> Dict[str, Any]:
+                                     outdated_keys: List[str], target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Translate outdated keys in batches to avoid overloading the API.
         
@@ -642,6 +655,7 @@ class Translator:
             outdated_keys: List of dot-notation keys that are outdated
             target_lang: Target language code
             ui_safe: If True, ensure translations will not be longer than original text
+            glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
             
         Returns:
             Updated target content with translated outdated keys
@@ -686,7 +700,8 @@ class Translator:
                             source_value,
                             source_lang,
                             target_lang,
-                            ui_safe
+                            ui_safe,
+                            glossary_id
                         )
                         futures[key_path] = (future, key_parts)
                 

@@ -228,18 +228,44 @@ class Config:
         return key in self.data
     
     def get_setting(self, key: str, default: Any = None) -> Any:
-        """Get a setting from the configuration."""
+        """Get a setting from the configuration. Supports dot notation for nested keys."""
         if not self.data:
             if not self.exists():
                 return default
             self.load()
         
+        # Handle nested keys using dot notation
+        if "." in key:
+            keys = key.split(".")
+            current = self.data
+            for k in keys:
+                if isinstance(current, dict) and k in current:
+                    current = current[k]
+                else:
+                    return default
+            return current
+        
         return self.data.get(key, default)
     
     def set_setting(self, key: str, value: Any) -> None:
-        """Set a setting in the configuration."""
+        """Set a setting in the configuration. Supports dot notation for nested keys."""
         if not self.data:
             self.load()
         
-        self.data[key] = value
+        # Handle nested keys using dot notation
+        if "." in key:
+            keys = key.split(".")
+            current = self.data
+            
+            # Navigate to the parent of the final key, creating nested dicts as needed
+            for k in keys[:-1]:
+                if k not in current or not isinstance(current[k], dict):
+                    current[k] = {}
+                current = current[k]
+            
+            # Set the final key
+            current[keys[-1]] = value
+        else:
+            self.data[key] = value
+        
         self.save() 

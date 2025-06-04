@@ -9,7 +9,7 @@ from colorama import Fore
 from algebras.config import Config
 
 
-def execute(provider: str = None, model: str = None, path_rules: str = None, batch_size: int = None) -> None:
+def execute(provider: str = None, model: str = None, path_rules: str = None, batch_size: int = None, glossary_id: str = None) -> None:
     """
     Configure your Algebras project settings.
     
@@ -18,6 +18,7 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         model: Set the model for the provider (only applicable for some providers)
         path_rules: Set the path rules for file patterns to process
         batch_size: Set the batch size for translation processing
+        glossary_id: Set the glossary ID for Algebras AI translations
     """
     config = Config()
     
@@ -60,6 +61,14 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         config.data["api"]["model"] = model
         click.echo(f"{Fore.GREEN}Model set to '{model}'.\x1b[0m")
     
+    # Handle glossary_id change
+    if glossary_id is not None:
+        config.set_setting("api.glossary_id", glossary_id)
+        if glossary_id:
+            click.echo(f"{Fore.GREEN}Glossary ID set to '{glossary_id}'.\x1b[0m")
+        else:
+            click.echo(f"{Fore.GREEN}Glossary ID cleared.\x1b[0m")
+    
     # Handle path_rules change
     if path_rules:
         # Split the path rules by comma
@@ -78,10 +87,17 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         click.echo(f"{Fore.GREEN}Batch size set to {batch_size}.\x1b[0m")
     
     # If no arguments provided, show current configuration
-    if not provider and not model and not path_rules and batch_size is None:
+    if not provider and not model and not path_rules and batch_size is None and glossary_id is None:
         click.echo(f"\nCurrent configuration:")
         click.echo(f"  Provider: {Fore.BLUE}{current_provider}\x1b[0m")
         click.echo(f"  Model: {Fore.BLUE}{config.data['api'].get('model', 'Not set')}\x1b[0m")
+        
+        # Show glossary ID
+        current_glossary_id = config.get_setting("api.glossary_id", "")
+        if current_glossary_id:
+            click.echo(f"  Glossary ID: {Fore.BLUE}{current_glossary_id}\x1b[0m")
+        else:
+            click.echo(f"  Glossary ID: {Fore.BLUE}Not set\x1b[0m")
         
         # Show path rules
         path_rules_list = config.data.get('path_rules', [])
@@ -114,6 +130,7 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         
         click.echo(f"\nTo change the provider, run: {Fore.BLUE}algebras configure --provider <provider>\x1b[0m")
         click.echo(f"To change the model, run: {Fore.BLUE}algebras configure --model <model>\x1b[0m")
+        click.echo(f"To set the glossary ID, run: {Fore.BLUE}algebras configure --glossary-id <glossary_id>\x1b[0m")
         click.echo(f"To set path rules, run: {Fore.BLUE}algebras configure --path-rules \"pattern1,pattern2,...\"\x1b[0m")
         return
     

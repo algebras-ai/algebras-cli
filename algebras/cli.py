@@ -47,9 +47,10 @@ def add(language):
 @click.option("--ui-safe", is_flag=True, help="Ensure translations will not exceed the original text length.")
 @click.option("--verbose", is_flag=True, help="Show detailed logs of the translation process.")
 @click.option("--batch-size", type=int, help="Override the batch size for translation processing.")
-def translate(language, force, only_missing, ui_safe, verbose, batch_size):
+@click.option("--glossary-id", help="Glossary ID to use for Algebras AI translations.")
+def translate(language, force, only_missing, ui_safe, verbose, batch_size, glossary_id):
     """Translate your application."""
-    translate_command.execute(language, force, only_missing, ui_safe=ui_safe, verbose=verbose, batch_size=batch_size)
+    translate_command.execute(language, force, only_missing, ui_safe=ui_safe, verbose=verbose, batch_size=batch_size, glossary_id=glossary_id)
 
 
 @cli.command("update")
@@ -95,9 +96,10 @@ def status(language):
 @click.option("--model", help="Set the model for the provider (only applicable for some providers).")
 @click.option("--path-rules", help="Set the path rules for file patterns to process (comma separated list or glob patterns).")
 @click.option("--batch-size", type=int, help="Set the batch size for translation processing (default: 5).")
-def configure(provider, model, path_rules, batch_size):
+@click.option("--glossary-id", help="Set the glossary ID for Algebras AI translations.")
+def configure(provider, model, path_rules, batch_size, glossary_id):
     """Configure your Algebras project settings."""
-    configure_command.execute(provider, model, path_rules, batch_size)
+    configure_command.execute(provider, model, path_rules, batch_size, glossary_id)
 
 
 def main():

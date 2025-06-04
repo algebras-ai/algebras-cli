@@ -183,7 +183,7 @@ class TestTranslator:
         m = mock_open(read_data=json.dumps(json_content))
         
         # Mock translate_text to return expected translations
-        def mock_translate_text(text, source_lang, target_lang, ui_safe=False):
+        def mock_translate_text(text, source_lang, target_lang, ui_safe=False, glossary_id=None):
             if text == "Welcome to our application!":
                 return "Bienvenue dans notre application!"
             elif text == "Login":
@@ -249,7 +249,7 @@ class TestTranslator:
         monkeypatch.setattr(yaml, "safe_load", lambda f: parsed_yaml)
         
         # Mock translate_text to return expected translations
-        def mock_translate_text(text, source_lang, target_lang, ui_safe=False):
+        def mock_translate_text(text, source_lang, target_lang, ui_safe=False, glossary_id=None):
             if text == "Welcome to our application!":
                 return "Bienvenue dans notre application!"
             elif text == "Login":
@@ -324,7 +324,7 @@ class TestTranslator:
         monkeypatch.setenv("OPENAI_API_KEY", "test-api-key")
 
         # Mock translate_text to return expected translations
-        def mock_translate_text(text, source_lang, target_lang, ui_safe=False):
+        def mock_translate_text(text, source_lang, target_lang, ui_safe=False, glossary_id=None):
             if text == "Welcome to our application!":
                 return "Bienvenue dans notre application!"
             elif text == "Login":
