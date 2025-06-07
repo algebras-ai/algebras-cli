@@ -9,7 +9,7 @@ from colorama import Fore
 from algebras.config import Config
 
 
-def execute(provider: str = None, model: str = None, path_rules: str = None, batch_size: int = None, glossary_id: str = None) -> None:
+def execute(provider: str = None, model: str = None, path_rules: str = None, batch_size: int = None, glossary_id: str = None, prompt: str = None) -> None:
     """
     Configure your Algebras project settings.
     
@@ -19,6 +19,7 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         path_rules: Set the path rules for file patterns to process
         batch_size: Set the batch size for translation processing
         glossary_id: Set the glossary ID for Algebras AI translations
+        prompt: Set a default prompt for translations
     """
     config = Config()
     
@@ -86,8 +87,17 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         config.set_setting("batch_size", batch_size)
         click.echo(f"{Fore.GREEN}Batch size set to {batch_size}.\x1b[0m")
     
+    # Handle prompt change
+    if prompt is not None:
+        config.set_setting("api.prompt", prompt)
+        if prompt:
+            click.echo(f"{Fore.GREEN}Default prompt set.\x1b[0m")
+            click.echo(f"Prompt preview: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
+        else:
+            click.echo(f"{Fore.GREEN}Default prompt cleared.\x1b[0m")
+    
     # If no arguments provided, show current configuration
-    if not provider and not model and not path_rules and batch_size is None and glossary_id is None:
+    if not provider and not model and not path_rules and batch_size is None and glossary_id is None and prompt is None:
         click.echo(f"\nCurrent configuration:")
         click.echo(f"  Provider: {Fore.BLUE}{current_provider}\x1b[0m")
         click.echo(f"  Model: {Fore.BLUE}{config.data['api'].get('model', 'Not set')}\x1b[0m")
@@ -98,6 +108,13 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
             click.echo(f"  Glossary ID: {Fore.BLUE}{current_glossary_id}\x1b[0m")
         else:
             click.echo(f"  Glossary ID: {Fore.BLUE}Not set\x1b[0m")
+        
+        # Show prompt
+        current_prompt = config.get_setting("api.prompt", "")
+        if current_prompt:
+            click.echo(f"  Default prompt: {Fore.BLUE}{current_prompt[:50]}{'...' if len(current_prompt) > 50 else ''}\x1b[0m")
+        else:
+            click.echo(f"  Default prompt: {Fore.BLUE}Not set\x1b[0m")
         
         # Show path rules
         path_rules_list = config.data.get('path_rules', [])
@@ -132,6 +149,7 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         click.echo(f"To change the model, run: {Fore.BLUE}algebras configure --model <model>\x1b[0m")
         click.echo(f"To set the glossary ID, run: {Fore.BLUE}algebras configure --glossary-id <glossary_id>\x1b[0m")
         click.echo(f"To set path rules, run: {Fore.BLUE}algebras configure --path-rules \"pattern1,pattern2,...\"\x1b[0m")
+        click.echo(f"To set a default prompt, run: {Fore.BLUE}algebras configure --prompt \"your custom prompt\"\x1b[0m")
         return
     
     # Save configuration

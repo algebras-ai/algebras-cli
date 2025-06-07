@@ -30,7 +30,7 @@ class TranslationCache:
     
     _instance = None
     _cache = {}
-    _max_size = 4096
+    _max_size = 4096 * 100  # Approximately 10MB
     _cache_file = os.path.join(os.path.expanduser("~"), ".algebras.cache")
     
     def __new__(cls):
@@ -124,6 +124,18 @@ class Translator:
         # Initialize the translation cache
         self.cache = TranslationCache()
         
+        # Initialize custom prompt
+        self.custom_prompt = ""
+        
+    def set_custom_prompt(self, prompt: str) -> None:
+        """
+        Set a custom prompt to be used for translations.
+        
+        Args:
+            prompt: Custom prompt text to use for translation
+        """
+        self.custom_prompt = prompt
+        
     def translate_text(self, text: str, source_lang: str, target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> str:
         """
         Translate a text from source language to target language.
@@ -186,7 +198,26 @@ class Translator:
         if not self.client:
             raise ValueError("OpenAI API key not found. Set the OPENAI_API_KEY environment variable.")
         
-        prompt = f"""
+        # Build the prompt with custom prompt if provided
+        base_prompt = f"""
+        Translate the following text from {source_lang} to {target_lang}.
+        Preserve all formatting, variables, and placeholders.
+        Only return the translated text, nothing else.
+        """
+        
+        if self.custom_prompt:
+            prompt = f"""
+        {self.custom_prompt}
+        
+        Translate the following text from {source_lang} to {target_lang}.
+        Preserve all formatting, variables, and placeholders.
+        Only return the translated text, nothing else.
+        
+        Text to translate:
+        {text}
+        """
+        else:
+            prompt = f"""
         Translate the following text from {source_lang} to {target_lang}.
         Preserve all formatting, variables, and placeholders.
         Only return the translated text, nothing else.
@@ -239,12 +270,11 @@ class Translator:
             "textContent": text,
             "fileContent": "",
             "glossaryId": glossary_id,
-            "prompt": "",
+            "prompt": self.custom_prompt,
             "flag": "true" if ui_safe else "false"
         }
         
         try:
-            print(data)
             response = requests.post(url, headers=headers, files={
                 "sourceLanguage": (None, data["sourceLanguage"]),
                 "targetLanguage": (None, data["targetLanguage"]),

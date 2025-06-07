@@ -23,7 +23,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
            missing_keys_files: List[Tuple[str, Set[str], str]] = None,
            outdated_keys_files: List[Tuple[str, Set[str], str]] = None,
            ui_safe: bool = False, verbose: bool = False, batch_size: Optional[int] = None, 
-           glossary_id: Optional[str] = None) -> None:
+           glossary_id: Optional[str] = None, prompt_file: Optional[str] = None) -> None:
     """
     Translate your application.
     
@@ -38,6 +38,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         verbose: If True, show detailed logs of the translation process
         batch_size: Override the batch size for translation processing
         glossary_id: ID of the glossary to use for translation
+        prompt_file: Path to a file containing a custom prompt for translation
     """
     config = Config()
 
@@ -83,6 +84,36 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
     translator = Translator()
     if verbose:
         click.echo(f"{Fore.BLUE}Initialized translator\x1b[0m")
+    
+    # Handle custom prompt from file or config
+    custom_prompt = None
+    if prompt_file:
+        try:
+            if not os.path.exists(prompt_file):
+                click.echo(f"{Fore.RED}Prompt file not found: {prompt_file}\x1b[0m")
+                return
+            
+            with open(prompt_file, "r", encoding="utf-8") as f:
+                custom_prompt = f.read().strip()
+            
+            if verbose:
+                click.echo(f"{Fore.BLUE}Loaded custom prompt from file: {prompt_file}\x1b[0m")
+                click.echo(f"{Fore.BLUE}Prompt preview: {custom_prompt[:100]}{'...' if len(custom_prompt) > 100 else ''}\x1b[0m")
+        except Exception as e:
+            click.echo(f"{Fore.RED}Error reading prompt file {prompt_file}: {str(e)}\x1b[0m")
+            return
+    else:
+        # Check if prompt is configured in the config file
+        custom_prompt = config.get_setting("api.prompt", "")
+        if custom_prompt and verbose:
+            click.echo(f"{Fore.BLUE}Using prompt from config file\x1b[0m")
+            click.echo(f"{Fore.BLUE}Prompt preview: {custom_prompt[:100]}{'...' if len(custom_prompt) > 100 else ''}\x1b[0m")
+    
+    # Set the custom prompt in the translator if provided
+    if custom_prompt:
+        translator.set_custom_prompt(custom_prompt)
+        if verbose:
+            click.echo(f"{Fore.BLUE}Custom prompt set for translation\x1b[0m")
     
     # Override batch size if specified
     if batch_size is not None:
