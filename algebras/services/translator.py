@@ -79,10 +79,13 @@ class TranslationCache:
         self._cache[key] = value
         self._save_cache()
     
-    def get_cache_key(self, text, source_lang, target_lang, ui_safe):
+    def get_cache_key(self, text, source_lang, target_lang, ui_safe, prompt=""):
         """Generate a unique cache key for the translation parameters."""
-        key_str = f"{text}|{source_lang}|{target_lang}|{ui_safe}"
-        return hashlib.md5(key_str.encode()).hexdigest()
+        if prompt:
+            prompt_hash = hashlib.md5(prompt.encode()).hexdigest()[:8]
+            return f"{text}|{source_lang}|{target_lang}|{ui_safe}|{prompt_hash}"
+        else:
+            return f"{text}|{source_lang}|{target_lang}|{ui_safe}"
     
     def clear(self):
         """Clear the cache."""
@@ -159,7 +162,7 @@ class Translator:
         target_lang = map_language_code(target_lang)
         
         # Check cache first
-        cache_key = self.cache.get_cache_key(text, source_lang, target_lang, ui_safe)
+        cache_key = self.cache.get_cache_key(text, source_lang, target_lang, ui_safe, self.custom_prompt)
         cached_translation = self.cache.get(cache_key)
         if cached_translation:
             print(f"Cache hit: Using cached translation for '{text[:30]}...' ({source_lang} → {target_lang})")
@@ -590,7 +593,7 @@ class Translator:
         # Load translations into cache
         loaded_count = 0
         for text in all_strings:
-            cache_key = self.cache.get_cache_key(text, source_lang, source_lang, False)
+            cache_key = self.cache.get_cache_key(text, source_lang, source_lang, False, "")
             if not self.cache.get(cache_key):
                 self.cache.set(cache_key, text)  # Set identity translation (same language)
                 loaded_count += 1
