@@ -124,7 +124,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
             if verbose:
                 click.echo(f"{Fore.BLUE}Using batch size: {batch_size}\x1b[0m")
     elif verbose:
-        click.echo(f"{Fore.BLUE}Using default batch size: {translator.batch_size}\x1b[0m")
+        click.echo(f"{Fore.BLUE}Using default batch size: {translator.batch_size} (20 strings per batch for Algebras AI)\x1b[0m")
     
     # Initialize lists if they're None
     outdated_files = outdated_files or []
@@ -259,8 +259,6 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
-                    print(f"Source content: {source_content}")
-                    print(f"Target content: {target_content}")
                     # Translate missing keys
                     if missing_keys:
                         click.echo(f"  {Fore.GREEN}Translating {len(missing_keys)} missing keys...{Fore.RESET}")
@@ -426,10 +424,6 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         target_file = os.path.join(target_dirname, target_basename)
                 
                 os.makedirs(target_dirname, exist_ok=True)
-                
-                # Log the file paths for debugging
-                print(f"  Source file: {source_file}")
-                print(f"  Target file: {target_file}")
                 
                 # Check if target file already exists and is up to date
                 if not force and os.path.exists(target_file):
