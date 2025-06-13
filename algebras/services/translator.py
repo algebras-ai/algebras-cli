@@ -117,6 +117,11 @@ class Translator:
         if self.config.has_setting("batch_size"):
             self.batch_size = int(self.config.get_setting("batch_size"))
         
+        # Get max parallel batches from config, default to 5
+        self.max_parallel_batches = int(os.environ.get("ALGEBRAS_MAX_PARALLEL_BATCHES", 5))
+        if self.config.has_setting("max_parallel_batches"):
+            self.max_parallel_batches = int(self.config.get_setting("max_parallel_batches"))
+        
         # Set up OpenAI client if available
         openai_api_key = os.environ.get("OPENAI_API_KEY")
         if openai_api_key:
@@ -558,26 +563,61 @@ class Translator:
         translated_values = {}
         provider = self.api_config.get("provider", "openai")
         
-        for i in range(0, total_strings, self.batch_size):
-            batch = string_items[i:i + self.batch_size]
-            batch_paths = paths[i:i + self.batch_size]
-            batch_idx = i // self.batch_size + 1
+        if provider == "algebras-ai":
+            # Use parallel batch processing for Algebras AI
+            print(f"Using parallel batch processing with {self.max_parallel_batches} concurrent batches")
             
-            print(f"Processing batch {batch_idx}/{num_batches} ({len(batch)} items)")
+            # Create batch data
+            batches = []
+            for i in range(0, total_strings, self.batch_size):
+                batch = string_items[i:i + self.batch_size]
+                batch_paths = paths[i:i + self.batch_size]
+                batch_idx = i // self.batch_size + 1
+                batches.append((batch, batch_paths, batch_idx))
             
-            try:
-                if provider == "algebras-ai":
-                    # Use batch translation for Algebras AI
-                    translated_batch = self._translate_with_algebras_ai_batch(
+            # Process batches in parallel using ThreadPoolExecutor
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_parallel_batches) as executor:
+                # Submit all batch translation tasks
+                future_to_batch = {}
+                for batch, batch_paths, batch_idx in batches:
+                    future = executor.submit(
+                        self._translate_with_algebras_ai_batch,
                         batch, source_lang, target_lang, ui_safe, glossary_id
                     )
+                    future_to_batch[future] = (batch, batch_paths, batch_idx)
+                
+                # Collect results as they complete
+                completed_batches = 0
+                for future in concurrent.futures.as_completed(future_to_batch):
+                    batch, batch_paths, batch_idx = future_to_batch[future]
+                    completed_batches += 1
                     
-                    # Store results with their paths
-                    for j, translated_text in enumerate(translated_batch):
-                        path_key = tuple(batch_paths[j])  # Convert list to tuple for dict key
-                        translated_values[path_key] = translated_text
-                        print(f"  ✓ Translated: {'.'.join(str(p) for p in batch_paths[j])}")
-                else:
+                    try:
+                        translated_batch = future.result()
+                        
+                        # Store results with their paths
+                        for j, translated_text in enumerate(translated_batch):
+                            path_key = tuple(batch_paths[j])  # Convert list to tuple for dict key
+                            translated_values[path_key] = translated_text
+                        
+                        print(f"Completed batch {batch_idx}/{num_batches} ({completed_batches}/{num_batches} total completed)")
+                        for j in range(len(batch)):
+                            print(f"  ✓ Translated: {'.'.join(str(p) for p in batch_paths[j])}")
+                    
+                    except Exception as e:
+                        print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
+                        # Re-raise the exception instead of falling back to individual translations
+                        raise e
+        else:
+            # Use sequential batch processing for other providers (like OpenAI)
+            for i in range(0, total_strings, self.batch_size):
+                batch = string_items[i:i + self.batch_size]
+                batch_paths = paths[i:i + self.batch_size]
+                batch_idx = i // self.batch_size + 1
+                
+                print(f"Processing batch {batch_idx}/{num_batches} ({len(batch)} items)")
+                
+                try:
                     # Use individual translations for other providers (like OpenAI)
                     # Use ThreadPoolExecutor for parallel processing within the batch
                     with concurrent.futures.ThreadPoolExecutor(max_workers=self.batch_size) as executor:
@@ -603,20 +643,12 @@ class Translator:
                                 print(f"  ✓ Translated: {'.'.join(str(p) for p in batch_paths[j])}")
                             except Exception as e:
                                 print(f"  ✗ Error translating {batch[j]}: {str(e)}")
-                
-                print(f"Completed batch {batch_idx}/{num_batches}")
-            except Exception as e:
-                print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
-                # Fall back to individual translations for this batch
-                print(f"  Falling back to individual translations for batch {batch_idx}")
-                for j, text in enumerate(batch):
-                    try:
-                        translated_text = self.translate_text(text, source_lang, target_lang, ui_safe, glossary_id)
-                        path_key = tuple(batch_paths[j])
-                        translated_values[path_key] = translated_text
-                        print(f"  ✓ Translated (fallback): {'.'.join(str(p) for p in batch_paths[j])}")
-                    except Exception as individual_error:
-                        print(f"  ✗ Error translating {text}: {str(individual_error)}")
+                    
+                    print(f"Completed batch {batch_idx}/{num_batches}")
+                except Exception as e:
+                    print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
+                    # Re-raise the exception instead of falling back to individual translations
+                    raise e
         
         # Build the result dictionary with translations
         result = {}
@@ -746,27 +778,62 @@ class Translator:
         
         provider = self.api_config.get("provider", "openai")
         
-        # Process each batch
-        for i in range(0, total_keys, self.batch_size):
-            batch_texts = texts_to_translate[i:i + self.batch_size]
-            batch_key_paths = key_paths_list[i:i + self.batch_size]
-            batch_key_parts = key_parts_list[i:i + self.batch_size]
-            batch_idx = i // self.batch_size + 1
+        if provider == "algebras-ai":
+            # Use parallel batch processing for Algebras AI
+            print(f"Using parallel batch processing with {self.max_parallel_batches} concurrent batches")
             
-            print(f"Processing batch {batch_idx}/{num_batches} ({len(batch_texts)} keys)")
+            # Create batch data
+            batches = []
+            for i in range(0, total_keys, self.batch_size):
+                batch_texts = texts_to_translate[i:i + self.batch_size]
+                batch_key_paths = key_paths_list[i:i + self.batch_size]
+                batch_key_parts = key_parts_list[i:i + self.batch_size]
+                batch_idx = i // self.batch_size + 1
+                batches.append((batch_texts, batch_key_paths, batch_key_parts, batch_idx))
             
-            try:
-                if provider == "algebras-ai":
-                    # Use batch translation for Algebras AI
-                    translated_batch = self._translate_with_algebras_ai_batch(
+            # Process batches in parallel using ThreadPoolExecutor
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_parallel_batches) as executor:
+                # Submit all batch translation tasks
+                future_to_batch = {}
+                for batch_texts, batch_key_paths, batch_key_parts, batch_idx in batches:
+                    future = executor.submit(
+                        self._translate_with_algebras_ai_batch,
                         batch_texts, source_lang, target_lang, ui_safe, glossary_id
                     )
+                    future_to_batch[future] = (batch_texts, batch_key_paths, batch_key_parts, batch_idx)
+                
+                # Collect results as they complete
+                completed_batches = 0
+                for future in concurrent.futures.as_completed(future_to_batch):
+                    batch_texts, batch_key_paths, batch_key_parts, batch_idx = future_to_batch[future]
+                    completed_batches += 1
                     
-                    # Update content with translated values
-                    for j, translated_value in enumerate(translated_batch):
-                        self._set_nested_value(updated_content, batch_key_parts[j], translated_value)
-                        print(f"  ✓ Translated: {batch_key_paths[j]}")
-                else:
+                    try:
+                        translated_batch = future.result()
+                        
+                        # Update content with translated values
+                        for j, translated_value in enumerate(translated_batch):
+                            self._set_nested_value(updated_content, batch_key_parts[j], translated_value)
+                        
+                        print(f"Completed batch {batch_idx}/{num_batches} ({completed_batches}/{num_batches} total completed)")
+                        for j in range(len(batch_texts)):
+                            print(f"  ✓ Translated: {batch_key_paths[j]}")
+                    
+                    except Exception as e:
+                        print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
+                        # Re-raise the exception instead of falling back to individual translations
+                        raise e
+        else:
+            # Use sequential batch processing for other providers (like OpenAI)
+            for i in range(0, total_keys, self.batch_size):
+                batch_texts = texts_to_translate[i:i + self.batch_size]
+                batch_key_paths = key_paths_list[i:i + self.batch_size]
+                batch_key_parts = key_parts_list[i:i + self.batch_size]
+                batch_idx = i // self.batch_size + 1
+                
+                print(f"Processing batch {batch_idx}/{num_batches} ({len(batch_texts)} keys)")
+                
+                try:
                     # Use individual translations for other providers (like OpenAI)
                     # Use ThreadPoolExecutor for parallel processing within each batch
                     with concurrent.futures.ThreadPoolExecutor(max_workers=self.batch_size) as executor:
@@ -791,19 +858,12 @@ class Translator:
                                 print(f"  ✓ Translated: {batch_key_paths[j]}")
                             except Exception as e:
                                 print(f"  ✗ Error translating {batch_key_paths[j]}: {str(e)}")
-                
-                print(f"Completed batch {batch_idx}/{num_batches}")
-            except Exception as e:
-                print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
-                # Fall back to individual translations for this batch
-                print(f"  Falling back to individual translations for batch {batch_idx}")
-                for j, text in enumerate(batch_texts):
-                    try:
-                        translated_value = self.translate_text(text, source_lang, target_lang, ui_safe, glossary_id)
-                        self._set_nested_value(updated_content, batch_key_parts[j], translated_value)
-                        print(f"  ✓ Translated (fallback): {batch_key_paths[j]}")
-                    except Exception as individual_error:
-                        print(f"  ✗ Error translating {batch_key_paths[j]}: {str(individual_error)}")
+                    
+                    print(f"Completed batch {batch_idx}/{num_batches}")
+                except Exception as e:
+                    print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
+                    # Re-raise the exception instead of falling back to individual translations
+                    raise e
         
         return updated_content
     
@@ -858,27 +918,62 @@ class Translator:
         
         provider = self.api_config.get("provider", "openai")
         
-        # Process each batch
-        for i in range(0, total_keys, self.batch_size):
-            batch_texts = texts_to_translate[i:i + self.batch_size]
-            batch_key_paths = key_paths_list[i:i + self.batch_size]
-            batch_key_parts = key_parts_list[i:i + self.batch_size]
-            batch_idx = i // self.batch_size + 1
+        if provider == "algebras-ai":
+            # Use parallel batch processing for Algebras AI
+            print(f"Using parallel batch processing with {self.max_parallel_batches} concurrent batches")
             
-            print(f"Processing batch {batch_idx}/{num_batches} ({len(batch_texts)} keys)")
+            # Create batch data
+            batches = []
+            for i in range(0, total_keys, self.batch_size):
+                batch_texts = texts_to_translate[i:i + self.batch_size]
+                batch_key_paths = key_paths_list[i:i + self.batch_size]
+                batch_key_parts = key_parts_list[i:i + self.batch_size]
+                batch_idx = i // self.batch_size + 1
+                batches.append((batch_texts, batch_key_paths, batch_key_parts, batch_idx))
             
-            try:
-                if provider == "algebras-ai":
-                    # Use batch translation for Algebras AI
-                    translated_batch = self._translate_with_algebras_ai_batch(
+            # Process batches in parallel using ThreadPoolExecutor
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_parallel_batches) as executor:
+                # Submit all batch translation tasks
+                future_to_batch = {}
+                for batch_texts, batch_key_paths, batch_key_parts, batch_idx in batches:
+                    future = executor.submit(
+                        self._translate_with_algebras_ai_batch,
                         batch_texts, source_lang, target_lang, ui_safe, glossary_id
                     )
+                    future_to_batch[future] = (batch_texts, batch_key_paths, batch_key_parts, batch_idx)
+                
+                # Collect results as they complete
+                completed_batches = 0
+                for future in concurrent.futures.as_completed(future_to_batch):
+                    batch_texts, batch_key_paths, batch_key_parts, batch_idx = future_to_batch[future]
+                    completed_batches += 1
                     
-                    # Update content with translated values
-                    for j, translated_value in enumerate(translated_batch):
-                        self._set_nested_value(updated_content, batch_key_parts[j], translated_value)
-                        print(f"  ✓ Translated: {batch_key_paths[j]}")
-                else:
+                    try:
+                        translated_batch = future.result()
+                        
+                        # Update content with translated values
+                        for j, translated_value in enumerate(translated_batch):
+                            self._set_nested_value(updated_content, batch_key_parts[j], translated_value)
+                        
+                        print(f"Completed batch {batch_idx}/{num_batches} ({completed_batches}/{num_batches} total completed)")
+                        for j in range(len(batch_texts)):
+                            print(f"  ✓ Translated: {batch_key_paths[j]}")
+                    
+                    except Exception as e:
+                        print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
+                        # Re-raise the exception instead of falling back to individual translations
+                        raise e
+        else:
+            # Use sequential batch processing for other providers (like OpenAI)
+            for i in range(0, total_keys, self.batch_size):
+                batch_texts = texts_to_translate[i:i + self.batch_size]
+                batch_key_paths = key_paths_list[i:i + self.batch_size]
+                batch_key_parts = key_parts_list[i:i + self.batch_size]
+                batch_idx = i // self.batch_size + 1
+                
+                print(f"Processing batch {batch_idx}/{num_batches} ({len(batch_texts)} keys)")
+                
+                try:
                     # Use individual translations for other providers (like OpenAI)
                     # Use ThreadPoolExecutor for parallel processing within each batch
                     with concurrent.futures.ThreadPoolExecutor(max_workers=self.batch_size) as executor:
@@ -903,18 +998,11 @@ class Translator:
                                 print(f"  ✓ Translated: {batch_key_paths[j]}")
                             except Exception as e:
                                 print(f"  ✗ Error translating {batch_key_paths[j]}: {str(e)}")
-                
-                print(f"Completed batch {batch_idx}/{num_batches}")
-            except Exception as e:
-                print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
-                # Fall back to individual translations for this batch
-                print(f"  Falling back to individual translations for batch {batch_idx}")
-                for j, text in enumerate(batch_texts):
-                    try:
-                        translated_value = self.translate_text(text, source_lang, target_lang, ui_safe, glossary_id)
-                        self._set_nested_value(updated_content, batch_key_parts[j], translated_value)
-                        print(f"  ✓ Translated (fallback): {batch_key_paths[j]}")
-                    except Exception as individual_error:
-                        print(f"  ✗ Error translating {batch_key_paths[j]}: {str(individual_error)}")
+                    
+                    print(f"Completed batch {batch_idx}/{num_batches}")
+                except Exception as e:
+                    print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
+                    # Re-raise the exception instead of falling back to individual translations
+                    raise e
         
         return updated_content 

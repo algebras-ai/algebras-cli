@@ -23,7 +23,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
            missing_keys_files: List[Tuple[str, Set[str], str]] = None,
            outdated_keys_files: List[Tuple[str, Set[str], str]] = None,
            ui_safe: bool = False, verbose: bool = False, batch_size: Optional[int] = None, 
-           glossary_id: Optional[str] = None, prompt_file: Optional[str] = None) -> None:
+           max_parallel_batches: Optional[int] = None, glossary_id: Optional[str] = None, prompt_file: Optional[str] = None) -> None:
     """
     Translate your application.
     
@@ -37,6 +37,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         ui_safe: If True, ensure translations will not be longer than original text
         verbose: If True, show detailed logs of the translation process
         batch_size: Override the batch size for translation processing
+        max_parallel_batches: Override the maximum number of parallel batches for translation processing
         glossary_id: ID of the glossary to use for translation
         prompt_file: Path to a file containing a custom prompt for translation
     """
@@ -125,6 +126,17 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                 click.echo(f"{Fore.BLUE}Using batch size: {batch_size}\x1b[0m")
     elif verbose:
         click.echo(f"{Fore.BLUE}Using default batch size: {translator.batch_size} (20 strings per batch for Algebras AI)\x1b[0m")
+    
+    # Override max parallel batches if specified
+    if max_parallel_batches is not None:
+        if max_parallel_batches < 1:
+            click.echo(f"{Fore.RED}Max parallel batches must be at least 1. Using default max parallel batches.\x1b[0m")
+        else:
+            translator.max_parallel_batches = max_parallel_batches
+            if verbose:
+                click.echo(f"{Fore.BLUE}Using max parallel batches: {max_parallel_batches}\x1b[0m")
+    elif verbose:
+        click.echo(f"{Fore.BLUE}Using default max parallel batches: {translator.max_parallel_batches}\x1b[0m")
     
     # Initialize lists if they're None
     outdated_files = outdated_files or []

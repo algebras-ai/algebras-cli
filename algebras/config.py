@@ -158,7 +158,8 @@ class Config:
                 "model": "gpt-4",     # Default model (for OpenAI)
                 # Provider options include: "openai", "algebras-ai"
             },
-            "batch_size": 5  # Default batch size
+            "batch_size": 5,  # Default batch size
+            "max_parallel_batches": 5  # Default max parallel batches
         }
         
         self.save()

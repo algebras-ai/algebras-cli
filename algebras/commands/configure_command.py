@@ -9,7 +9,7 @@ from colorama import Fore
 from algebras.config import Config
 
 
-def execute(provider: str = None, model: str = None, path_rules: str = None, batch_size: int = None, glossary_id: str = None, prompt: str = None) -> None:
+def execute(provider: str = None, model: str = None, path_rules: str = None, batch_size: int = None, max_parallel_batches: int = None, glossary_id: str = None, prompt: str = None) -> None:
     """
     Configure your Algebras project settings.
     
@@ -18,6 +18,7 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         model: Set the model for the provider (only applicable for some providers)
         path_rules: Set the path rules for file patterns to process
         batch_size: Set the batch size for translation processing
+        max_parallel_batches: Set the maximum number of parallel batches for translation processing
         glossary_id: Set the glossary ID for Algebras AI translations
         prompt: Set a default prompt for translations
     """
@@ -87,6 +88,15 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         config.set_setting("batch_size", batch_size)
         click.echo(f"{Fore.GREEN}Batch size set to {batch_size}.\x1b[0m")
     
+    # Handle max_parallel_batches change
+    if max_parallel_batches is not None:
+        if max_parallel_batches < 1:
+            click.echo(f"{Fore.RED}Max parallel batches must be at least 1.\x1b[0m")
+            return
+        
+        config.set_setting("max_parallel_batches", max_parallel_batches)
+        click.echo(f"{Fore.GREEN}Max parallel batches set to {max_parallel_batches}.\x1b[0m")
+    
     # Handle prompt change
     if prompt is not None:
         config.set_setting("api.prompt", prompt)
@@ -97,7 +107,7 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
             click.echo(f"{Fore.GREEN}Default prompt cleared.\x1b[0m")
     
     # If no arguments provided, show current configuration
-    if not provider and not model and not path_rules and batch_size is None and glossary_id is None and prompt is None:
+    if not provider and not model and not path_rules and batch_size is None and max_parallel_batches is None and glossary_id is None and prompt is None:
         click.echo(f"\nCurrent configuration:")
         click.echo(f"  Provider: {Fore.BLUE}{current_provider}\x1b[0m")
         click.echo(f"  Model: {Fore.BLUE}{config.data['api'].get('model', 'Not set')}\x1b[0m")
@@ -129,6 +139,10 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         batch_size_value = config.get_setting('batch_size', os.environ.get('ALGEBRAS_BATCH_SIZE', 5))
         click.echo(f"  Batch size: {Fore.BLUE}{batch_size_value}\x1b[0m")
         
+        # Show max parallel batches if set
+        max_parallel_batches_value = config.get_setting('max_parallel_batches', os.environ.get('ALGEBRAS_MAX_PARALLEL_BATCHES', 5))
+        click.echo(f"  Max parallel batches: {Fore.BLUE}{max_parallel_batches_value}\x1b[0m")
+        
         # Show environment variable status
         if current_provider == "openai":
             api_key = os.environ.get("OPENAI_API_KEY")
@@ -149,6 +163,8 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         click.echo(f"To change the model, run: {Fore.BLUE}algebras configure --model <model>\x1b[0m")
         click.echo(f"To set the glossary ID, run: {Fore.BLUE}algebras configure --glossary-id <glossary_id>\x1b[0m")
         click.echo(f"To set path rules, run: {Fore.BLUE}algebras configure --path-rules \"pattern1,pattern2,...\"\x1b[0m")
+        click.echo(f"To set batch size, run: {Fore.BLUE}algebras configure --batch-size <batch_size>\x1b[0m")
+        click.echo(f"To set max parallel batches, run: {Fore.BLUE}algebras configure --max-parallel-batches <max_parallel_batches>\x1b[0m")
         click.echo(f"To set a default prompt, run: {Fore.BLUE}algebras configure --prompt \"your custom prompt\"\x1b[0m")
         return
     
