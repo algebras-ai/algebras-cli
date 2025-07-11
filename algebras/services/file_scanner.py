@@ -64,12 +64,11 @@ class FileScanner:
                 if os.path.isfile(file_path):
                     all_files.add(os.path.normpath(file_path))
         
-        # If no files found, fallback to general patterns
-        if not all_files:
-            for pattern in include_patterns:
-                for file_path in glob.glob(pattern, recursive=True):
-                    if os.path.isfile(file_path):
-                        all_files.add(os.path.normpath(file_path))
+        # Also check user-configured patterns from config (don't just fallback)
+        for pattern in include_patterns:
+            for file_path in glob.glob(pattern, recursive=True):
+                if os.path.isfile(file_path):
+                    all_files.add(os.path.normpath(file_path))
         
         # Remove files matching exclude patterns
         for pattern in exclude_patterns:
