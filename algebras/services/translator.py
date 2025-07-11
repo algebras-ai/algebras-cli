@@ -25,6 +25,7 @@ from algebras.utils.lang_validator import map_language_code
 from algebras.utils.ts_handler import read_ts_translation_file
 from algebras.utils.android_xml_handler import read_android_xml_file
 from algebras.utils.ios_strings_handler import read_ios_strings_file
+from algebras.utils.ios_stringsdict_handler import read_ios_stringsdict_file, extract_translatable_strings
 
 
 class TranslationCache:
@@ -330,6 +331,10 @@ class Translator:
             content = read_android_xml_file(file_path)
         elif file_path.endswith(".strings"):
             content = read_ios_strings_file(file_path)
+        elif file_path.endswith(".stringsdict"):
+            # For .stringsdict files, extract translatable strings to get a flat dictionary
+            raw_content = read_ios_stringsdict_file(file_path)
+            content = extract_translatable_strings(raw_content)
         else:
             raise ValueError(f"Unsupported file format: {file_path}")
         
@@ -708,6 +713,10 @@ class Translator:
             content = read_android_xml_file(file_path)
         elif file_path.endswith(".strings"):
             content = read_ios_strings_file(file_path)
+        elif file_path.endswith(".stringsdict"):
+            # For .stringsdict files, extract translatable strings to get a flat dictionary
+            raw_content = read_ios_stringsdict_file(file_path)
+            content = extract_translatable_strings(raw_content)
         else:
             raise ValueError(f"Unsupported file format: {file_path}")
         

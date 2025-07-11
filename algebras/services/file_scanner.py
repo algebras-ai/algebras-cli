@@ -37,7 +37,17 @@ class FileScanner:
             "src/i18n/*.json",
             "i18n/*.json",
             "public/locales/*/*.json",  # Add support for public/locales/{lang}/common.json
-            "public/locales/*/common.json"  # Specifically target common.json files
+            "public/locales/*/common.json",  # Specifically target common.json files
+            # iOS localization files
+            "*.lproj/*.strings",
+            "*/*.lproj/*.strings",
+            "*/*/*.lproj/*.strings",
+            "*.lproj/*.stringsdict",
+            "*/*.lproj/*.stringsdict",
+            "*/*/*.lproj/*.stringsdict",
+            # More general patterns for iOS files
+            "**/*.strings",
+            "**/*.stringsdict",
         ]
         
         # Separate include and exclude patterns

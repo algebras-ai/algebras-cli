@@ -18,6 +18,12 @@ from algebras.utils.git_utils import is_git_available, is_git_repository
 from algebras.utils.ts_handler import read_ts_translation_file, write_ts_translation_file
 from algebras.utils.android_xml_handler import read_android_xml_file, write_android_xml_file
 from algebras.utils.ios_strings_handler import read_ios_strings_file, write_ios_strings_file
+from algebras.utils.ios_stringsdict_handler import (
+    read_ios_stringsdict_file, 
+    write_ios_stringsdict_file,
+    extract_translatable_strings,
+    update_translatable_strings
+)
 
 
 def execute(language: Optional[str] = None, force: bool = False, only_missing: bool = False,
@@ -178,6 +184,12 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     elif source_file.endswith(".strings"):
                         source_content = read_ios_strings_file(source_file)
                         target_content = read_ios_strings_file(target_file)
+                    elif source_file.endswith(".stringsdict"):
+                        # For .stringsdict files, we need to extract translatable strings first
+                        source_content_raw = read_ios_stringsdict_file(source_file)
+                        target_content_raw = read_ios_stringsdict_file(target_file)
+                        source_content = extract_translatable_strings(source_content_raw)
+                        target_content = extract_translatable_strings(target_content_raw)
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
@@ -252,6 +264,10 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             write_android_xml_file(target_file, target_content)
                         elif target_file.endswith(".strings"):
                             write_ios_strings_file(target_file, target_content)
+                        elif target_file.endswith(".stringsdict"):
+                            # For .stringsdict files, update the original structure with translations
+                            updated_content = update_translatable_strings(target_content_raw, target_content)
+                            write_ios_stringsdict_file(target_file, updated_content)
                         
                         updated_count = len(missing_keys) + len(modified_keys)
                         click.echo(f"  {Fore.GREEN}✓ Updated {updated_count} keys in {target_file}\x1b[0m")
@@ -286,6 +302,12 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     elif source_file.endswith(".strings"):
                         source_content = read_ios_strings_file(source_file)
                         target_content = read_ios_strings_file(target_file)
+                    elif source_file.endswith(".stringsdict"):
+                        # For .stringsdict files, we need to extract translatable strings first
+                        source_content_raw = read_ios_stringsdict_file(source_file)
+                        target_content_raw = read_ios_stringsdict_file(target_file)
+                        source_content = extract_translatable_strings(source_content_raw)
+                        target_content = extract_translatable_strings(target_content_raw)
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
@@ -314,6 +336,10 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             write_android_xml_file(target_file, target_content)
                         elif target_file.endswith(".strings"):
                             write_ios_strings_file(target_file, target_content)
+                        elif target_file.endswith(".stringsdict"):
+                            # For .stringsdict files, update the original structure with translations
+                            updated_content = update_translatable_strings(target_content_raw, target_content)
+                            write_ios_stringsdict_file(target_file, updated_content)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                 except Exception as e:
@@ -345,6 +371,11 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".strings"):
                             source_content = read_ios_strings_file(source_file)
                             target_content = read_ios_strings_file(target_file)
+                        elif source_file.endswith(".stringsdict"):
+                            source_content_raw = read_ios_stringsdict_file(source_file)
+                            target_content_raw = read_ios_stringsdict_file(target_file)
+                            source_content = extract_translatable_strings(source_content_raw)
+                            target_content = extract_translatable_strings(target_content_raw)
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
@@ -369,6 +400,13 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                     yaml.dump(target_content, f, default_flow_style=False, allow_unicode=True)
                             elif target_file.endswith(".ts"):
                                 write_ts_translation_file(target_file, target_content)
+                            elif target_file.endswith(".xml"):
+                                write_android_xml_file(target_file, target_content)
+                            elif target_file.endswith(".strings"):
+                                write_ios_strings_file(target_file, target_content)
+                            elif target_file.endswith(".stringsdict"):
+                                updated_content = update_translatable_strings(target_content_raw, target_content)
+                                write_ios_stringsdict_file(target_file, updated_content)
                             
                             click.echo(f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -508,6 +546,11 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".strings"):
                             source_content = read_ios_strings_file(source_file)
                             target_content = read_ios_strings_file(target_file)
+                        elif source_file.endswith(".stringsdict"):
+                            source_content_raw = read_ios_stringsdict_file(source_file)
+                            target_content_raw = read_ios_stringsdict_file(target_file)
+                            source_content = extract_translatable_strings(source_content_raw)
+                            target_content = extract_translatable_strings(target_content_raw)
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
@@ -534,6 +577,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             write_android_xml_file(target_file, translated_content)
                         elif source_file.endswith(".strings"):
                             write_ios_strings_file(target_file, translated_content)
+                        elif source_file.endswith(".stringsdict"):
+                            updated_content = update_translatable_strings(target_content_raw, translated_content)
+                            write_ios_stringsdict_file(target_file, updated_content)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -542,21 +588,38 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     # Translate the full file
                     click.echo(f"  {Fore.GREEN}Translating {source_basename} to {target_basename}...\x1b[0m")
                     try:
-                        translated_content = translator.translate_file(source_file, target_lang, ui_safe, glossary_id)
-                        
-                        # Save translated content
-                        if source_file.endswith(".json"):
-                            with open(target_file, "w", encoding="utf-8") as f:
-                                json.dump(translated_content, f, ensure_ascii=False, indent=2)
-                        elif source_file.endswith((".yaml", ".yml")):
-                            with open(target_file, "w", encoding="utf-8") as f:
-                                yaml.dump(translated_content, f, default_flow_style=False, allow_unicode=True)
-                        elif source_file.endswith(".ts"):
-                            write_ts_translation_file(target_file, translated_content)
-                        elif source_file.endswith(".xml"):
-                            write_android_xml_file(target_file, translated_content)
-                        elif source_file.endswith(".strings"):
-                            write_ios_strings_file(target_file, translated_content)
+                        # For .stringsdict files, we need to load the target file to get the structure
+                        if source_file.endswith(".stringsdict"):
+                            # Load the target file if it exists to preserve structure
+                            if os.path.exists(target_file):
+                                target_content_raw = read_ios_stringsdict_file(target_file)
+                            else:
+                                # If target file doesn't exist, use source file as template
+                                target_content_raw = read_ios_stringsdict_file(source_file)
+                            
+                            # Translate the file
+                            translated_content = translator.translate_file(source_file, target_lang, ui_safe, glossary_id)
+                            
+                            # Update the target structure with translations
+                            updated_content = update_translatable_strings(target_content_raw, translated_content)
+                            write_ios_stringsdict_file(target_file, updated_content)
+                        else:
+                            # For other file types, use the normal translation flow
+                            translated_content = translator.translate_file(source_file, target_lang, ui_safe, glossary_id)
+                            
+                            # Save translated content
+                            if source_file.endswith(".json"):
+                                with open(target_file, "w", encoding="utf-8") as f:
+                                    json.dump(translated_content, f, ensure_ascii=False, indent=2)
+                            elif source_file.endswith((".yaml", ".yml")):
+                                with open(target_file, "w", encoding="utf-8") as f:
+                                    yaml.dump(translated_content, f, default_flow_style=False, allow_unicode=True)
+                            elif source_file.endswith(".ts"):
+                                write_ts_translation_file(target_file, translated_content)
+                            elif source_file.endswith(".xml"):
+                                write_android_xml_file(target_file, translated_content)
+                            elif source_file.endswith(".strings"):
+                                write_ios_strings_file(target_file, translated_content)
                         
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     except Exception as e:
