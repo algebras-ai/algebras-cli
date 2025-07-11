@@ -150,6 +150,8 @@ class Config:
             "path_rules": [
                 "**/*.json",  # JSON files
                 "**/*.yaml",  # YAML files
+                "**/*.xml",   # Android XML localization files
+                "**/*.strings",  # iOS strings localization files
                 "!**/node_modules/**",  # Exclude node_modules directory
                 "!**/build/**",  # Exclude build directory
             ],

@@ -16,6 +16,8 @@ from algebras.utils.path_utils import determine_target_path
 from algebras.utils.lang_validator import validate_language_files, find_outdated_keys, extract_all_keys
 from algebras.utils.git_utils import is_git_available, is_git_repository
 from algebras.utils.ts_handler import read_ts_translation_file, write_ts_translation_file
+from algebras.utils.android_xml_handler import read_android_xml_file, write_android_xml_file
+from algebras.utils.ios_strings_handler import read_ios_strings_file, write_ios_strings_file
 
 
 def execute(language: Optional[str] = None, force: bool = False, only_missing: bool = False,
@@ -170,6 +172,12 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     elif source_file.endswith(".ts"):
                         source_content = read_ts_translation_file(source_file)
                         target_content = read_ts_translation_file(target_file)
+                    elif source_file.endswith(".xml"):
+                        source_content = read_android_xml_file(source_file)
+                        target_content = read_android_xml_file(target_file)
+                    elif source_file.endswith(".strings"):
+                        source_content = read_ios_strings_file(source_file)
+                        target_content = read_ios_strings_file(target_file)
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
@@ -240,6 +248,10 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 yaml.dump(target_content, f, default_flow_style=False, allow_unicode=True)
                         elif target_file.endswith(".ts"):
                             write_ts_translation_file(target_file, target_content)
+                        elif target_file.endswith(".xml"):
+                            write_android_xml_file(target_file, target_content)
+                        elif target_file.endswith(".strings"):
+                            write_ios_strings_file(target_file, target_content)
                         
                         updated_count = len(missing_keys) + len(modified_keys)
                         click.echo(f"  {Fore.GREEN}✓ Updated {updated_count} keys in {target_file}\x1b[0m")
@@ -268,6 +280,12 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     elif source_file.endswith(".ts"):
                         source_content = read_ts_translation_file(source_file)
                         target_content = read_ts_translation_file(target_file)
+                    elif source_file.endswith(".xml"):
+                        source_content = read_android_xml_file(source_file)
+                        target_content = read_android_xml_file(target_file)
+                    elif source_file.endswith(".strings"):
+                        source_content = read_ios_strings_file(source_file)
+                        target_content = read_ios_strings_file(target_file)
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
@@ -292,6 +310,10 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 yaml.dump(target_content, f, default_flow_style=False, allow_unicode=True)
                         elif target_file.endswith(".ts"):
                             write_ts_translation_file(target_file, target_content)
+                        elif target_file.endswith(".xml"):
+                            write_android_xml_file(target_file, target_content)
+                        elif target_file.endswith(".strings"):
+                            write_ios_strings_file(target_file, target_content)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                 except Exception as e:
@@ -317,6 +339,12 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".ts"):
                             source_content = read_ts_translation_file(source_file)
                             target_content = read_ts_translation_file(target_file)
+                        elif source_file.endswith(".xml"):
+                            source_content = read_android_xml_file(source_file)
+                            target_content = read_android_xml_file(target_file)
+                        elif source_file.endswith(".strings"):
+                            source_content = read_ios_strings_file(source_file)
+                            target_content = read_ios_strings_file(target_file)
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
@@ -474,6 +502,12 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".ts"):
                             source_content = read_ts_translation_file(source_file)
                             target_content = read_ts_translation_file(target_file)
+                        elif source_file.endswith(".xml"):
+                            source_content = read_android_xml_file(source_file)
+                            target_content = read_android_xml_file(target_file)
+                        elif source_file.endswith(".strings"):
+                            source_content = read_ios_strings_file(source_file)
+                            target_content = read_ios_strings_file(target_file)
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
@@ -496,6 +530,10 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 yaml.dump(translated_content, f, default_flow_style=False, allow_unicode=True)
                         elif source_file.endswith(".ts"):
                             write_ts_translation_file(target_file, translated_content)
+                        elif source_file.endswith(".xml"):
+                            write_android_xml_file(target_file, translated_content)
+                        elif source_file.endswith(".strings"):
+                            write_ios_strings_file(target_file, translated_content)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -515,6 +553,10 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 yaml.dump(translated_content, f, default_flow_style=False, allow_unicode=True)
                         elif source_file.endswith(".ts"):
                             write_ts_translation_file(target_file, translated_content)
+                        elif source_file.endswith(".xml"):
+                            write_android_xml_file(target_file, translated_content)
+                        elif source_file.endswith(".strings"):
+                            write_ios_strings_file(target_file, translated_content)
                         
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     except Exception as e:

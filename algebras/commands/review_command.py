@@ -11,6 +11,8 @@ from typing import Optional, Dict, Any
 
 from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
+from algebras.utils.android_xml_handler import read_android_xml_file
+from algebras.utils.ios_strings_handler import read_ios_strings_file
 
 
 def execute(language: Optional[str] = None) -> None:
@@ -149,6 +151,20 @@ def execute(language: Optional[str] = None) -> None:
                     source_content = yaml.safe_load(f)
                 with open(target_file, "r", encoding="utf-8") as f:
                     target_content = yaml.safe_load(f)
+                
+                # Review content
+                review_content(source_content, target_content, source_language, target_language)
+            
+            elif source_file.endswith(".xml"):
+                source_content = read_android_xml_file(source_file)
+                target_content = read_android_xml_file(target_file)
+                
+                # Review content
+                review_content(source_content, target_content, source_language, target_language)
+            
+            elif source_file.endswith(".strings"):
+                source_content = read_ios_strings_file(source_file)
+                target_content = read_ios_strings_file(target_file)
                 
                 # Review content
                 review_content(source_content, target_content, source_language, target_language)

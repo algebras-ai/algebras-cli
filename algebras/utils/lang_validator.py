@@ -12,6 +12,8 @@ from algebras.utils.git_utils import (
     get_keys_last_modifications_batch
 )
 from algebras.utils.ts_handler import read_ts_translation_file
+from algebras.utils.android_xml_handler import read_android_xml_file
+from algebras.utils.ios_strings_handler import read_ios_strings_file
 
 
 def read_language_file(file_path: str) -> Dict[str, Any]:
@@ -32,6 +34,10 @@ def read_language_file(file_path: str) -> Dict[str, Any]:
             return yaml.safe_load(f) or {}
     elif file_path.endswith('.ts'):
         return read_ts_translation_file(file_path)
+    elif file_path.endswith('.xml'):
+        return read_android_xml_file(file_path)
+    elif file_path.endswith('.strings'):
+        return read_ios_strings_file(file_path)
     else:
         raise ValueError(f"Unsupported file format: {file_path}")
 
