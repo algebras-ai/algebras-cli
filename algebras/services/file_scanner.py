@@ -48,6 +48,12 @@ class FileScanner:
             # More general patterns for iOS files
             "**/*.strings",
             "**/*.stringsdict",
+            # gettext .po files
+            "**/*.po",
+            "locale/*/*.po",
+            "locales/*/*.po",
+            "src/locale/*/*.po",
+            "src/locales/*/*.po",
         ]
         
         # Separate include and exclude patterns

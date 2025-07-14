@@ -26,6 +26,7 @@ from algebras.utils.ts_handler import read_ts_translation_file
 from algebras.utils.android_xml_handler import read_android_xml_file
 from algebras.utils.ios_strings_handler import read_ios_strings_file
 from algebras.utils.ios_stringsdict_handler import read_ios_stringsdict_file, extract_translatable_strings
+from algebras.utils.po_handler import read_po_file
 
 
 class TranslationCache:
@@ -373,6 +374,8 @@ class Translator:
             # For .stringsdict files, extract translatable strings to get a flat dictionary
             raw_content = read_ios_stringsdict_file(file_path)
             content = extract_translatable_strings(raw_content)
+        elif file_path.endswith(".po"):
+            content = read_po_file(file_path)
         else:
             raise ValueError(f"Unsupported file format: {file_path}")
         
@@ -761,6 +764,8 @@ class Translator:
             # For .stringsdict files, extract translatable strings to get a flat dictionary
             raw_content = read_ios_stringsdict_file(file_path)
             content = extract_translatable_strings(raw_content)
+        elif file_path.endswith(".po"):
+            content = read_po_file(file_path)
         else:
             raise ValueError(f"Unsupported file format: {file_path}")
         

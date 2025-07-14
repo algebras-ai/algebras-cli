@@ -24,6 +24,7 @@ from algebras.utils.ios_stringsdict_handler import (
     extract_translatable_strings,
     update_translatable_strings
 )
+from algebras.utils.po_handler import read_po_file, write_po_file
 
 
 def execute(language: Optional[str] = None, force: bool = False, only_missing: bool = False,
@@ -190,6 +191,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         target_content_raw = read_ios_stringsdict_file(target_file)
                         source_content = extract_translatable_strings(source_content_raw)
                         target_content = extract_translatable_strings(target_content_raw)
+                    elif source_file.endswith(".po"):
+                        source_content = read_po_file(source_file)
+                        target_content = read_po_file(target_file)
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
@@ -308,6 +312,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         target_content_raw = read_ios_stringsdict_file(target_file)
                         source_content = extract_translatable_strings(source_content_raw)
                         target_content = extract_translatable_strings(target_content_raw)
+                    elif source_file.endswith(".po"):
+                        source_content = read_po_file(source_file)
+                        target_content = read_po_file(target_file)
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
@@ -340,6 +347,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             # For .stringsdict files, update the original structure with translations
                             updated_content = update_translatable_strings(target_content_raw, target_content)
                             write_ios_stringsdict_file(target_file, updated_content)
+                        elif target_file.endswith(".po"):
+                            write_po_file(target_file, target_content)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                 except Exception as e:
@@ -376,6 +385,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             target_content_raw = read_ios_stringsdict_file(target_file)
                             source_content = extract_translatable_strings(source_content_raw)
                             target_content = extract_translatable_strings(target_content_raw)
+                        elif source_file.endswith(".po"):
+                            source_content = read_po_file(source_file)
+                            target_content = read_po_file(target_file)
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
@@ -407,6 +419,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             elif target_file.endswith(".stringsdict"):
                                 updated_content = update_translatable_strings(target_content_raw, target_content)
                                 write_ios_stringsdict_file(target_file, updated_content)
+                            elif target_file.endswith(".po"):
+                                write_po_file(target_file, target_content)
                             
                             click.echo(f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -551,6 +565,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             target_content_raw = read_ios_stringsdict_file(target_file)
                             source_content = extract_translatable_strings(source_content_raw)
                             target_content = extract_translatable_strings(target_content_raw)
+                        elif source_file.endswith(".po"):
+                            source_content = read_po_file(source_file)
+                            target_content = read_po_file(target_file)
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
@@ -580,6 +597,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".stringsdict"):
                             updated_content = update_translatable_strings(target_content_raw, translated_content)
                             write_ios_stringsdict_file(target_file, updated_content)
+                        elif source_file.endswith(".po"):
+                            write_po_file(target_file, translated_content)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -620,6 +639,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 write_android_xml_file(target_file, translated_content)
                             elif source_file.endswith(".strings"):
                                 write_ios_strings_file(target_file, translated_content)
+                            elif source_file.endswith(".po"):
+                                write_po_file(target_file, translated_content)
                         
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     except Exception as e:

@@ -13,6 +13,7 @@ from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
 from algebras.utils.android_xml_handler import read_android_xml_file
 from algebras.utils.ios_strings_handler import read_ios_strings_file
+from algebras.utils.po_handler import read_po_file
 
 
 def execute(language: Optional[str] = None) -> None:
@@ -165,6 +166,13 @@ def execute(language: Optional[str] = None) -> None:
             elif source_file.endswith(".strings"):
                 source_content = read_ios_strings_file(source_file)
                 target_content = read_ios_strings_file(target_file)
+                
+                # Review content
+                review_content(source_content, target_content, source_language, target_language)
+            
+            elif source_file.endswith(".po"):
+                source_content = read_po_file(source_file)
+                target_content = read_po_file(target_file)
                 
                 # Review content
                 review_content(source_content, target_content, source_language, target_language)
