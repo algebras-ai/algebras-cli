@@ -147,6 +147,41 @@ class Translator:
         """
         self.custom_prompt = prompt
         
+    def normalize_translation_string(self, source_text: str, translated_text: str) -> str:
+        """
+        Normalize a translated string by removing escaped characters if they weren't
+        present in the source text.
+        
+        Args:
+            source_text: The original source text
+            translated_text: The translated text from the API
+            
+        Returns:
+            Normalized translated text
+        """
+        # Check if normalization is enabled
+        if not self.config.get_setting("api.normalize_strings", True):
+            return translated_text
+        
+        # Common escaped characters to normalize
+        escape_mappings = {
+            "\\'": "'",   # Escaped apostrophe
+            '\\"': '"',   # Escaped quote
+            "\\\\": "\\", # Escaped backslash
+            "\\n": "\n",  # Escaped newline (keep as actual newline)
+            "\\t": "\t",  # Escaped tab (keep as actual tab)
+            "\\r": "\r",  # Escaped carriage return (keep as actual carriage return)
+        }
+        
+        # Only normalize if the source text doesn't contain these escaped characters
+        normalized_text = translated_text
+        for escaped_char, unescaped_char in escape_mappings.items():
+            # Only normalize if the source text doesn't contain the escaped version
+            if escaped_char not in source_text and escaped_char in normalized_text:
+                normalized_text = normalized_text.replace(escaped_char, unescaped_char)
+        
+        return normalized_text
+        
     def translate_text(self, text: str, source_lang: str, target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> str:
         """
         Translate a text from source language to target language.
@@ -185,6 +220,9 @@ class Translator:
             translation = self._translate_with_algebras_ai(text, source_lang, target_lang, ui_safe, glossary_id)
         else:
             raise ValueError(f"Unsupported provider: {provider}")
+        
+        # Apply normalization to the translation
+        translation = self.normalize_translation_string(text, translation)
         
         # Update cache with new translation
         self.cache.set(cache_key, translation)
@@ -520,7 +558,13 @@ class Translator:
                 if len(translations) != len(texts):
                     raise Exception(f"Expected {len(texts)} translations, but got {len(translations)}")
                 
-                return translations
+                # Apply normalization to each translation
+                normalized_translations = []
+                for i, translation in enumerate(translations):
+                    normalized_translation = self.normalize_translation_string(texts[i], translation)
+                    normalized_translations.append(normalized_translation)
+                
+                return normalized_translations
             else:
                 error_msg = f"Error from Algebras AI batch API: {response.status_code} - {response.text}"
                 raise Exception(error_msg)

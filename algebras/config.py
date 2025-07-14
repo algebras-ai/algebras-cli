@@ -159,6 +159,7 @@ class Config:
                 "provider": "algebras-ai",  # Default provider
                 "model": "gpt-4",     # Default model (for OpenAI)
                 # Provider options include: "openai", "algebras-ai"
+                "normalize_strings": True,  # Default to normalize escaped characters
             },
             "batch_size": 5,  # Default batch size
             "max_parallel_batches": 5  # Default max parallel batches

@@ -101,9 +101,10 @@ def status(language):
 @click.option("--max-parallel-batches", type=int, help="Set the maximum number of parallel batches for translation processing (default: 5).")
 @click.option("--glossary-id", help="Set the glossary ID for Algebras AI translations.")
 @click.option("--prompt", help="Set a default prompt for translations.")
-def configure(provider, model, path_rules, batch_size, max_parallel_batches, glossary_id, prompt):
+@click.option("--normalize-strings", type=bool, help="Enable/disable string normalization (removes escaped characters like \\').")
+def configure(provider, model, path_rules, batch_size, max_parallel_batches, glossary_id, prompt, normalize_strings):
     """Configure your Algebras project settings."""
-    configure_command.execute(provider, model, path_rules, batch_size, max_parallel_batches, glossary_id, prompt)
+    configure_command.execute(provider, model, path_rules, batch_size, max_parallel_batches, glossary_id, prompt, normalize_strings)
 
 
 def main():

@@ -5,6 +5,9 @@ iOS .strings localization file handler
 import re
 from typing import Dict, Any
 
+# Import Config to check normalization settings
+from algebras.config import Config
+
 
 def read_ios_strings_file(file_path: str) -> Dict[str, Any]:
     """
@@ -107,6 +110,17 @@ def _escape_ios_string(text: str) -> str:
     Returns:
         Escaped text suitable for iOS .strings format
     """
+    # Check if normalization is enabled
+    try:
+        config = Config()
+        if config.exists():
+            config.load()
+            normalize_strings = config.get_setting("api.normalize_strings", True)
+        else:
+            normalize_strings = True  # Default to True if no config
+    except:
+        normalize_strings = True  # Default to True if config fails to load
+    
     # Handle iOS-specific escape sequences
     # Order matters - backslash must be escaped first
     replacements = [
@@ -115,8 +129,11 @@ def _escape_ios_string(text: str) -> str:
         ('\n', '\\n'),
         ('\t', '\\t'),
         ('\r', '\\r'),
-        ("'", "\\'"),
     ]
+    
+    # Only escape apostrophes if normalization is disabled
+    if not normalize_strings:
+        replacements.append(("'", "\\'"))
     
     result = text
     for unescaped, escaped in replacements:

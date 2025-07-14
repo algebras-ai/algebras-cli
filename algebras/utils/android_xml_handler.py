@@ -7,6 +7,9 @@ from typing import Dict, Any
 import html
 import re
 
+# Import Config to check normalization settings
+from algebras.config import Config
+
 
 def read_android_xml_file(file_path: str) -> Dict[str, Any]:
     """
@@ -159,8 +162,23 @@ def _escape_xml_text(text: str) -> str:
     # Escape XML special characters
     text = html.escape(text, quote=False)
     
+    # Check if normalization is enabled
+    try:
+        config = Config()
+        if config.exists():
+            config.load()
+            normalize_strings = config.get_setting("api.normalize_strings", True)
+        else:
+            normalize_strings = True  # Default to True if no config
+    except:
+        normalize_strings = True  # Default to True if config fails to load
+    
     # Handle Android-specific escape sequences
-    text = text.replace("'", "\\'")
+    # Only escape apostrophes if normalization is disabled
+    if not normalize_strings:
+        text = text.replace("'", "\\'")
+    
+    # Always escape double quotes, newlines, and tabs for XML compatibility
     text = text.replace('"', '\\"')
     text = text.replace('\n', '\\n')
     text = text.replace('\t', '\\t')

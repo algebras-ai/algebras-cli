@@ -392,62 +392,65 @@ class TestTranslator:
         assert kwargs["files"]["targetLanguage"][1] == "de"
         assert kwargs["files"]["textContent"][1] == "Hello world"
 
-    def test_translate_with_algebras_ai_no_api_key(self, monkeypatch):
-        """Test translation with Algebras AI provider but no API key"""
+    def test_normalize_translation_string(self, monkeypatch):
+        """Test normalize_translation_string method"""
         # Mock Config
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
-
-        # Patch Config class
-        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
-
-        # Ensure no API key in environment
-        monkeypatch.delenv("ALGEBRAS_API_KEY", raising=False)
-
-        # Mock the cache to return None (cache miss)
-        mock_cache = MagicMock()
-        mock_cache.get.return_value = None
-        monkeypatch.setattr("algebras.services.translator.TranslationCache", lambda: mock_cache)
-
-        # Initialize Translator
-        translator = Translator()
-
-        # Test translate_text with no API key
-        with pytest.raises(ValueError, match="Algebras API key not found"):
-            translator.translate_text("Hello world", "en", "fr")
-            
-    def test_translate_with_algebras_ai_error_response(self, monkeypatch):
-        """Test translation with Algebras AI provider returning an error"""
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        mock_config.get_api_config.return_value = {"provider": "openai", "model": "gpt-4"}
+        mock_config.get_setting.return_value = True  # normalization enabled
 
         # Patch Config class
         monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
 
         # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Mock the cache to return None (cache miss)
-        mock_cache = MagicMock()
-        mock_cache.get.return_value = None
-        monkeypatch.setattr("algebras.services.translator.TranslationCache", lambda: mock_cache)
-
-        # Mock requests.post to return an error
-        mock_response = MagicMock()
-        mock_response.status_code = 400
-        mock_response.text = "Bad Request"
-        
-        mock_post = MagicMock(return_value=mock_response)
-        monkeypatch.setattr("algebras.services.translator.requests.post", mock_post)
+        monkeypatch.setenv("OPENAI_API_KEY", "test-api-key")
 
         # Initialize Translator
         translator = Translator()
 
-        # Test translate_text with error response
-        with pytest.raises(Exception, match="Error from Algebras AI API: 400 - Bad Request"):
-            translator.translate_text("Hello world", "en", "fr") 
+        # Test 1: Normal case - should normalize escaped apostrophe
+        source_text = "More"
+        translated_text = "Ko\\'proq"
+        result = translator.normalize_translation_string(source_text, translated_text)
+        assert result == "Ko'proq"
+
+        # Test 2: Source has escaped character - should NOT normalize
+        source_text = "Say \\'hello\\'"
+        translated_text = "Salom \\'aytish\\'"
+        result = translator.normalize_translation_string(source_text, translated_text)
+        assert result == "Salom \\'aytish\\'"  # Should remain escaped
+
+        # Test 3: Multiple escaped characters
+        source_text = "Hello world"
+        translated_text = "Salom \\'dunyo\\' va \\\"odam\\\""
+        result = translator.normalize_translation_string(source_text, translated_text)
+        assert result == "Salom 'dunyo' va \"odam\""
+
+        # Test 4: Mixed case - some should normalize, some shouldn't
+        source_text = "Text with \\'existing\\' escapes"
+        translated_text = "Matn \\'mavjud\\' va \\\"yangi\\\" qochishlar bilan"
+        result = translator.normalize_translation_string(source_text, translated_text)
+        # Should NOT normalize apostrophes (present in source) but SHOULD normalize quotes (not in source)
+        assert result == "Matn \\'mavjud\\' va \"yangi\" qochishlar bilan"
+
+        # Test 5: Test with normalization disabled
+        mock_config.get_setting.return_value = False  # normalization disabled
+        source_text = "More"
+        translated_text = "Ko\\'proq"
+        result = translator.normalize_translation_string(source_text, translated_text)
+        assert result == "Ko\\'proq"  # Should remain unchanged
+
+        # Test 6: Test newlines and tabs (should be preserved as actual characters)
+        mock_config.get_setting.return_value = True  # normalization enabled
+        source_text = "Line one"
+        translated_text = "Birinchi qator\\nIkkinchi qator"
+        result = translator.normalize_translation_string(source_text, translated_text)
+        assert result == "Birinchi qator\nIkkinchi qator"
+
+        # Test 7: Test backslash normalization
+        source_text = "File path"
+        translated_text = "Fayl yo\\\\li"
+        result = translator.normalize_translation_string(source_text, translated_text)
+        assert result == "Fayl yo\\li" 

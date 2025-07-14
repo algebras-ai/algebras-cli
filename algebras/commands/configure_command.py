@@ -9,7 +9,7 @@ from colorama import Fore
 from algebras.config import Config
 
 
-def execute(provider: str = None, model: str = None, path_rules: str = None, batch_size: int = None, max_parallel_batches: int = None, glossary_id: str = None, prompt: str = None) -> None:
+def execute(provider: str = None, model: str = None, path_rules: str = None, batch_size: int = None, max_parallel_batches: int = None, glossary_id: str = None, prompt: str = None, normalize_strings: bool = None) -> None:
     """
     Configure your Algebras project settings.
     
@@ -21,6 +21,7 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         max_parallel_batches: Set the maximum number of parallel batches for translation processing
         glossary_id: Set the glossary ID for Algebras AI translations
         prompt: Set a default prompt for translations
+        normalize_strings: Enable/disable string normalization (removes escaped characters like \')
     """
     config = Config()
     
@@ -106,8 +107,16 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         else:
             click.echo(f"{Fore.GREEN}Default prompt cleared.\x1b[0m")
     
+    # Handle normalize_strings change
+    if normalize_strings is not None:
+        config.set_setting("api.normalize_strings", normalize_strings)
+        if normalize_strings:
+            click.echo(f"{Fore.GREEN}String normalization enabled (will remove escaped characters like \\').\x1b[0m")
+        else:
+            click.echo(f"{Fore.GREEN}String normalization disabled (will preserve all escaped characters).\x1b[0m")
+    
     # If no arguments provided, show current configuration
-    if not provider and not model and not path_rules and batch_size is None and max_parallel_batches is None and glossary_id is None and prompt is None:
+    if not provider and not model and not path_rules and batch_size is None and max_parallel_batches is None and glossary_id is None and prompt is None and normalize_strings is None:
         click.echo(f"\nCurrent configuration:")
         click.echo(f"  Provider: {Fore.BLUE}{current_provider}\x1b[0m")
         click.echo(f"  Model: {Fore.BLUE}{config.data['api'].get('model', 'Not set')}\x1b[0m")
@@ -125,6 +134,10 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
             click.echo(f"  Default prompt: {Fore.BLUE}{current_prompt[:50]}{'...' if len(current_prompt) > 50 else ''}\x1b[0m")
         else:
             click.echo(f"  Default prompt: {Fore.BLUE}Not set\x1b[0m")
+        
+        # Show string normalization setting
+        normalize_strings_setting = config.get_setting("api.normalize_strings", True)
+        click.echo(f"  String normalization: {Fore.BLUE}{'Enabled' if normalize_strings_setting else 'Disabled'}\x1b[0m")
         
         # Show path rules
         path_rules_list = config.data.get('path_rules', [])
@@ -166,6 +179,7 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         click.echo(f"To set batch size, run: {Fore.BLUE}algebras configure --batch-size <batch_size>\x1b[0m")
         click.echo(f"To set max parallel batches, run: {Fore.BLUE}algebras configure --max-parallel-batches <max_parallel_batches>\x1b[0m")
         click.echo(f"To set a default prompt, run: {Fore.BLUE}algebras configure --prompt \"your custom prompt\"\x1b[0m")
+        click.echo(f"To enable/disable string normalization, run: {Fore.BLUE}algebras configure --normalize-strings <true/false>\x1b[0m")
         return
     
     # Save configuration
