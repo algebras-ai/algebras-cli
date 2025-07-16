@@ -16,7 +16,7 @@ Algebras CLI is a Python package that simplifies application localization by tra
 ## Installation
 
 ```bash
-pip install algebras-cli
+pip install git+https://github.com/algebras-ai/algebras-cli.git
 ```
 
 ## Usage
