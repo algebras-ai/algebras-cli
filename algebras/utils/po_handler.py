@@ -50,10 +50,31 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
         # Parse the original content to get structure
         entries = _parse_po_content(original_content)
         
+        # Track which keys we've updated
+        updated_keys = set()
+        
         # Update msgstr values with new translations
         for entry in entries:
             if entry['msgid'] in content:
                 entry['msgstr'] = content[entry['msgid']]
+                updated_keys.add(entry['msgid'])
+        
+        # Find keys that need to be added (exist in content but not in original file)
+        new_keys = set(content.keys()) - updated_keys
+        
+        # Add new entries for missing keys
+        for msgid in sorted(new_keys):
+            if not msgid:  # Skip empty keys
+                continue
+                
+            new_entry = {
+                'msgid': msgid,
+                'msgstr': content[msgid],
+                'comments': [],
+                'start_line': len(entries),
+                'end_line': len(entries)
+            }
+            entries.append(new_entry)
         
         # Reconstruct the .po file content
         new_content = _reconstruct_po_content(entries, original_content)
@@ -91,10 +112,31 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
             # Parse the template content to get structure
             entries = _parse_po_content(template_content)
             
+            # Track which keys we've updated
+            updated_keys = set()
+            
             # Update msgstr values with new translations
             for entry in entries:
                 if entry['msgid'] in content:
                     entry['msgstr'] = content[entry['msgid']]
+                    updated_keys.add(entry['msgid'])
+            
+            # Find keys that need to be added (exist in content but not in template)
+            new_keys = set(content.keys()) - updated_keys
+            
+            # Add new entries for missing keys
+            for msgid in sorted(new_keys):
+                if not msgid:  # Skip empty keys
+                    continue
+                    
+                new_entry = {
+                    'msgid': msgid,
+                    'msgstr': content[msgid],
+                    'comments': [],
+                    'start_line': len(entries),
+                    'end_line': len(entries)
+                }
+                entries.append(new_entry)
             
             # Reconstruct the .po file content
             new_content = _reconstruct_po_content(entries, template_content)
@@ -274,7 +316,11 @@ def _reconstruct_po_content(entries: List[Dict[str, Any]], original_content: str
     # Track which lines have been processed
     processed_lines = set()
     
-    for entry in entries:
+    # Separate existing entries from new entries
+    existing_entries = [entry for entry in entries if entry['start_line'] < len(lines)]
+    new_entries = [entry for entry in entries if entry['start_line'] >= len(lines)]
+    
+    for entry in existing_entries:
         # Add lines before this entry (if any)
         for line_num in range(len(result_lines), entry['start_line']):
             if line_num < len(lines) and line_num not in processed_lines:
@@ -285,7 +331,7 @@ def _reconstruct_po_content(entries: List[Dict[str, Any]], original_content: str
         for comment in entry['comments']:
             result_lines.append(comment)
         
-        # Add msgid - preserve multi-line format if original was multi-line
+        # Add msgid - preserve original format style
         if 'msgid_lines' in entry and len(entry['msgid_lines']) > 1:
             # Original was multi-line, preserve format but check if content changed
             original_msgid_content = ''.join(_extract_quoted_string(line) for line in entry['msgid_lines'])
@@ -294,17 +340,21 @@ def _reconstruct_po_content(entries: List[Dict[str, Any]], original_content: str
                 for line in entry['msgid_lines']:
                     result_lines.append(line)
             else:
-                # Content changed, format as multi-line
+                # Content changed, format as multi-line to preserve style
                 result_lines.extend(_format_multiline_entry('msgid', entry['msgid']))
+        elif 'msgid_lines' in entry and len(entry['msgid_lines']) == 1:
+            # Original was single-line, preserve format
+            escaped_msgid = _escape_po_string(entry['msgid'])
+            result_lines.append(f'msgid "{escaped_msgid}"')
         elif 'msgid' in entry:
-            # Single line or new entry
-            if _should_be_multiline(entry['msgid']):
+            # New entry - apply multiline logic only for very long strings or those with newlines
+            if entry['msgid'] == "" or '\n' in entry['msgid'] or len(entry['msgid']) > 120:
                 result_lines.extend(_format_multiline_entry('msgid', entry['msgid']))
             else:
                 escaped_msgid = _escape_po_string(entry['msgid'])
                 result_lines.append(f'msgid "{escaped_msgid}"')
         
-        # Add msgstr - preserve multi-line format if original was multi-line  
+        # Add msgstr - preserve original format style  
         if 'msgstr_lines' in entry and len(entry['msgstr_lines']) > 1:
             # Original was multi-line, preserve format but check if content changed
             original_msgstr_content = ''.join(_extract_quoted_string(line) for line in entry['msgstr_lines'])
@@ -313,11 +363,15 @@ def _reconstruct_po_content(entries: List[Dict[str, Any]], original_content: str
                 for line in entry['msgstr_lines']:
                     result_lines.append(line)
             else:
-                # Content changed, format as multi-line
+                # Content changed, format as multi-line to preserve style
                 result_lines.extend(_format_multiline_entry('msgstr', entry['msgstr']))
+        elif 'msgstr_lines' in entry and len(entry['msgstr_lines']) == 1:
+            # Original was single-line, preserve format
+            escaped_msgstr = _escape_po_string(entry['msgstr'])
+            result_lines.append(f'msgstr "{escaped_msgstr}"')
         elif 'msgstr' in entry:
-            # Single line or new entry
-            if _should_be_multiline(entry['msgstr']):
+            # New entry - apply multiline logic only for very long strings or those with newlines
+            if entry['msgstr'] == "" or '\n' in entry['msgstr'] or len(entry['msgstr']) > 120:
                 result_lines.extend(_format_multiline_entry('msgstr', entry['msgstr']))
             else:
                 escaped_msgstr = _escape_po_string(entry['msgstr'])
@@ -334,6 +388,33 @@ def _reconstruct_po_content(entries: List[Dict[str, Any]], original_content: str
     for line_num in range(len(lines)):
         if line_num not in processed_lines:
             result_lines.append(lines[line_num])
+    
+    # Add new entries at the end
+    for entry in new_entries:
+        # Add empty line before new entry if the last line isn't empty
+        if result_lines and result_lines[-1].strip():
+            result_lines.append('')
+        
+        # Add comments
+        for comment in entry['comments']:
+            result_lines.append(comment)
+        
+        # Add msgid - for new entries, be more conservative with multiline
+        if entry['msgid'] == "" or '\n' in entry['msgid'] or len(entry['msgid']) > 120:
+            result_lines.extend(_format_multiline_entry('msgid', entry['msgid']))
+        else:
+            escaped_msgid = _escape_po_string(entry['msgid'])
+            result_lines.append(f'msgid "{escaped_msgid}"')
+        
+        # Add msgstr - for new entries, be more conservative with multiline
+        if entry['msgstr'] == "" or '\n' in entry['msgstr'] or len(entry['msgstr']) > 120:
+            result_lines.extend(_format_multiline_entry('msgstr', entry['msgstr']))
+        else:
+            escaped_msgstr = _escape_po_string(entry['msgstr'])
+            result_lines.append(f'msgstr "{escaped_msgstr}"')
+        
+        # Add empty line after entry
+        result_lines.append('')
     
     return '\n'.join(result_lines)
 
