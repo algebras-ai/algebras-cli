@@ -174,12 +174,12 @@ def _escape_xml_text(text: str) -> str:
         normalize_strings = True  # Default to True if config fails to load
     
     # Handle Android-specific escape sequences
-    # Only escape apostrophes if normalization is disabled
+    # Only escape quotes if normalization is disabled
     if not normalize_strings:
         text = text.replace("'", "\\'")
+        text = text.replace('"', '\\"')
     
-    # Always escape double quotes, newlines, and tabs for XML compatibility
-    text = text.replace('"', '\\"')
+    # Always escape newlines and tabs for XML compatibility
     text = text.replace('\n', '\\n')
     text = text.replace('\t', '\\t')
     
