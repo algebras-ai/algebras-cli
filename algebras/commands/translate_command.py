@@ -500,11 +500,31 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             base = base.replace(f"_{source_language}", f"_{target_lang}")
                             target_basename = f"{base}.{ext}"
                         else:
-                            # If no language marker, add one with the target language
-                            base = f"{base}.{target_lang}"
-                            target_basename = f"{base}.{ext}"
+                            # Check if source file is in a language-specific directory structure
+                            # If so, preserve the original filename instead of adding language markers
+                            source_dir_parts = os.path.normpath(source_dirname).split(os.sep)
+                            has_lang_directory = any(part == source_language or part.lower() == source_language.lower() 
+                                                   for part in source_dir_parts)
+                            
+                            if has_lang_directory:
+                                # File is in language-specific directory, preserve original filename
+                                target_basename = source_basename
+                            else:
+                                # File is not in language-specific directory, add language marker to filename
+                                base = f"{base}.{target_lang}"
+                                target_basename = f"{base}.{ext}"
                     else:
-                        target_basename = f"{source_basename}.{target_lang}"
+                        # Check if source file is in a language-specific directory structure
+                        source_dir_parts = os.path.normpath(source_dirname).split(os.sep)
+                        has_lang_directory = any(part == source_language or part.lower() == source_language.lower() 
+                                               for part in source_dir_parts)
+                        
+                        if has_lang_directory:
+                            # File is in language-specific directory, preserve original filename
+                            target_basename = source_basename
+                        else:
+                            # File is not in language-specific directory, add language marker to filename
+                            target_basename = f"{source_basename}.{target_lang}"
                     
                     # Check if target file exists in the list of already existing files for this language
                     if target_basename in existing_file_basenames:
