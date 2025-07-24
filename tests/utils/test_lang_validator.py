@@ -113,6 +113,33 @@ class TestLangValidator(unittest.TestCase):
         self.assertEqual(missing_keys, {"login.password"})
         self.assertEqual(mock_read_file.call_count, 2)
 
+    @patch('algebras.utils.lang_validator.read_language_file')
+    def test_validate_language_files_with_empty_values(self, mock_read_file):
+        # Test data with empty string values
+        target_data_with_empty = {
+            "welcome": "",  # Empty string value
+            "login": {
+                "title": "Connexion",
+                "username": "",  # Empty string value
+                "password": "Mot de passe"  # This key exists and has value
+            },
+            "errors": {
+                "required": "Ce champ est obligatoire",
+                "invalid": ""  # Empty string value
+            }
+        }
+        
+        # Mock read_language_file to return test data
+        mock_read_file.side_effect = [self.source_data, target_data_with_empty]
+        
+        is_valid, missing_keys = validate_language_files(self.source_file, self.target_file)
+        
+        self.assertFalse(is_valid)
+        # Should include keys with empty string values as missing
+        expected_missing = {"welcome", "login.username", "errors.invalid"}
+        self.assertEqual(missing_keys, expected_missing)
+        self.assertEqual(mock_read_file.call_count, 2)
+
     @patch('algebras.utils.lang_validator.is_git_available')
     def test_find_outdated_keys_no_git(self, mock_is_git_available):
         # Test when git is not available

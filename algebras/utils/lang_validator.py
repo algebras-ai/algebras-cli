@@ -99,6 +99,7 @@ def get_key_value(data: Dict[str, Any], key: str) -> Any:
 def validate_language_files(source_file: str, target_file: str) -> Tuple[bool, Set[str]]:
     """
     Validate if a target language file contains all keys from the source language file.
+    Keys with empty string values are considered missing.
     
     Args:
         source_file: Path to the source language file
@@ -114,7 +115,16 @@ def validate_language_files(source_file: str, target_file: str) -> Tuple[bool, S
         source_keys = extract_all_keys(source_data)
         target_keys = extract_all_keys(target_data)
         
+        # Find keys that don't exist at all in target
         missing_keys = source_keys - target_keys
+        
+        # Find keys that exist in target but have empty string values
+        common_keys = source_keys & target_keys
+        for key in common_keys:
+            target_value = get_key_value(target_data, key)
+            # Treat empty string values as missing keys
+            if target_value == "":
+                missing_keys.add(key)
         
         return len(missing_keys) == 0, missing_keys
     except Exception as e:
