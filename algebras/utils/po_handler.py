@@ -62,15 +62,57 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
         # Find keys that need to be added (exist in content but not in original file)
         new_keys = set(content.keys()) - updated_keys
         
+        # If we have new keys, try to find source file to get comment structure
+        source_entries_map = {}
+        if new_keys:
+            # Look for the source file by replacing the language code
+            dir_path = os.path.dirname(file_path)
+            filename = os.path.basename(file_path)
+            
+            # Try common source language patterns (en.po, es.po, etc.)
+            source_candidates = []
+            if '.' in filename:
+                name_parts = filename.split('.')
+                if len(name_parts) >= 2:
+                    # Try replacing the language part with common source languages
+                    for src_lang in ['en', 'es', 'fr', 'de']:
+                        candidate_name = f"{name_parts[0]}.{src_lang}.{'.'.join(name_parts[2:])}" if len(name_parts) > 2 else f"{src_lang}.{name_parts[1]}"
+                        candidate_path = os.path.join(dir_path, candidate_name)
+                        if os.path.exists(candidate_path):
+                            source_candidates.append(candidate_path)
+                    
+                    # Also try just replacing the first part (kk.po -> en.po)
+                    for src_lang in ['en', 'es', 'fr', 'de']:
+                        candidate_path = os.path.join(dir_path, f"{src_lang}.{name_parts[1]}")
+                        if os.path.exists(candidate_path):
+                            source_candidates.append(candidate_path)
+            
+            # Parse source file to get comment structure for new keys
+            if source_candidates:
+                try:
+                    with open(source_candidates[0], 'r', encoding='utf-8') as f:
+                        source_content = f.read()
+                    source_entries = _parse_po_content(source_content)
+                    # Create a map of msgid -> entry for quick lookup
+                    source_entries_map = {entry['msgid']: entry for entry in source_entries if entry['msgid']}
+                except Exception:
+                    # If we can't read the source file, continue without comments
+                    pass
+        
         # Add new entries for missing keys
         for msgid in sorted(new_keys):
             if not msgid:  # Skip empty keys
                 continue
                 
+            # Try to get comments from source file
+            comments = []
+            if msgid in source_entries_map:
+                comments = source_entries_map[msgid]['comments']
+                
             new_entry = {
                 'msgid': msgid,
                 'msgstr': content[msgid],
-                'comments': [],
+                'comments': comments,
                 'start_line': len(entries),
                 'end_line': len(entries)
             }
