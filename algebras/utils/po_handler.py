@@ -320,7 +320,7 @@ def _reconstruct_po_content(entries: List[Dict[str, Any]], original_content: str
     existing_entries = [entry for entry in entries if entry['start_line'] < len(lines)]
     new_entries = [entry for entry in entries if entry['start_line'] >= len(lines)]
     
-    for entry in existing_entries:
+    for i, entry in enumerate(existing_entries):
         # Add lines before this entry (if any)
         for line_num in range(len(result_lines), entry['start_line']):
             if line_num < len(lines) and line_num not in processed_lines:
@@ -377,8 +377,9 @@ def _reconstruct_po_content(entries: List[Dict[str, Any]], original_content: str
                 escaped_msgstr = _escape_po_string(entry['msgstr'])
                 result_lines.append(f'msgstr "{escaped_msgstr}"')
         
-        # Add empty line after entry
-        result_lines.append('')
+        # Add empty line after entry only if there's a next entry or if it's not the last entry
+        if i < len(existing_entries) - 1 or new_entries:
+            result_lines.append('')
         
         # Mark these lines as processed
         for line_num in range(entry['start_line'], entry['end_line'] + 1):
@@ -390,8 +391,8 @@ def _reconstruct_po_content(entries: List[Dict[str, Any]], original_content: str
             result_lines.append(lines[line_num])
     
     # Add new entries at the end
-    for entry in new_entries:
-        # Add empty line before new entry if the last line isn't empty
+    for i, entry in enumerate(new_entries):
+        # Add empty line before new entry if the last line isn't empty and we have existing content
         if result_lines and result_lines[-1].strip():
             result_lines.append('')
         
@@ -413,7 +414,16 @@ def _reconstruct_po_content(entries: List[Dict[str, Any]], original_content: str
             escaped_msgstr = _escape_po_string(entry['msgstr'])
             result_lines.append(f'msgstr "{escaped_msgstr}"')
         
-        # Add empty line after entry
+        # Add empty line after entry only if there's a next entry
+        if i < len(new_entries) - 1:
+            result_lines.append('')
+    
+    # Clean up trailing empty lines - keep only one at the end if any
+    while len(result_lines) > 1 and result_lines[-1] == '':
+        result_lines.pop()
+    
+    # Ensure file ends with exactly one newline
+    if result_lines and result_lines[-1] != '':
         result_lines.append('')
     
     return '\n'.join(result_lines)
@@ -518,7 +528,8 @@ def _create_po_from_scratch(content: Dict[str, Any]) -> str:
     lines.append('')
     
     # Add all translation entries
-    for msgid, msgstr in sorted(content.items()):
+    sorted_items = sorted(content.items())
+    for i, (msgid, msgstr) in enumerate(sorted_items):
         # Skip empty keys
         if not msgid:
             continue
@@ -537,6 +548,11 @@ def _create_po_from_scratch(content: Dict[str, Any]) -> str:
             escaped_msgstr = _escape_po_string(msgstr)
             lines.append(f'msgstr "{escaped_msgstr}"')
         
-        lines.append('')  # Empty line between entries
+        # Add empty line between entries, but not after the last entry
+        if i < len(sorted_items) - 1:
+            lines.append('')
     
-    return '\n'.join(lines) 
+    # Ensure file ends with exactly one newline
+    lines.append('')
+    
+    return '\n'.join(lines)
