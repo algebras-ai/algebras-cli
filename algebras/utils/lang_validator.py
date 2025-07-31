@@ -112,19 +112,37 @@ def validate_language_files(source_file: str, target_file: str) -> Tuple[bool, S
         source_data = read_language_file(source_file)
         target_data = read_language_file(target_file)
         
-        source_keys = extract_all_keys(source_data)
-        target_keys = extract_all_keys(target_data)
-        
-        # Find keys that don't exist at all in target
-        missing_keys = source_keys - target_keys
-        
-        # Find keys that exist in target but have empty string values
-        common_keys = source_keys & target_keys
-        for key in common_keys:
-            target_value = get_key_value(target_data, key)
-            # Treat empty string values as missing keys
-            if target_value == "":
-                missing_keys.add(key)
+        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict) 
+        # These formats return flat key-value dictionaries rather than nested structures
+        if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict')):
+            source_keys = set(source_data.keys())
+            target_keys = set(target_data.keys())
+            
+            # Find keys that don't exist at all in target
+            missing_keys = source_keys - target_keys
+            
+            # Find keys that exist in target but have empty string values
+            common_keys = source_keys & target_keys
+            for key in common_keys:
+                target_value = target_data.get(key)
+                # Treat empty string values as missing keys
+                if target_value == "" or target_value is None:
+                    missing_keys.add(key)
+        else:
+            # Handle nested formats (JSON, YAML, TS)
+            source_keys = extract_all_keys(source_data)
+            target_keys = extract_all_keys(target_data)
+            
+            # Find keys that don't exist at all in target
+            missing_keys = source_keys - target_keys
+            
+            # Find keys that exist in target but have empty string values
+            common_keys = source_keys & target_keys
+            for key in common_keys:
+                target_value = get_key_value(target_data, key)
+                # Treat empty string values as missing keys
+                if target_value == "":
+                    missing_keys.add(key)
         
         return len(missing_keys) == 0, missing_keys
     except Exception as e:

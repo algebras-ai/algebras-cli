@@ -40,7 +40,6 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
         content: Dictionary to write
     """
     import os
-    
     # Check if target file exists
     if os.path.exists(file_path):
         # Read the original file to preserve structure

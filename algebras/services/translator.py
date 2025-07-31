@@ -411,18 +411,28 @@ class Translator:
         
         # Translate each missing key and update the target content
         for key_path in missing_keys:
-            # Split the key path into individual parts
-            key_parts = key_path.split('.')
-            
-            # Get the value from the source content
-            source_value = self._get_nested_value(source_content, key_parts)
-            
-            if isinstance(source_value, str):
-                # Translate the value
-                translated_value = self.translate_text(source_value, source_lang, target_lang, ui_safe, glossary_id)
+            # First, check if this is a direct key in source_content (flat format)
+            if isinstance(source_content, dict) and key_path in source_content:
+                source_value = source_content[key_path]
+                if isinstance(source_value, str):
+                    # Translate the value
+                    translated_value = self.translate_text(source_value, source_lang, target_lang, ui_safe, glossary_id)
+                    # Update target content directly (flat format)
+                    updated_content[key_path] = translated_value
+            else:
+                # Try to treat it as a dot-notation path (nested format)
+                key_parts = key_path.split('.')
+                source_value = self._get_nested_value(source_content, key_parts)
                 
-                # Update the target content with the translated value
-                self._set_nested_value(updated_content, key_parts, translated_value)
+                if isinstance(source_value, str):
+                    # Translate the value
+                    translated_value = self.translate_text(source_value, source_lang, target_lang, ui_safe, glossary_id)
+                    # Update the target content with the translated value (nested format)
+                    self._set_nested_value(updated_content, key_parts, translated_value)
+                else:
+                    # For flat formats like .po, the key itself might BE the text to translate
+                    translated_value = self.translate_text(key_path, source_lang, target_lang, ui_safe, glossary_id)
+                    updated_content[key_path] = translated_value
         
         return updated_content
     
@@ -450,18 +460,28 @@ class Translator:
         
         # Translate each outdated key and update the target content
         for key_path in outdated_keys:
-            # Split the key path into individual parts
-            key_parts = key_path.split('.')
-            
-            # Get the value from the source content
-            source_value = self._get_nested_value(source_content, key_parts)
-            
-            if isinstance(source_value, str):
-                # Translate the value
-                translated_value = self.translate_text(source_value, source_lang, target_lang, ui_safe, glossary_id)
+            # First, check if this is a direct key in source_content (flat format)
+            if isinstance(source_content, dict) and key_path in source_content:
+                source_value = source_content[key_path]
+                if isinstance(source_value, str):
+                    # Translate the value
+                    translated_value = self.translate_text(source_value, source_lang, target_lang, ui_safe, glossary_id)
+                    # Update target content directly (flat format)
+                    updated_content[key_path] = translated_value
+            else:
+                # Try to treat it as a dot-notation path (nested format)
+                key_parts = key_path.split('.')
+                source_value = self._get_nested_value(source_content, key_parts)
                 
-                # Update the target content with the translated value
-                self._set_nested_value(updated_content, key_parts, translated_value)
+                if isinstance(source_value, str):
+                    # Translate the value
+                    translated_value = self.translate_text(source_value, source_lang, target_lang, ui_safe, glossary_id)
+                    # Update the target content with the translated value (nested format)
+                    self._set_nested_value(updated_content, key_parts, translated_value)
+                else:
+                    # For flat formats like .po, the key itself might BE the text to translate
+                    translated_value = self.translate_text(key_path, source_lang, target_lang, ui_safe, glossary_id)
+                    updated_content[key_path] = translated_value
         
         return updated_content
     
@@ -826,16 +846,41 @@ class Translator:
         key_paths_list = []
         key_parts_list = []
         
-        for key_path in missing_keys:
-            key_parts = key_path.split('.')
-            source_value = self._get_nested_value(source_content, key_parts)
-            
-            if isinstance(source_value, str):
-                texts_to_translate.append(source_value)
-                key_paths_list.append(key_path)
-                key_parts_list.append(key_parts)
+        for key_path in missing_keys:            
+            # First, check if this is a direct key in source_content (flat format)
+            if isinstance(source_content, dict) and key_path in source_content:
+                source_value = source_content[key_path]
+                if isinstance(source_value, str):
+                    texts_to_translate.append(source_value)
+                    key_paths_list.append(key_path)
+                    key_parts_list.append([key_path])  # Treat as single-level key
+            else:
+                # Try to treat it as a dot-notation path (nested format)
+                key_parts = key_path.split('.')
+                print(f"DEBUG: Trying as nested path -> key_parts: {key_parts}")
+                
+                source_value = self._get_nested_value(source_content, key_parts)
+                print(f"DEBUG: Source value for nested '{key_path}': {repr(source_value)} (type: {type(source_value)})")
+                
+                if isinstance(source_value, str):
+                    # This is a nested format, use the source value as text to translate
+                    texts_to_translate.append(source_value)
+                    key_paths_list.append(key_path)
+                    key_parts_list.append(key_parts)
+                    print(f"DEBUG: ✓ Added '{key_path}' to translation queue (nested format)")
+                else:
+                    print(f"DEBUG: Source value for '{key_path}': {repr(source_value)} (type: {type(source_value)})")
+                    # For flat formats like .po, the key itself might BE the text to translate
+                    # This is common when msgid is used as the key
+                    texts_to_translate.append(key_path)
+                    key_paths_list.append(key_path)
+                    key_parts_list.append([key_path])
+                    print(f"DEBUG: ✓ Added '{key_path}' to translation queue (flat format - key as text)")
+        
+        print(f"DEBUG: Final translation queue size: {len(texts_to_translate)}")
         
         if not texts_to_translate:
+            print("DEBUG: No texts to translate, returning original target content")
             return updated_content
         
         # Split into batches
@@ -881,7 +926,13 @@ class Translator:
                         
                         # Update content with translated values
                         for j, translated_value in enumerate(translated_batch):
-                            self._set_nested_value(updated_content, batch_key_parts[j], translated_value)
+                            key_parts = batch_key_parts[j]
+                            if len(key_parts) == 1:
+                                # Flat format - set directly
+                                updated_content[key_parts[0]] = translated_value
+                            else:
+                                # Nested format - use nested value setter
+                                self._set_nested_value(updated_content, key_parts, translated_value)
                         
                         print(f"Completed batch {batch_idx}/{num_batches} ({completed_batches}/{num_batches} total completed)")
                         for j in range(len(batch_texts)):
@@ -922,7 +973,13 @@ class Translator:
                         for j, future in futures.items():
                             try:
                                 translated_value = future.result()
-                                self._set_nested_value(updated_content, batch_key_parts[j], translated_value)
+                                key_parts = batch_key_parts[j]
+                                if len(key_parts) == 1:
+                                    # Flat format - set directly
+                                    updated_content[key_parts[0]] = translated_value
+                                else:
+                                    # Nested format - use nested value setter
+                                    self._set_nested_value(updated_content, key_parts, translated_value)
                                 print(f"  ✓ Translated: {batch_key_paths[j]}")
                             except Exception as e:
                                 print(f"  ✗ Error translating {batch_key_paths[j]}: {str(e)}")
@@ -1021,7 +1078,13 @@ class Translator:
                         
                         # Update content with translated values
                         for j, translated_value in enumerate(translated_batch):
-                            self._set_nested_value(updated_content, batch_key_parts[j], translated_value)
+                            key_parts = batch_key_parts[j]
+                            if len(key_parts) == 1:
+                                # Flat format - set directly
+                                updated_content[key_parts[0]] = translated_value
+                            else:
+                                # Nested format - use nested value setter
+                                self._set_nested_value(updated_content, key_parts, translated_value)
                         
                         print(f"Completed batch {batch_idx}/{num_batches} ({completed_batches}/{num_batches} total completed)")
                         for j in range(len(batch_texts)):
@@ -1062,7 +1125,13 @@ class Translator:
                         for j, future in futures.items():
                             try:
                                 translated_value = future.result()
-                                self._set_nested_value(updated_content, batch_key_parts[j], translated_value)
+                                key_parts = batch_key_parts[j]
+                                if len(key_parts) == 1:
+                                    # Flat format - set directly
+                                    updated_content[key_parts[0]] = translated_value
+                                else:
+                                    # Nested format - use nested value setter
+                                    self._set_nested_value(updated_content, key_parts, translated_value)
                                 print(f"  ✓ Translated: {batch_key_paths[j]}")
                             except Exception as e:
                                 print(f"  ✗ Error translating {batch_key_paths[j]}: {str(e)}")
