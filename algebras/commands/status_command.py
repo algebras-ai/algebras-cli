@@ -5,7 +5,7 @@ Check the status of your translations
 import os
 import click
 import requests
-from typing import Optional, Dict, List, Set, Tuple
+from typing import Optional, Dict, List, Set, Tuple, Any
 
 from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
@@ -89,7 +89,8 @@ def count_translated_keys(file_path: str) -> Tuple[int, int]:
             return translated_count, total_keys
         else:
             # Handle nested formats (JSON, YAML, TS)
-            all_keys = extract_all_keys(data)
+            # Only count leaf keys (actual translatable values)
+            all_keys = _extract_leaf_keys(data)
             translated_count = 0
             for key in all_keys:
                 value = get_key_value(data, key)
@@ -101,6 +102,32 @@ def count_translated_keys(file_path: str) -> Tuple[int, int]:
     except Exception as e:
         click.echo(click.style(f"Warning: Could not parse file {file_path}: {str(e)}", fg='yellow'))
         return 0, 0
+
+
+def _extract_leaf_keys(data: Dict[str, Any], prefix: str = '') -> Set[str]:
+    """
+    Extract only leaf keys (keys with non-dict values) from a nested dictionary.
+    
+    Args:
+        data: Dictionary to extract keys from
+        prefix: Prefix for nested keys
+        
+    Returns:
+        Set of leaf keys in the dictionary
+    """
+    keys = set()
+    for key, value in data.items():
+        full_key = f"{prefix}.{key}" if prefix else key
+        
+        # Only add non-dict values (leaf keys)
+        if isinstance(value, dict):
+            # Recursively extract keys from nested dictionaries
+            nested_keys = _extract_leaf_keys(value, full_key)
+            keys.update(nested_keys)
+        else:
+            keys.add(full_key)
+    
+    return keys
 
 
 def count_current_and_outdated_keys(source_file_path: str, target_file_path: str) -> Tuple[int, int]:
@@ -135,8 +162,9 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
                         current_translated += 1
         else:
             # Handle nested formats (JSON, YAML, TS)
-            source_keys = set(extract_all_keys(source_data))
-            target_keys = set(extract_all_keys(target_data))
+            # Only extract leaf keys (actual translatable values, not container keys)
+            source_keys = set(_extract_leaf_keys(source_data))
+            target_keys = set(_extract_leaf_keys(target_data))
             
             # Count current translated keys (keys that exist in both source and target, and have non-empty values)
             current_translated = 0
@@ -221,9 +249,9 @@ def execute(language: Optional[str] = None) -> None:
         total_source_keys = 0
         for source_file in source_files:
             try:
-                total_keys, key_count = count_translated_keys(source_file)
-                source_key_counts[source_file] = key_count
-                total_source_keys += key_count
+                translated_keys, total_keys = count_translated_keys(source_file)
+                source_key_counts[source_file] = total_keys
+                total_source_keys += total_keys
             except Exception as e:
                 click.echo(click.style(f"Warning: Could not count keys in source file {source_file}: {str(e)}", fg='yellow'))
                 source_key_counts[source_file] = 0

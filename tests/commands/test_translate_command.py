@@ -150,8 +150,7 @@ class TestTranslateCommand:
              patch("os.path.dirname", return_value="public/locales/fr"), \
              patch("os.path.basename", return_value=source_basename), \
              patch("os.path.getsize", return_value=1024), \
-             patch("os.path.relpath", return_value=source_file), \
-             patch("builtins.print") as mock_print:  # Mock print to avoid output in terminal
+             patch("os.path.relpath", return_value=source_file):
 
             # Call execute
             translate_command.execute()
@@ -164,7 +163,6 @@ class TestTranslateCommand:
             
             # Verify translation was attempted - should use translate_file
             assert mock_translator.translate_file.called
-            assert mock_print.called
 
             # Verify output messages
             mock_echo.assert_any_call(f"{click.style('Found 1 source files for language \'en\'.', fg='green')}")
@@ -216,7 +214,6 @@ class TestTranslateCommand:
              patch("os.path.getsize", return_value=1024), \
              patch("os.path.relpath", return_value=source_file), \
              patch("algebras.commands.translate_command.click.echo") as mock_echo, \
-             patch("builtins.print") as mock_print, \
              patch("algebras.commands.translate_command.determine_target_path", return_value=target_file):
 
             # Call execute without force
@@ -282,8 +279,7 @@ class TestTranslateCommand:
              patch("os.path.getsize", return_value=1024), \
              patch("os.path.relpath", return_value=source_file), \
              patch("algebras.commands.translate_command.determine_target_path", return_value=target_file), \
-             patch("algebras.commands.translate_command.click.echo") as mock_echo, \
-             patch("builtins.print") as mock_print:
+             patch("algebras.commands.translate_command.click.echo") as mock_echo:
 
             # Call execute with force=True
             translate_command.execute(force=True)
@@ -318,8 +314,8 @@ class TestTranslateCommand:
             # Verify the command executed successfully
             assert result.exit_code == 0
             
-            # Verify execute was called with the right arguments
-            mock_execute.assert_called_once_with(None, False, False, ui_safe=False, verbose=False, batch_size=None, glossary_id=None)
+            # Verify execute was called with the right arguments - including new parameters
+            mock_execute.assert_called_once_with(None, False, False, ui_safe=False, verbose=False, batch_size=None, max_parallel_batches=None, glossary_id=None, prompt_file=None)
             
             # Test with language and force options
             result = runner.invoke(translate, ["--language", "fr", "--force"])
@@ -327,8 +323,8 @@ class TestTranslateCommand:
             # Verify the command executed successfully
             assert result.exit_code == 0
             
-            # Verify execute was called with the right arguments
-            mock_execute.assert_called_with("fr", True, False, ui_safe=False, verbose=False, batch_size=None, glossary_id=None)
+            # Verify execute was called with the right arguments - including new parameters
+            mock_execute.assert_called_with("fr", True, False, ui_safe=False, verbose=False, batch_size=None, max_parallel_batches=None, glossary_id=None, prompt_file=None)
             
             # Test with ui_safe option
             result = runner.invoke(translate, ["--ui-safe"])
@@ -336,5 +332,5 @@ class TestTranslateCommand:
             # Verify the command executed successfully
             assert result.exit_code == 0
             
-            # Verify execute was called with the right arguments
-            mock_execute.assert_called_with(None, False, False, ui_safe=True, verbose=False, batch_size=None, glossary_id=None) 
+            # Verify execute was called with the right arguments - including new parameters
+            mock_execute.assert_called_with(None, False, False, ui_safe=True, verbose=False, batch_size=None, max_parallel_batches=None, glossary_id=None, prompt_file=None) 

@@ -665,6 +665,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     except Exception as e:
                         click.echo(f"  {Fore.RED}Error translating {source_basename}: {str(e)}\x1b[0m")
+                        if verbose:
+                            import traceback
+                            click.echo(f"  {Fore.RED}Traceback: {traceback.format_exc()}\x1b[0m")
         
         click.echo(f"\n{Fore.GREEN}Translation completed.\x1b[0m")
         click.echo(f"To check the status of your translations, run: {Fore.BLUE}algebras status\x1b[0m")
