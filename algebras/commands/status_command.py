@@ -103,6 +103,59 @@ def count_translated_keys(file_path: str) -> Tuple[int, int]:
         return 0, 0
 
 
+def count_current_and_outdated_keys(source_file_path: str, target_file_path: str) -> Tuple[int, int]:
+    """
+    Count current translated keys and outdated keys in a target translation file.
+    
+    Args:
+        source_file_path: Path to the source file
+        target_file_path: Path to the target translation file
+        
+    Returns:
+        Tuple of (current_translated_keys, outdated_keys)
+    """
+    try:
+        if not os.path.exists(source_file_path) or not os.path.exists(target_file_path):
+            return 0, 0
+            
+        source_data = read_language_file(source_file_path)
+        target_data = read_language_file(target_file_path)
+        
+        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict)
+        if target_file_path.endswith(('.po', '.xml', '.strings', '.stringsdict')):
+            source_keys = set(source_data.keys())
+            target_keys = set(target_data.keys())
+            
+            # Count current translated keys (keys that exist in both source and target, and have non-empty values)
+            current_translated = 0
+            for key in source_keys:
+                if key in target_data:
+                    value = target_data[key]
+                    if value is not None and str(value).strip():
+                        current_translated += 1
+        else:
+            # Handle nested formats (JSON, YAML, TS)
+            source_keys = set(extract_all_keys(source_data))
+            target_keys = set(extract_all_keys(target_data))
+            
+            # Count current translated keys (keys that exist in both source and target, and have non-empty values)
+            current_translated = 0
+            for key in source_keys:
+                if key in target_keys:
+                    value = get_key_value(target_data, key)
+                    if value is not None and str(value).strip():
+                        current_translated += 1
+        
+        # Find keys that exist in target but not in source (outdated keys)
+        outdated_keys = target_keys - source_keys
+        return current_translated, len(outdated_keys)
+        
+    except Exception as e:
+        click.echo(click.style(f"Warning: Could not check keys between {source_file_path} and {target_file_path}: {str(e)}", fg='yellow'))
+        return 0, 0
+
+
+
 def execute(language: Optional[str] = None) -> None:
     """
     Check the status of your translations.
@@ -189,9 +242,10 @@ def execute(language: Optional[str] = None) -> None:
             else:
                 file_percentage = 0
             
-            # Count translated keys
+            # Count translated keys and outdated keys
             total_translated_keys = 0
             total_expected_keys = 0
+            total_outdated_keys = 0
             
             for lang_file in lang_files:
                 # Find corresponding source file to get expected key count
@@ -213,22 +267,25 @@ def execute(language: Optional[str] = None) -> None:
                     elif f"_{lang}" in base:
                         base_source = base.replace(f"_{lang}", f"_{source_language}")
                     else:
-                        # Remove language suffix
-                        base_source = base.replace(f".{lang}", "")
+                        # Replace language with source language directly
+                        base_source = base.replace(lang, source_language)
                     
                     source_basename = f"{base_source}.{ext}"
                 else:
                     source_basename = lang_basename.replace(f".{lang}", "")
                 
                 potential_source_file = os.path.join(lang_dirname, source_basename)
-                if not potential_source_file in source_files:
+                
+                if potential_source_file in source_files:
                     source_file = potential_source_file
                     expected_keys = source_key_counts.get(source_file, 0)
                     total_expected_keys += expected_keys
                     
-                    # Count translated keys in target file
-                    translated_keys, _ = count_translated_keys(lang_file)
-                    total_translated_keys += translated_keys
+                    # Count current translated keys and outdated keys
+                    current_translated_keys, outdated_keys = count_current_and_outdated_keys(source_file, lang_file)
+                    
+                    total_translated_keys += current_translated_keys
+                    total_outdated_keys += outdated_keys
             
             # Use total source keys if we couldn't match files properly
             if total_expected_keys == 0:
@@ -248,8 +305,14 @@ def execute(language: Optional[str] = None) -> None:
             else:
                 color = 'red'
             
-            # Print status with both key and file counts
-            click.echo(f"{lang}: {click.style(f'{total_translated_keys}/{total_expected_keys} keys ({key_percentage:.1f}%) in {file_count}/{expected_file_counts[lang]} files ({file_percentage:.1f}%)', fg=color)}")
+            # Print status with both key and file counts, including outdated keys
+            status_parts = [f'{total_translated_keys}/{total_expected_keys} keys ({key_percentage:.1f}%)']
+            if total_outdated_keys > 0:
+                status_parts.append(f'{total_outdated_keys} outdated keys')
+            status_parts.append(f'{file_count}/{expected_file_counts[lang]} files ({file_percentage:.1f}%)')
+            
+            status_text = ' + '.join(status_parts[:-1]) + f' in {status_parts[-1]}'
+            click.echo(f"{lang}: {click.style(status_text, fg=color)}")
             
             # Check for outdated files
             outdated_count = 0
