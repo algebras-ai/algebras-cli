@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">My Android App</string>
+    <string name="welcome_message">Welcome to our app!</string>
+    <string name="login_button">Log In</string>
+    <string name="logout_button">Log Out</string>
+    <string name="settings_title">Settings</string>
+    <string name="profile_title">Profile</string>
+    <string name="save_button">Save</string>
+    <string name="cancel_button">Cancel</string>
+    
+    <plurals name="items_count">
+        <item quantity="zero">No items</item>
+        <item quantity="one">One item</item>
+        <item quantity="other">%d items</item>
+    </plurals>
+    
+    <plurals name="notifications_count">
+        <item quantity="zero">No notifications</item>
+        <item quantity="one">One notification</item>
+        <item quantity="other">%d notifications</item>
+    </plurals>
+</resources>

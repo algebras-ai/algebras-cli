@@ -436,7 +436,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         files_by_language = scanner.group_files_by_language()
         
         # Get source files
+        print(f"Files by language: {files_by_language} (type!!!!: {type(files_by_language)})")
         source_files = files_by_language.get(source_language, [])
+        print(f"Source files: {source_files} (type: {type(source_files)})")
         if not source_files:
             click.echo(f"{Fore.YELLOW}No source files found for language '{source_language}'.\x1b[0m")
             return
@@ -467,7 +469,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
             click.echo(f"\n{Fore.BLUE}Translating to {target_lang}...\x1b[0m")
             
             # Get existing files for this language
+            print(f"Files by language: {files_by_language} (type!!!!: {type(files_by_language)})")
             existing_files = files_by_language.get(target_lang, [])
+            print(f"Existing files: {existing_files} (type: {type(existing_files)})")
             existing_file_basenames = [os.path.basename(f) for f in existing_files]
             existing_file_paths = {os.path.basename(f): f for f in existing_files}
             
@@ -626,51 +630,50 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                 else:
                     # Translate the full file
                     click.echo(f"  {Fore.GREEN}Translating {source_basename} to {target_basename}...\x1b[0m")
-                    try:
-                        # For .stringsdict files, we need to load the target file to get the structure
-                        if source_file.endswith(".stringsdict"):
-                            # Load the target file if it exists to preserve structure
-                            if os.path.exists(target_file):
-                                target_content_raw = read_ios_stringsdict_file(target_file)
-                            else:
-                                # If target file doesn't exist, use source file as template
-                                target_content_raw = read_ios_stringsdict_file(source_file)
-                            
-                            # Translate the file
-                            translated_content = translator.translate_file(source_file, target_lang, ui_safe, glossary_id)
-                            
-                            # Update the target structure with translations
-                            updated_content = update_translatable_strings(target_content_raw, translated_content)
-                            write_ios_stringsdict_file(target_file, updated_content)
+                    # For .stringsdict files, we need to load the target file to get the structure
+                    if source_file.endswith(".stringsdict"):
+                        # Load the target file if it exists to preserve structure
+                        if os.path.exists(target_file):
+                            target_content_raw = read_ios_stringsdict_file(target_file)
                         else:
-                            # For other file types, use the normal translation flow
-                            translated_content = translator.translate_file(source_file, target_lang, ui_safe, glossary_id)
-                            
-                            # Save translated content
-                            if source_file.endswith(".json"):
-                                with open(target_file, "w", encoding="utf-8") as f:
-                                    json.dump(translated_content, f, ensure_ascii=False, indent=2)
-                            elif source_file.endswith((".yaml", ".yml")):
-                                with open(target_file, "w", encoding="utf-8") as f:
-                                    yaml.dump(translated_content, f, default_flow_style=False, allow_unicode=True)
-                            elif source_file.endswith(".ts"):
-                                write_ts_translation_file(target_file, translated_content)
-                            elif source_file.endswith(".xml"):
-                                write_android_xml_file(target_file, translated_content)
-                            elif source_file.endswith(".strings"):
-                                write_ios_strings_file(target_file, translated_content)
-                            elif source_file.endswith(".po"):
-                                write_po_file(target_file, translated_content)
+                            # If target file doesn't exist, use source file as template
+                            target_content_raw = read_ios_stringsdict_file(source_file)
                         
+                        # Translate the file
+                        translated_content = translator.translate_file(source_file, target_lang, ui_safe, glossary_id)
+                        
+                        # Update the target structure with translations
+                        updated_content = update_translatable_strings(target_content_raw, translated_content)
+                        write_ios_stringsdict_file(target_file, updated_content)
+                    else:
+                        # For other file types, use the normal translation flow
+                        translated_content = translator.translate_file(source_file, target_lang, ui_safe, glossary_id)
+                        
+                        # Save translated content
+                        if source_file.endswith(".json"):
+                            with open(target_file, "w", encoding="utf-8") as f:
+                                json.dump(translated_content, f, ensure_ascii=False, indent=2)
+                        elif source_file.endswith((".yaml", ".yml")):
+                            with open(target_file, "w", encoding="utf-8") as f:
+                                yaml.dump(translated_content, f, default_flow_style=False, allow_unicode=True)
+                        elif source_file.endswith(".ts"):
+                            write_ts_translation_file(target_file, translated_content)
+                        elif source_file.endswith(".xml"):
+                            write_android_xml_file(target_file, translated_content)
+                        elif source_file.endswith(".strings"):
+                            write_ios_strings_file(target_file, translated_content)
+                        elif source_file.endswith(".po"):
+                            write_po_file(target_file, translated_content)
+                    
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
-                    except Exception as e:
-                        click.echo(f"  {Fore.RED}Error translating {source_basename}: {str(e)}\x1b[0m")
         
         click.echo(f"\n{Fore.GREEN}Translation completed.\x1b[0m")
         click.echo(f"To check the status of your translations, run: {Fore.BLUE}algebras status\x1b[0m")
     
     except Exception as e:
+        import traceback
         click.echo(f"{Fore.RED}Error: {str(e)}\x1b[0m")
+        traceback.print_exc()
 
 
 def get_nested_value(data: Dict[str, Any], key_parts: List[str]) -> Any:

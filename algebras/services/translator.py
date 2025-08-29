@@ -213,7 +213,7 @@ class Translator:
             return cached_translation
         
         print(f"Cache miss: Translating '{text[:30]}...' ({source_lang} → {target_lang})")
-        provider = self.api_config.get("provider", "openai")
+        provider = self.api_config.get("provider", "algebras-ai")
         
         if provider == "openai":
             translation = self._translate_with_openai(text, source_lang, target_lang)
@@ -639,7 +639,8 @@ class Translator:
         
         # Translate in batches
         translated_values = {}
-        provider = self.api_config.get("provider", "openai")
+        print(f"API CONFIG: {self.api_config} (type: {type(self.api_config)})")
+        provider = self.api_config.get("provider", "algebras-ai")
         
         if provider == "algebras-ai":
             # Use parallel batch processing for Algebras AI
@@ -888,8 +889,8 @@ class Translator:
         num_batches = (total_keys + self.batch_size - 1) // self.batch_size
         
         print(f"Processing {total_keys} missing keys in {num_batches} batches (batch size: {self.batch_size})")
-        
-        provider = self.api_config.get("provider", "openai")
+
+        provider = self.api_config.get("provider", "algebras-ai")
         
         if provider == "algebras-ai":
             # Use parallel batch processing for Algebras AI
@@ -1041,7 +1042,7 @@ class Translator:
         
         print(f"Processing {total_keys} outdated keys in {num_batches} batches (batch size: {self.batch_size})")
         
-        provider = self.api_config.get("provider", "openai")
+        provider = self.api_config.get("provider", "algebras-ai")
         
         if provider == "algebras-ai":
             # Use parallel batch processing for Algebras AI
