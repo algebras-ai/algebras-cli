@@ -27,6 +27,7 @@ from algebras.utils.android_xml_handler import read_android_xml_file
 from algebras.utils.ios_strings_handler import read_ios_strings_file
 from algebras.utils.ios_stringsdict_handler import read_ios_stringsdict_file, extract_translatable_strings
 from algebras.utils.po_handler import read_po_file
+from algebras.utils.html_handler import read_html_file
 
 
 class TranslationCache:
@@ -376,6 +377,8 @@ class Translator:
             content = extract_translatable_strings(raw_content)
         elif file_path.endswith(".po"):
             content = read_po_file(file_path)
+        elif file_path.endswith(".html"):
+            content = read_html_file(file_path)
         else:
             raise ValueError(f"Unsupported file format: {file_path}")
         
@@ -383,9 +386,109 @@ class Translator:
         source_lang = self.config.get_languages()[0]
         
         # Translate the content
-        translated = self._translate_nested_dict(content, source_lang, target_lang, ui_safe, glossary_id)
+        if file_path.endswith(".html"):
+            # HTML files are already flat dictionaries, translate directly
+            translated = self._translate_flat_dict(content, source_lang, target_lang, ui_safe, glossary_id)
+        else:
+            translated = self._translate_nested_dict(content, source_lang, target_lang, ui_safe, glossary_id)
         
         return translated
+    
+    def _translate_flat_dict(self, data: Dict[str, str], source_lang: str, target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, str]:
+        """
+        Translate a flat dictionary (key-value pairs where values are strings).
+        
+        Args:
+            data: Dictionary to translate (flat, string values only)
+            source_lang: Source language code
+            target_lang: Target language code
+            ui_safe: If True, ensures translation will be no more characters than original text
+            glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
+            
+        Returns:
+            Translated dictionary
+        """
+        # Resolve glossary_id from config if not provided
+        if glossary_id is None:
+            glossary_id = self.config.get_setting("api.glossary_id", "")
+        
+        # Get string items and keys
+        string_items = list(data.values())
+        keys = list(data.keys())
+        
+        # Split into batches
+        total_strings = len(string_items)
+        num_batches = (total_strings + self.batch_size - 1) // self.batch_size
+        
+        print(f"Processing {total_strings} text items in {num_batches} batches (batch size: {self.batch_size})")
+        
+        # Translate in batches
+        translated_values = {}
+        provider = self.api_config.get("provider", "algebras-ai")
+        
+        if provider == "algebras-ai":
+            # Use parallel batch processing for Algebras AI
+            print(f"Using parallel batch processing with {self.max_parallel_batches} concurrent batches")
+            
+            # Split into batches
+            batches = []
+            batch_keys = []
+            for i in range(0, total_strings, self.batch_size):
+                batch_strings = string_items[i:i + self.batch_size]
+                batch_key_list = keys[i:i + self.batch_size]
+                batches.append(batch_strings)
+                batch_keys.append(batch_key_list)
+            
+            # Process batches in parallel with limited concurrency
+            def process_batch_range(start_idx, end_idx):
+                batch_results = {}
+                for batch_idx in range(start_idx, min(end_idx, len(batches))):
+                    batch_strings = batches[batch_idx]
+                    batch_key_list = batch_keys[batch_idx]
+                    
+                    print(f"Processing batch {batch_idx + 1}/{len(batches)} ({len(batch_strings)} items)")
+                    batch_translations = self._translate_with_algebras_ai_batch(
+                        batch_strings, source_lang, target_lang, ui_safe, glossary_id
+                    )
+                    
+                    # Map back to keys
+                    for key, translation in zip(batch_key_list, batch_translations):
+                        batch_results[key] = translation
+                        
+                return batch_results
+            
+            # Process batches in groups to limit concurrency
+            all_results = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_parallel_batches) as executor:
+                futures = []
+                
+                # Submit batch ranges
+                for i in range(0, len(batches), self.max_parallel_batches):
+                    end_idx = min(i + self.max_parallel_batches, len(batches))
+                    future = executor.submit(process_batch_range, i, end_idx)
+                    futures.append(future)
+                
+                # Collect results
+                for future in concurrent.futures.as_completed(futures):
+                    batch_result = future.result()
+                    all_results.update(batch_result)
+            
+            translated_values = all_results
+        else:
+            # Single threaded processing for other providers
+            for i in range(0, total_strings, self.batch_size):
+                batch_strings = string_items[i:i + self.batch_size]
+                batch_key_list = keys[i:i + self.batch_size]
+                
+                print(f"Processing batch {i // self.batch_size + 1}/{num_batches} ({len(batch_strings)} items)")
+                
+                # Translate each string individually for non-Algebras AI providers
+                for j, text in enumerate(batch_strings):
+                    key = batch_key_list[j]
+                    translated_text = self._translate_text(text, source_lang, target_lang, ui_safe, glossary_id)
+                    translated_values[key] = translated_text
+        
+        return translated_values
     
     def translate_missing_keys(self, source_content: Dict[str, Any], target_content: Dict[str, Any], 
                               missing_keys: List[str], target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:

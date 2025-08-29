@@ -25,6 +25,7 @@ from algebras.utils.ios_stringsdict_handler import (
     update_translatable_strings
 )
 from algebras.utils.po_handler import read_po_file, write_po_file
+from algebras.utils.html_handler import read_html_file, write_html_file
 
 
 def execute(language: Optional[str] = None, force: bool = False, only_missing: bool = False,
@@ -194,12 +195,19 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     elif source_file.endswith(".po"):
                         source_content = read_po_file(source_file)
                         target_content = read_po_file(target_file)
+                    elif source_file.endswith(".html"):
+                        source_content = read_html_file(source_file)
+                        target_content = read_html_file(target_file)
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
                     # Extract all keys from both files
-                    source_keys = extract_all_keys(source_content)
-                    target_keys = extract_all_keys(target_content)
+                    if source_file.endswith(".html"):
+                        source_keys = set(source_content.keys())
+                        target_keys = set(target_content.keys())
+                    else:
+                        source_keys = extract_all_keys(source_content)
+                        target_keys = extract_all_keys(target_content)
                     
                     # Find keys that exist in both files - these are potentially outdated
                     common_keys = source_keys.intersection(target_keys)
@@ -207,9 +215,14 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     # Compare values to find potentially modified keys
                     modified_keys = []
                     for key in common_keys:
-                        key_parts = key.split('.')
-                        source_value = get_nested_value(source_content, key_parts)
-                        target_value = get_nested_value(target_content, key_parts)
+                        if source_file.endswith(".html"):
+                            # For HTML files, keys are already hash-based, so compare values directly
+                            source_value = source_content.get(key)
+                            target_value = target_content.get(key)
+                        else:
+                            key_parts = key.split('.')
+                            source_value = get_nested_value(source_content, key_parts)
+                            target_value = get_nested_value(target_content, key_parts)
                         
                         # If values are different, consider this key outdated
                         if source_value != target_value and isinstance(source_value, str):
@@ -272,6 +285,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             # For .stringsdict files, update the original structure with translations
                             updated_content = update_translatable_strings(target_content_raw, target_content)
                             write_ios_stringsdict_file(target_file, updated_content)
+                        elif target_file.endswith(".html"):
+                            write_html_file(target_file, source_file, target_content)
                         
                         updated_count = len(missing_keys) + len(modified_keys)
                         click.echo(f"  {Fore.GREEN}✓ Updated {updated_count} keys in {target_file}\x1b[0m")
@@ -315,6 +330,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     elif source_file.endswith(".po"):
                         source_content = read_po_file(source_file)
                         target_content = read_po_file(target_file)
+                    elif source_file.endswith(".html"):
+                        source_content = read_html_file(source_file)
+                        target_content = read_html_file(target_file)
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
@@ -349,6 +367,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             write_ios_stringsdict_file(target_file, updated_content)
                         elif target_file.endswith(".po"):
                             write_po_file(target_file, target_content)
+                        elif target_file.endswith(".html"):
+                            write_html_file(target_file, source_file, target_content)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                 except Exception as e:
@@ -388,6 +408,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".po"):
                             source_content = read_po_file(source_file)
                             target_content = read_po_file(target_file)
+                        elif source_file.endswith(".html"):
+                            source_content = read_html_file(source_file)
+                            target_content = read_html_file(target_file)
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
@@ -421,6 +444,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 write_ios_stringsdict_file(target_file, updated_content)
                             elif target_file.endswith(".po"):
                                 write_po_file(target_file, target_content)
+                            elif target_file.endswith(".html"):
+                                write_html_file(target_file, source_file, target_content)
                             
                             click.echo(f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -598,6 +623,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".po"):
                             source_content = read_po_file(source_file)
                             target_content = read_po_file(target_file)
+                        elif source_file.endswith(".html"):
+                            source_content = read_html_file(source_file)
+                            target_content = read_html_file(target_file)
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
@@ -629,6 +657,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             write_ios_stringsdict_file(target_file, updated_content)
                         elif source_file.endswith(".po"):
                             write_po_file(target_file, translated_content)
+                        elif source_file.endswith(".html"):
+                            write_html_file(target_file, source_file, translated_content)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -670,6 +700,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             write_ios_strings_file(target_file, translated_content)
                         elif source_file.endswith(".po"):
                             write_po_file(target_file, translated_content)
+                        elif source_file.endswith(".html"):
+                            write_html_file(target_file, source_file, translated_content)
                     
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
         
