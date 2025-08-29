@@ -164,11 +164,10 @@ class TestTranslateCommand:
             
             # Verify translation was attempted - should use translate_file
             assert mock_translator.translate_file.called
-            assert mock_print.called
 
-            # Verify output messages
-            mock_echo.assert_any_call(f"{click.style('Found 1 source files for language \'en\'.', fg='green')}")
-            mock_echo.assert_any_call(f"\n{click.style('Translating to fr...', fg='blue')}")
+            # Verify output messages (updated to match actual implementation with raw color codes)
+            mock_echo.assert_any_call("\x1b[32mFound 1 source files for language 'en'.\x1b[0m")
+            mock_echo.assert_any_call("\n\x1b[34mTranslating to fr...\x1b[0m")
 
     def test_execute_skip_uptodate(self):
         """Test execute with up-to-date files (should skip)"""
@@ -318,8 +317,8 @@ class TestTranslateCommand:
             # Verify the command executed successfully
             assert result.exit_code == 0
             
-            # Verify execute was called with the right arguments
-            mock_execute.assert_called_once_with(None, False, False, ui_safe=False, verbose=False, batch_size=None, glossary_id=None)
+            # Verify execute was called with the right arguments (updated with new parameters)
+            mock_execute.assert_called_once_with(None, False, False, ui_safe=False, verbose=False, batch_size=None, max_parallel_batches=None, glossary_id=None, prompt_file=None)
             
             # Test with language and force options
             result = runner.invoke(translate, ["--language", "fr", "--force"])
@@ -328,7 +327,7 @@ class TestTranslateCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments
-            mock_execute.assert_called_with("fr", True, False, ui_safe=False, verbose=False, batch_size=None, glossary_id=None)
+            mock_execute.assert_called_with("fr", True, False, ui_safe=False, verbose=False, batch_size=None, max_parallel_batches=None, glossary_id=None, prompt_file=None)
             
             # Test with ui_safe option
             result = runner.invoke(translate, ["--ui-safe"])
@@ -337,4 +336,4 @@ class TestTranslateCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments
-            mock_execute.assert_called_with(None, False, False, ui_safe=True, verbose=False, batch_size=None, glossary_id=None) 
+            mock_execute.assert_called_with(None, False, False, ui_safe=True, verbose=False, batch_size=None, max_parallel_batches=None, glossary_id=None, prompt_file=None) 

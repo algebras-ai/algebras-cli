@@ -105,6 +105,9 @@ class TestStatusCommand:
         with patch("algebras.commands.status_command.Config", return_value=mock_config), \
              patch("algebras.commands.status_command.FileScanner", return_value=mock_scanner), \
              patch("os.path.getmtime", return_value=1000), \
+             patch("algebras.commands.status_command.validate_languages_with_api", return_value=(["en", "fr", "es"], [])), \
+             patch("algebras.commands.status_command.count_translated_keys", return_value=(1, 2)), \
+             patch("algebras.commands.status_command.count_current_and_outdated_keys", return_value=(1, 0)), \
              patch("algebras.commands.status_command.click.echo") as mock_echo:
             
             # Call execute
@@ -120,8 +123,9 @@ class TestStatusCommand:
             # Verify output messages
             mock_echo.assert_any_call(f"\n{click.style('Translation Status', fg='blue')}")
             mock_echo.assert_any_call(f"Source language: en (2 files)")
-            mock_echo.assert_any_call(f"fr: {click.style('1/2 files (50.0%)', fg='yellow')}")
-            mock_echo.assert_any_call(f"es: {click.style('2/2 files (100.0%)', fg='green')}")
+            # Updated format: shows keys and files
+            mock_echo.assert_any_call(f"fr: {click.style('1/2 keys (50.0%) in 1/2 files (50.0%)', fg='yellow')}")
+            mock_echo.assert_any_call(f"es: {click.style('2/4 keys (50.0%) in 2/2 files (100.0%)', fg='yellow')}")
 
     def test_execute_status_single_language(self):
         """Test execute status for a specific language"""
@@ -142,6 +146,9 @@ class TestStatusCommand:
         with patch("algebras.commands.status_command.Config", return_value=mock_config), \
              patch("algebras.commands.status_command.FileScanner", return_value=mock_scanner), \
              patch("os.path.getmtime", return_value=1000), \
+             patch("algebras.commands.status_command.validate_languages_with_api", return_value=(["en", "fr", "es"], [])), \
+             patch("algebras.commands.status_command.count_translated_keys", return_value=(1, 2)), \
+             patch("algebras.commands.status_command.count_current_and_outdated_keys", return_value=(1, 0)), \
              patch("algebras.commands.status_command.click.echo") as mock_echo:
             
             # Call execute
@@ -157,10 +164,10 @@ class TestStatusCommand:
             # Verify output messages
             mock_echo.assert_any_call(f"\n{click.style('Translation Status', fg='blue')}")
             mock_echo.assert_any_call(f"Source language: en (2 files)")
-            mock_echo.assert_any_call(f"fr: {click.style('1/2 files (50.0%)', fg='yellow')}")
+            mock_echo.assert_any_call(f"fr: {click.style('1/2 keys (50.0%) in 1/2 files (50.0%)', fg='yellow')}")
             
             # Verify that es language is not in the output
-            assert not any(call.args[0].endswith("es:") for call in mock_echo.call_args_list)
+            assert not any(call.args[0].startswith("es:") for call in mock_echo.call_args_list)
 
     def test_execute_detect_outdated_files(self):
         """Test execute with outdated files"""
