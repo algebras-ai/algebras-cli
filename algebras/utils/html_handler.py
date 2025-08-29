@@ -35,12 +35,26 @@ def read_html_file(file_path: str) -> Dict[str, str]:
     
     for tag_name in text_tags:
         for tag in soup.find_all(tag_name):
-            # Get direct text content (not from nested tags)
-            text = tag.get_text(strip=True)
-            if text:
-                # Create hash key for the text content
-                text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()[:12]
-                translations[text_hash] = text
+            # Extract individual text nodes to handle mixed content properly
+            text_nodes = []
+            for content in tag.contents:
+                if isinstance(content, NavigableString):
+                    text_content = str(content).strip()
+                    if text_content:
+                        text_nodes.append(text_content)
+            
+            # If we have text nodes, process each one
+            if text_nodes:
+                for text in text_nodes:
+                    text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()[:12]
+                    translations[text_hash] = text
+            else:
+                # Fallback to get_text for simple cases
+                text = tag.get_text(strip=True)
+                if text:
+                    # Create hash key for the text content
+                    text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()[:12]
+                    translations[text_hash] = text
     
     # Extract alt attributes from images
     for img in soup.find_all("img"):
@@ -107,23 +121,12 @@ def write_html_file(file_path: str, original_file_path: str, translations: Dict[
     
     for tag_name in text_tags:
         for tag in soup.find_all(tag_name):
-            # Check if this tag has direct text content (not just from children)
-            if tag.string and tag.string.strip():
-                original_text = tag.string.strip()
-                if original_text in original_to_translation:
-                    tag.string.replace_with(original_to_translation[original_text])
-            elif len(list(tag.children)) == 1 and isinstance(list(tag.children)[0], NavigableString):
-                # Handle case where tag has only one text node
-                original_text = str(list(tag.children)[0]).strip()
-                if original_text in original_to_translation:
-                    list(tag.children)[0].replace_with(original_to_translation[original_text])
-            else:
-                # Handle tags with mixed content (text + other tags)
-                for content in tag.contents:
-                    if isinstance(content, NavigableString):
-                        text_content = str(content).strip()
-                        if text_content and text_content in original_to_translation:
-                            content.replace_with(original_to_translation[text_content])
+            # Handle tags with mixed content (text + other tags) - process all NavigableString content
+            for content in list(tag.contents):  # Use list() to avoid modification during iteration
+                if isinstance(content, NavigableString):
+                    text_content = str(content).strip()
+                    if text_content and text_content in original_to_translation:
+                        content.replace_with(original_to_translation[text_content])
     
     # Replace alt attributes in images
     for img in soup.find_all("img"):
@@ -176,17 +179,39 @@ def get_html_element_locations(file_path: str) -> Dict[str, List[Tuple[str, str]
     
     for tag_name in text_tags:
         for idx, tag in enumerate(soup.find_all(tag_name)):
-            text = tag.get_text(strip=True)
-            if text:
-                text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()[:12]
-                if text_hash not in element_locations:
-                    element_locations[text_hash] = []
-                
-                # Create context information
-                classes = tag.get("class", [])
-                class_str = ".".join(classes) if classes else ""
-                context = f"{tag_name}[{idx}]" + (f".{class_str}" if class_str else "")
-                element_locations[text_hash].append(("text_content", context))
+            # Extract individual text nodes to handle mixed content properly
+            text_nodes = []
+            for content in tag.contents:
+                if isinstance(content, NavigableString):
+                    text_content = str(content).strip()
+                    if text_content:
+                        text_nodes.append(text_content)
+            
+            # If we have text nodes, process each one
+            if text_nodes:
+                for text in text_nodes:
+                    text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()[:12]
+                    if text_hash not in element_locations:
+                        element_locations[text_hash] = []
+                    
+                    # Create context information
+                    classes = tag.get("class", [])
+                    class_str = ".".join(classes) if classes else ""
+                    context = f"{tag_name}[{idx}]" + (f".{class_str}" if class_str else "")
+                    element_locations[text_hash].append(("text_content", context))
+            else:
+                # Fallback to get_text for simple cases
+                text = tag.get_text(strip=True)
+                if text:
+                    text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()[:12]
+                    if text_hash not in element_locations:
+                        element_locations[text_hash] = []
+                    
+                    # Create context information
+                    classes = tag.get("class", [])
+                    class_str = ".".join(classes) if classes else ""
+                    context = f"{tag_name}[{idx}]" + (f".{class_str}" if class_str else "")
+                    element_locations[text_hash].append(("text_content", context))
     
     # Track alt attribute locations
     for idx, img in enumerate(soup.find_all("img")):
