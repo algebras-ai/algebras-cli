@@ -48,6 +48,11 @@ class FileScanner:
             # More general patterns for iOS files
             "**/*.strings",
             "**/*.stringsdict",
+            # Android values directory patterns
+            "**/values/*.xml",          # Base language files: .../values/*.xml
+            "**/values-*/*.xml",        # Localized files: .../values-{lang}/*.xml
+            "values/*.xml",              # Direct values directory
+            "values-*/*.xml",            # Direct values-{lang} directories
             # gettext .po files
             "**/*.po",
             "locale/*/*.po",
@@ -111,6 +116,32 @@ class FileScanner:
         for file_path in files:
             base_name = os.path.basename(file_path)
             directory = os.path.dirname(file_path)
+            
+            # Special handling for Android values directory structure
+            # Pattern: .../values/*.xml (base language) and .../values-{lang}/*.xml (translations)
+            if file_path.endswith('.xml'):
+                parts = file_path.split(os.path.sep)
+                
+                # Look for values or values-{lang} directory in the path
+                for i, part in enumerate(parts):
+                    if part == "values":
+                        # This is a base language file in /values/ directory
+                        result[source_language].append(file_path)
+                        assigned_files.add(file_path)
+                        break
+                    elif part.startswith("values-") and len(part) > 7:  # "values-" is 7 chars
+                        # Extract language code from values-{lang}
+                        lang_code = part[7:]  # Remove "values-" prefix
+                        
+                        # Check if this language is in our config
+                        if lang_code in languages:
+                            result[lang_code].append(file_path)
+                            assigned_files.add(file_path)
+                            break
+                
+                # If assigned to Android pattern, skip other language checks
+                if file_path in assigned_files:
+                    continue
             
             # Special handling for public/locales/{lang}/common.json structure
             if "public/locales/" in file_path or f"public{os.path.sep}locales{os.path.sep}" in file_path:

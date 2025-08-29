@@ -210,7 +210,6 @@ class Config:
             if not self.exists():
                 return []
             self.load()
-        
         return self.data.get("path_rules", [])
     
     def get_api_config(self) -> Dict[str, str]:

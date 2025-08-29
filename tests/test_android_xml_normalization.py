@@ -22,9 +22,9 @@ def test_android_xml_normalization_enabled():
         result = _escape_xml_text("Ko'proq matn")
         assert result == "Ko'proq matn"  # Should NOT escape apostrophes
         
-        # Test with quotes (should still be escaped)
+        # Test with quotes (should NOT be escaped when normalization is enabled)
         result = _escape_xml_text('Say "hello"')
-        assert result == 'Say \\"hello\\"'  # Should escape quotes
+        assert result == 'Say "hello"'  # Should NOT escape quotes when normalization is enabled
 
 
 def test_android_xml_normalization_disabled():

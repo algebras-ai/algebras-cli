@@ -15,6 +15,24 @@ def determine_target_path(source_path: str, source_lang: str, target_lang: str) 
     # Replace the source language folder with target language folder if present
     target_path = source_path
     
+    # Handle Android values directory structure first (highest priority)
+    # Pattern: .../values/*.xml -> .../values-{lang}/*.xml
+    if source_path.endswith('.xml'):
+        path_parts = os.path.normpath(source_path).split(os.sep)
+        
+        # Look for values directory in the path
+        for i, part in enumerate(path_parts):
+            if part == "values":
+                # Convert /values/ to /values-{target_lang}/
+                path_parts[i] = f"values-{target_lang}"
+                target_path = os.path.join(*path_parts)
+                return target_path
+            elif part.startswith("values-"):
+                # Replace /values-{source_lang}/ with /values-{target_lang}/
+                path_parts[i] = f"values-{target_lang}"
+                target_path = os.path.join(*path_parts)
+                return target_path
+    
     # Handle path separators for different operating systems
     if f"/{source_lang}/" in source_path or f"\\{source_lang}\\" in source_path:
         target_path = source_path.replace(f"/{source_lang}/", f"/{target_lang}/")
