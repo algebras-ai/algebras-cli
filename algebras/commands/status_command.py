@@ -10,6 +10,7 @@ from typing import Optional, Dict, List, Set, Tuple
 from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
 from algebras.utils.lang_validator import read_language_file, extract_all_keys, get_key_value
+from algebras.utils.html_handler import read_html_file
 
 
 def validate_languages_with_api(languages: List[str]) -> Tuple[List[str], List[str]]:
@@ -75,6 +76,17 @@ def count_translated_keys(file_path: str) -> Tuple[int, int]:
         if not os.path.exists(file_path):
             return 0, 0
             
+        # Handle HTML files separately
+        if file_path.endswith('.html'):
+            data = read_html_file(file_path)
+            total_keys = len(data)
+            translated_count = 0
+            for key, value in data.items():
+                # Count as translated if value is not None, not empty string, and not just whitespace
+                if value is not None and str(value).strip():
+                    translated_count += 1
+            return translated_count, total_keys
+        
         data = read_language_file(file_path)
         
         # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict) 
@@ -117,12 +129,11 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
     try:
         if not os.path.exists(source_file_path) or not os.path.exists(target_file_path):
             return 0, 0
-            
-        source_data = read_language_file(source_file_path)
-        target_data = read_language_file(target_file_path)
         
-        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict)
-        if target_file_path.endswith(('.po', '.xml', '.strings', '.stringsdict')):
+        # Handle HTML files separately
+        if target_file_path.endswith('.html'):
+            source_data = read_html_file(source_file_path)
+            target_data = read_html_file(target_file_path)
             source_keys = set(source_data.keys())
             target_keys = set(target_data.keys())
             
@@ -134,17 +145,33 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
                     if value is not None and str(value).strip():
                         current_translated += 1
         else:
-            # Handle nested formats (JSON, YAML, TS)
-            source_keys = set(extract_all_keys(source_data))
-            target_keys = set(extract_all_keys(target_data))
+            source_data = read_language_file(source_file_path)
+            target_data = read_language_file(target_file_path)
             
-            # Count current translated keys (keys that exist in both source and target, and have non-empty values)
-            current_translated = 0
-            for key in source_keys:
-                if key in target_keys:
-                    value = get_key_value(target_data, key)
-                    if value is not None and str(value).strip():
-                        current_translated += 1
+            # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict)
+            if target_file_path.endswith(('.po', '.xml', '.strings', '.stringsdict')):
+                source_keys = set(source_data.keys())
+                target_keys = set(target_data.keys())
+                
+                # Count current translated keys (keys that exist in both source and target, and have non-empty values)
+                current_translated = 0
+                for key in source_keys:
+                    if key in target_data:
+                        value = target_data[key]
+                        if value is not None and str(value).strip():
+                            current_translated += 1
+            else:
+                # Handle nested formats (JSON, YAML, TS)
+                source_keys = set(extract_all_keys(source_data))
+                target_keys = set(extract_all_keys(target_data))
+                
+                # Count current translated keys (keys that exist in both source and target, and have non-empty values)
+                current_translated = 0
+                for key in source_keys:
+                    if key in target_keys:
+                        value = get_key_value(target_data, key)
+                        if value is not None and str(value).strip():
+                            current_translated += 1
         
         # Find keys that exist in target but not in source (outdated keys)
         outdated_keys = target_keys - source_keys
