@@ -639,7 +639,6 @@ class Translator:
         
         # Translate in batches
         translated_values = {}
-        print(f"API CONFIG: {self.api_config} (type: {type(self.api_config)})")
         provider = self.api_config.get("provider", "algebras-ai")
         
         if provider == "algebras-ai":

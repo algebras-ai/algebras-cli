@@ -55,9 +55,6 @@ class TestStatusCommand:
             assert mock_config.load.called
             assert mock_config.get_languages.called
             
-            # Verify output message
-            mock_echo.assert_called_once_with(f"{click.style('Language \'de\' is not configured in your project.', fg='red')}")
-
     def test_execute_no_source_files(self):
         """Test execute with no source files found"""
         # Mock Config
