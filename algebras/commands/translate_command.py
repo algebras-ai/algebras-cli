@@ -436,9 +436,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         files_by_language = scanner.group_files_by_language()
         
         # Get source files
-        print(f"Files by language: {files_by_language} (type!!!!: {type(files_by_language)})")
         source_files = files_by_language.get(source_language, [])
-        print(f"Source files: {source_files} (type: {type(source_files)})")
         if not source_files:
             click.echo(f"{Fore.YELLOW}No source files found for language '{source_language}'.\x1b[0m")
             return
@@ -469,9 +467,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
             click.echo(f"\n{Fore.BLUE}Translating to {target_lang}...\x1b[0m")
             
             # Get existing files for this language
-            print(f"Files by language: {files_by_language} (type!!!!: {type(files_by_language)})")
             existing_files = files_by_language.get(target_lang, [])
-            print(f"Existing files: {existing_files} (type: {type(existing_files)})")
             existing_file_basenames = [os.path.basename(f) for f in existing_files]
             existing_file_paths = {os.path.basename(f): f for f in existing_files}
             
@@ -510,8 +506,13 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             has_lang_directory = any(part == source_language or part.lower() == source_language.lower() 
                                                    for part in source_dir_parts)
                             
-                            if has_lang_directory:
-                                # File is in language-specific directory, preserve original filename
+                            # Special handling for Android values structure
+                            # Files in .../values/*.xml should preserve filename (not add language suffix)
+                            is_android_values = (source_file.endswith('.xml') and 
+                                               any(part == 'values' for part in source_dir_parts))
+                            
+                            if has_lang_directory or is_android_values:
+                                # File is in language-specific directory or Android values, preserve original filename
                                 target_basename = source_basename
                             else:
                                 # File is not in language-specific directory, add language marker to filename
@@ -523,8 +524,13 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         has_lang_directory = any(part == source_language or part.lower() == source_language.lower() 
                                                for part in source_dir_parts)
                         
-                        if has_lang_directory:
-                            # File is in language-specific directory, preserve original filename
+                        # Special handling for Android values structure
+                        # Files in .../values/*.xml should preserve filename (not add language suffix)
+                        is_android_values = (source_file.endswith('.xml') and 
+                                           any(part == 'values' for part in source_dir_parts))
+                        
+                        if has_lang_directory or is_android_values:
+                            # File is in language-specific directory or Android values, preserve original filename
                             target_basename = source_basename
                         else:
                             # File is not in language-specific directory, add language marker to filename
