@@ -75,7 +75,7 @@ class GlossaryService:
                 error_msg = str(e)
             raise requests.RequestException(f"Failed to create glossary: {error_msg}")
     
-    def add_terms_bulk(self, glossary_id: str, terms: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def add_terms_bulk(self, glossary_id: str, terms: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Add multiple terms to a glossary in bulk.
         
@@ -84,7 +84,14 @@ class GlossaryService:
             terms: List of term dictionaries with definitions
             
         Returns:
-            List of created term data
+            Dictionary containing the result with status, successful terms, and failed terms:
+            {
+                "status": "ok" | "partial_success",
+                "successful": List of created term data,
+                "failed": List of failed term data with error details,
+                "successCount": int,
+                "failedCount": int
+            }
             
         Raises:
             ValueError: If API key is not set
@@ -102,8 +109,27 @@ class GlossaryService:
             response.raise_for_status()
             
             result = response.json()
-            if result.get("status") == "ok" and "data" in result:
-                return result["data"]
+            status = result.get("status")
+            
+            if status == "ok":
+                # All terms created successfully
+                return {
+                    "status": "ok",
+                    "successful": result.get("data", []),
+                    "failed": [],
+                    "successCount": len(result.get("data", [])),
+                    "failedCount": 0
+                }
+            elif status == "partial_success":
+                # Some terms created, some failed
+                data = result.get("data", {})
+                return {
+                    "status": "partial_success",
+                    "successful": data.get("successful", []),
+                    "failed": data.get("failed", []),
+                    "successCount": data.get("successCount", 0),
+                    "failedCount": data.get("failedCount", 0)
+                }
             else:
                 raise requests.RequestException(f"API returned error: {result.get('error', 'Unknown error')}")
                 
@@ -112,8 +138,19 @@ class GlossaryService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('error', {}).get('message', str(e))
+                    # Try to get more detailed error information
+                    if 'details' in error_data.get('error', {}):
+                        error_msg += f" Details: {error_data['error']['details']}"
+                    if 'validation_errors' in error_data:
+                        error_msg += f" Validation errors: {error_data['validation_errors']}"
                 except:
                     error_msg = str(e)
+                    # Try to get response text for more details
+                    try:
+                        if hasattr(e, 'response') and e.response is not None:
+                            error_msg += f" Response: {e.response.text[:500]}"
+                    except:
+                        pass
             else:
                 error_msg = str(e)
             raise requests.RequestException(f"Failed to add terms to glossary: {error_msg}")

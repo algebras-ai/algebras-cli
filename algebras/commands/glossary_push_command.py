@@ -64,14 +64,15 @@ def execute(csv_file: str, name: str) -> None:
             click.echo(f"{Fore.RED}Error creating glossary: {str(e)}{Fore.RESET}")
             return
         
-        # Upload terms in batches of 100
-        batch_size = 500
+        # Upload terms in batches of 500
+        batch_size = 20
         total_batches = (len(terms) + batch_size - 1) // batch_size
         
         click.echo(f"{Fore.BLUE}Uploading {len(terms)} terms in {total_batches} batches of {batch_size}...{Fore.RESET}")
         
-        successful_terms = 0
-        failed_terms = 0
+        total_successful = 0
+        total_failed = 0
+        batch_results = []
         
         for batch_num in range(total_batches):
             start_idx = batch_num * batch_size
@@ -82,11 +83,30 @@ def execute(csv_file: str, name: str) -> None:
             
             try:
                 result = glossary_service.add_terms_bulk(glossary_id, batch_terms)
-                successful_terms += len(batch_terms)
-                click.echo(f"{Fore.GREEN}✓ Batch {batch_num + 1} uploaded successfully{Fore.RESET}")
+                batch_results.append(result)
+                
+                # Update counters based on result status
+                if result["status"] == "ok":
+                    total_successful += result["successCount"]
+                    click.echo(f"{Fore.GREEN}✓ Batch {batch_num + 1} uploaded successfully ({result['successCount']} terms){Fore.RESET}")
+                elif result["status"] == "partial_success":
+                    total_successful += result["successCount"]
+                    total_failed += result["failedCount"]
+                    click.echo(f"{Fore.YELLOW}⚠ Batch {batch_num + 1} partially successful ({result['successCount']} successful, {result['failedCount']} failed){Fore.RESET}")
+                    
+                    # Show details of failed terms in this batch
+                    if result["failed"]:
+                        click.echo(f"{Fore.RED}  Failed terms:{Fore.RESET}")
+                        for failed_term in result["failed"]:
+                            error_msg = failed_term.get("error", "Unknown error")
+                            details = failed_term.get("details", "")
+                            click.echo(f"    - Index {failed_term.get('index', '?')}: {error_msg}")
+                            if details:
+                                click.echo(f"      Details: {details}")
+                
             except Exception as e:
-                failed_terms += len(batch_terms)
-                click.echo(f"{Fore.RED}✗ Batch {batch_num + 1} failed: {str(e)}{Fore.RESET}")
+                total_failed += len(batch_terms)
+                click.echo(f"{Fore.RED}✗ Batch {batch_num + 1} failed completely: {str(e)}{Fore.RESET}")
                 # Continue with next batch instead of stopping completely
                 continue
         
@@ -96,12 +116,15 @@ def execute(csv_file: str, name: str) -> None:
         click.echo(f"Glossary Name: {name}")
         click.echo(f"Languages: {', '.join(language_codes)}")
         click.echo(f"Total terms: {len(terms)}")
-        click.echo(f"Successful uploads: {successful_terms}")
-        if failed_terms > 0:
-            click.echo(f"{Fore.RED}Failed uploads: {failed_terms}{Fore.RESET}")
+        click.echo(f"{Fore.GREEN}Successful uploads: {total_successful}{Fore.RESET}")
+        if total_failed > 0:
+            click.echo(f"{Fore.RED}Failed uploads: {total_failed}{Fore.RESET}")
         
-        if successful_terms > 0:
-            click.echo(f"{Fore.GREEN}✓ Glossary push completed successfully!{Fore.RESET}")
+        # Overall status
+        if total_failed == 0:
+            click.echo(f"{Fore.GREEN}✓ Glossary push completed successfully! All terms uploaded.{Fore.RESET}")
+        elif total_successful > 0:
+            click.echo(f"{Fore.YELLOW}⚠ Glossary push completed with partial success. {total_successful} terms uploaded, {total_failed} failed.{Fore.RESET}")
         else:
             click.echo(f"{Fore.RED}✗ No terms were uploaded successfully{Fore.RESET}")
     

@@ -82,6 +82,21 @@ class GlossaryCSVParser:
                         if not term_text:
                             continue
                         
+                        # Validate term text for potential issues
+                        if len(term_text) > 1000:  # Reasonable limit for term length
+                            click.echo(f"{Fore.YELLOW}Warning: Row {row_num}, language {lang_code}: Term too long ({len(term_text)} chars), truncating{Fore.RESET}")
+                            term_text = term_text[:1000]
+                        
+                        # Check for problematic characters that might cause API issues
+                        if '\x00' in term_text:  # Null bytes
+                            click.echo(f"{Fore.YELLOW}Warning: Row {row_num}, language {lang_code}: Contains null bytes, removing{Fore.RESET}")
+                            term_text = term_text.replace('\x00', '')
+                        
+                        # Validate language code format
+                        if not lang_code or not isinstance(lang_code, str) or len(lang_code) < 2:
+                            click.echo(f"{Fore.YELLOW}Warning: Row {row_num}: Invalid language code '{lang_code}', skipping{Fore.RESET}")
+                            continue
+                        
                         definitions.append({
                             "language": lang_code,
                             "term": term_text,
