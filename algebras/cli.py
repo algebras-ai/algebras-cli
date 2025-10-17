@@ -11,7 +11,7 @@ from algebras.config import Config
 from algebras.commands import init_command, add_command
 from algebras.commands import translate_command, update_command
 from algebras.commands import review_command, status_command
-from algebras.commands import configure_command
+from algebras.commands import configure_command, glossary_push_command
 
 # Initialize colorama
 init()
@@ -105,6 +105,20 @@ def status(language):
 def configure(provider, model, path_rules, batch_size, max_parallel_batches, glossary_id, prompt, normalize_strings):
     """Configure your Algebras project settings."""
     configure_command.execute(provider, model, path_rules, batch_size, max_parallel_batches, glossary_id, prompt, normalize_strings)
+
+
+@cli.group("glossary")
+def glossary():
+    """Manage glossaries for translation."""
+    pass
+
+
+@glossary.command("push")
+@click.argument("csv_file", type=click.Path(exists=True))
+@click.option("--name", required=True, help="Name of the glossary to create")
+def glossary_push(csv_file, name):
+    """Upload glossary terms from CSV file."""
+    glossary_push_command.execute(csv_file, name)
 
 
 def main():
