@@ -29,7 +29,10 @@ def validate_languages_with_api(languages: List[str]) -> Tuple[List[str], List[s
         return languages, []
     
     try:
-        url = "https://platform.algebras.ai/api/v1/translation/languages"
+        # Get base URL from config
+        config = Config()
+        base_url = config.get_base_url()
+        url = f"{base_url}/api/v1/translation/languages"
         headers = {
             "accept": "application/json",
             "X-Api-Key": api_key
