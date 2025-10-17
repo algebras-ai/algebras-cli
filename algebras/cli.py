@@ -114,11 +114,11 @@ def glossary():
 
 
 @glossary.command("push")
-@click.argument("csv_file", type=click.Path(exists=True))
+@click.argument("file", type=click.Path(exists=True))
 @click.option("--name", required=True, help="Name of the glossary to create")
-def glossary_push(csv_file, name):
-    """Upload glossary terms from CSV file."""
-    glossary_push_command.execute(csv_file, name)
+def glossary_push(file, name):
+    """Upload glossary terms from CSV or XLSX file."""
+    glossary_push_command.execute(file, name)
 
 
 def main():

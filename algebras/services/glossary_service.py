@@ -5,8 +5,14 @@ Glossary service for managing glossaries via Algebras AI API
 import os
 import requests
 import click
+import json
 from colorama import Fore
 from typing import List, Dict, Any, Optional
+
+
+class PayloadTooLargeError(Exception):
+    """Raised when request payload exceeds size limit."""
+    pass
 
 
 class GlossaryService:
@@ -96,6 +102,7 @@ class GlossaryService:
         Raises:
             ValueError: If API key is not set
             requests.RequestException: If API request fails
+            PayloadTooLargeError: If request payload exceeds 500KB limit
         """
         base_url = self.config.get_base_url()
         url = f"{base_url}/api/v1/translation/glossaries/{glossary_id}/terms/bulk"
@@ -103,6 +110,13 @@ class GlossaryService:
         data = {
             "terms": terms
         }
+        
+        # Calculate request size
+        payload_size = len(json.dumps(data).encode('utf-8'))
+        
+        # Check if payload exceeds 500KB
+        if payload_size > 512000:  # 500KB in bytes
+            raise PayloadTooLargeError(f"Request size ({payload_size} bytes) exceeds 500KB limit")
         
         try:
             response = requests.post(url, headers=self._get_headers(), json=data)
