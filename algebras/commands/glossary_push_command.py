@@ -13,7 +13,7 @@ from algebras.utils.csv_parser import GlossaryCSVParser, GlossaryXLSXParser
 
 
 def _upload_terms_adaptive(glossary_service: GlossaryService, glossary_id: str, terms: List[Dict[str, Any]], 
-                          batch_num: int, total_batches: int) -> Dict[str, Any]:
+                          batch_num: int, total_batches: int, debug: bool = False) -> Dict[str, Any]:
     """
     Upload terms with adaptive batch sizing to handle payload size limits.
     
@@ -28,7 +28,7 @@ def _upload_terms_adaptive(glossary_service: GlossaryService, glossary_id: str, 
         Dictionary containing upload results
     """
     try:
-        result = glossary_service.add_terms_bulk(glossary_id, terms)
+        result = glossary_service.add_terms_bulk(glossary_id, terms, debug=debug)
         return result
     except PayloadTooLargeError as e:
         # If batch is too large, split it in half
@@ -51,8 +51,8 @@ def _upload_terms_adaptive(glossary_service: GlossaryService, glossary_id: str, 
         click.echo(f"{Fore.YELLOW}⚠ Batch {batch_num} too large ({len(terms)} terms), splitting into smaller batches...{Fore.RESET}")
         
         # Recursively process each half
-        first_result = _upload_terms_adaptive(glossary_service, glossary_id, first_half, batch_num, total_batches)
-        second_result = _upload_terms_adaptive(glossary_service, glossary_id, second_half, batch_num, total_batches)
+        first_result = _upload_terms_adaptive(glossary_service, glossary_id, first_half, batch_num, total_batches, debug)
+        second_result = _upload_terms_adaptive(glossary_service, glossary_id, second_half, batch_num, total_batches, debug)
         
         # Combine results
         combined_successful = first_result.get("successful", []) + second_result.get("successful", [])
@@ -69,13 +69,15 @@ def _upload_terms_adaptive(glossary_service: GlossaryService, glossary_id: str, 
         }
 
 
-def execute(csv_file: str, name: str) -> None:
+def execute(csv_file: str, name: str, batch_size: int = 100, debug: bool = False) -> None:
     """
     Execute the glossary push command.
     
     Args:
         csv_file: Path to the CSV or XLSX file containing glossary terms
         name: Name of the glossary to create
+        batch_size: Number of terms to upload per batch (default: 100)
+        debug: Enable debug mode to log all requests before sending (default: False)
     """
     try:
         # Load configuration
@@ -87,7 +89,7 @@ def execute(csv_file: str, name: str) -> None:
         config.load()
         
         # Initialize services
-        glossary_service = GlossaryService(config)
+        glossary_service = GlossaryService(config, debug=debug)
         
         # Detect file type and create appropriate parser
         file_path = Path(csv_file)
@@ -132,8 +134,7 @@ def execute(csv_file: str, name: str) -> None:
             click.echo(f"{Fore.RED}Error creating glossary: {str(e)}{Fore.RESET}")
             return
         
-        # Upload terms in batches of 500
-        batch_size = 100
+        # Upload terms in batches
         total_batches = (len(terms) + batch_size - 1) // batch_size
         
         click.echo(f"{Fore.BLUE}Uploading {len(terms)} terms in {total_batches} batches of {batch_size}...{Fore.RESET}")
@@ -150,7 +151,7 @@ def execute(csv_file: str, name: str) -> None:
             click.echo(f"Uploading batch {batch_num + 1}/{total_batches} ({len(batch_terms)} terms)...")
             
             try:
-                result = _upload_terms_adaptive(glossary_service, glossary_id, batch_terms, batch_num + 1, total_batches)
+                result = _upload_terms_adaptive(glossary_service, glossary_id, batch_terms, batch_num + 1, total_batches, debug)
                 batch_results.append(result)
                 
                 # Update counters based on result status

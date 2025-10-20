@@ -18,9 +18,10 @@ class PayloadTooLargeError(Exception):
 class GlossaryService:
     """Service for managing glossaries through the Algebras AI API."""
     
-    def __init__(self, config):
+    def __init__(self, config, debug: bool = False):
         """Initialize the glossary service with configuration."""
         self.config = config
+        self.debug = debug
     
     def _get_api_key(self) -> str:
         """Get the API key from environment variables."""
@@ -60,6 +61,10 @@ class GlossaryService:
             "languages": languages
         }
         
+        if self.debug:
+            click.echo(f"{Fore.CYAN}[DEBUG] POST {url}{Fore.RESET}")
+            click.echo(f"{Fore.CYAN}[DEBUG] Request body: {json.dumps(data, indent=2)}{Fore.RESET}")
+        
         try:
             response = requests.post(url, headers=self._get_headers(), json=data)
             response.raise_for_status()
@@ -81,7 +86,7 @@ class GlossaryService:
                 error_msg = str(e)
             raise requests.RequestException(f"Failed to create glossary: {error_msg}")
     
-    def add_terms_bulk(self, glossary_id: str, terms: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def add_terms_bulk(self, glossary_id: str, terms: List[Dict[str, Any]], debug: bool = False) -> Dict[str, Any]:
         """
         Add multiple terms to a glossary in bulk.
         
@@ -117,6 +122,18 @@ class GlossaryService:
         # Check if payload exceeds 500KB
         if payload_size > 512000:  # 500KB in bytes
             raise PayloadTooLargeError(f"Request size ({payload_size} bytes) exceeds 500KB limit")
+        
+        # Use debug flag from parameter or instance variable
+        should_debug = debug or self.debug
+        
+        if should_debug:
+            click.echo(f"{Fore.CYAN}[DEBUG] POST {url}{Fore.RESET}")
+            click.echo(f"{Fore.CYAN}[DEBUG] Payload size: {payload_size} bytes ({payload_size / 1024:.2f} KB){Fore.RESET}")
+            click.echo(f"{Fore.CYAN}[DEBUG] Number of terms: {len(terms)}{Fore.RESET}")
+            # Log first few terms as a sample (don't log all terms as it can be too verbose)
+            if len(terms) > 0:
+                sample_terms = terms[:3] if len(terms) > 3 else terms
+                click.echo(f"{Fore.CYAN}[DEBUG] Sample terms (first {len(sample_terms)}): {json.dumps(sample_terms, indent=2)}{Fore.RESET}")
         
         try:
             response = requests.post(url, headers=self._get_headers(), json=data)
@@ -185,6 +202,9 @@ class GlossaryService:
         """
         base_url = self.config.get_base_url()
         url = f"{base_url}/api/v1/translation/glossaries/{glossary_id}"
+        
+        if self.debug:
+            click.echo(f"{Fore.CYAN}[DEBUG] GET {url}{Fore.RESET}")
         
         try:
             response = requests.get(url, headers=self._get_headers())

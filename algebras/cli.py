@@ -116,9 +116,11 @@ def glossary():
 @glossary.command("push")
 @click.argument("file", type=click.Path(exists=True))
 @click.option("--name", required=True, help="Name of the glossary to create")
-def glossary_push(file, name):
+@click.option("--batch-size", default=100, type=int, help="Number of terms to upload per batch (default: 100)")
+@click.option("--debug", is_flag=True, help="Enable debug mode to log all requests before sending")
+def glossary_push(file, name, batch_size, debug):
     """Upload glossary terms from CSV or XLSX file."""
-    glossary_push_command.execute(file, name)
+    glossary_push_command.execute(file, name, batch_size=batch_size, debug=debug)
 
 
 def main():
