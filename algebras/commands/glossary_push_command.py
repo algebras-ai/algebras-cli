@@ -70,7 +70,7 @@ def _upload_terms_adaptive(glossary_service: GlossaryService, glossary_id: str, 
         }
 
 
-def execute(csv_file: str, name: str, batch_size: int = 100, debug: bool = False, rows_ids: str = None) -> None:
+def execute(csv_file: str, name: str, batch_size: int = 100, debug: bool = False, rows_ids: str = None, max_length: int = None) -> None:
     """
     Execute the glossary push command.
     
@@ -166,6 +166,29 @@ def execute(csv_file: str, name: str, batch_size: int = 100, debug: bool = False
             return term_obj
 
         terms = [_normalize_term_object(t) for t in terms]
+
+        # Optionally drop definitions exceeding max_length
+        if isinstance(max_length, int) and max_length > 0:
+            pruned_terms = []
+            skipped_defs = 0
+            for t in terms:
+                defs = t.get("definitions", [])
+                if isinstance(defs, list):
+                    kept = []
+                    for d in defs:
+                        term_text = d.get("term")
+                        if isinstance(term_text, str) and len(term_text) > max_length:
+                            skipped_defs += 1
+                            continue
+                        kept.append(d)
+                    if kept:
+                        t["definitions"] = kept
+                        pruned_terms.append(t)
+                else:
+                    pruned_terms.append(t)
+            if skipped_defs > 0:
+                click.echo(f"{Fore.BLUE}Skipped {skipped_defs} definitions longer than --max-length={max_length}{Fore.RESET}")
+            terms = pruned_terms
         
         if not terms:
             if rows_ids:

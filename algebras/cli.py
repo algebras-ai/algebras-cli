@@ -119,9 +119,10 @@ def glossary():
 @click.option("--batch-size", default=100, type=int, help="Number of terms to upload per batch (default: 100)")
 @click.option("--debug", is_flag=True, help="Enable debug mode to log all requests before sending")
 @click.option("--rows-ids", help="Comma-separated list of row IDs (Record ID column) to include")
-def glossary_push(file, name, batch_size, debug, rows_ids):
+@click.option("--max-length", type=int, help="Maximum allowed length for a term; longer terms are skipped")
+def glossary_push(file, name, batch_size, debug, rows_ids, max_length):
     """Upload glossary terms from CSV or XLSX file."""
-    glossary_push_command.execute(file, name, batch_size=batch_size, debug=debug, rows_ids=rows_ids)
+    glossary_push_command.execute(file, name, batch_size=batch_size, debug=debug, rows_ids=rows_ids, max_length=max_length)
 
 
 def main():
