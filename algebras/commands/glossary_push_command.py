@@ -70,7 +70,7 @@ def _upload_terms_adaptive(glossary_service: GlossaryService, glossary_id: str, 
         }
 
 
-def execute(csv_file: str, name: str, batch_size: int = 100, debug: bool = False) -> None:
+def execute(csv_file: str, name: str, batch_size: int = 100, debug: bool = False, rows_ids: str = None) -> None:
     """
     Execute the glossary push command.
     
@@ -118,6 +118,35 @@ def execute(csv_file: str, name: str, batch_size: int = 100, debug: bool = False
         # Parse the actual data
         language_codes, terms = parser.parse()
 
+        # Optionally filter by record IDs if provided
+        if rows_ids:
+            try:
+                desired_tokens = {rid.strip() for rid in rows_ids.split(',') if rid.strip()}
+                desired_row_numbers = set()
+                desired_record_ids = set()
+                for token in desired_tokens:
+                    # Accept either integer row numbers or string record IDs
+                    try:
+                        desired_row_numbers.add(int(token))
+                    except ValueError:
+                        desired_record_ids.add(token)
+
+                if desired_tokens:
+                    original_count = len(terms)
+                    filtered = []
+                    for t in terms:
+                        rec_id = str(t.get("record_id", "")).strip()
+                        row_no = t.get("row_number")
+                        if rec_id in desired_record_ids or (isinstance(row_no, int) and row_no in desired_row_numbers):
+                            filtered.append(t)
+                    terms = filtered
+                    filtered_out = original_count - len(terms)
+                    if filtered_out > 0:
+                        click.echo(f"{Fore.BLUE}Filtered out {filtered_out} rows not in --rows-ids selection{Fore.RESET}")
+            except Exception as e:
+                click.echo(f"{Fore.RED}Error parsing --rows-ids: {str(e)}{Fore.RESET}")
+                return
+
         # Normalize problematic Unicode in parsed terms (ellipsis, NBSP)
         def _normalize_term_object(term_obj: Dict[str, Any]) -> Dict[str, Any]:
             # Expected structure: { "definitions": [ { "language": str, "term": str, "definition": str }, ... ] }
@@ -139,7 +168,10 @@ def execute(csv_file: str, name: str, batch_size: int = 100, debug: bool = False
         terms = [_normalize_term_object(t) for t in terms]
         
         if not terms:
-            click.echo(f"{Fore.RED}Error: No valid terms found in file{Fore.RESET}")
+            if rows_ids:
+                click.echo(f"{Fore.RED}Error: No terms matched --rows-ids selection{Fore.RESET}")
+            else:
+                click.echo(f"{Fore.RED}Error: No valid terms found in file{Fore.RESET}")
             return
         
         click.echo(f"{Fore.GREEN}Successfully parsed {len(terms)} terms{Fore.RESET}")

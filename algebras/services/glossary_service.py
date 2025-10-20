@@ -67,6 +67,11 @@ class GlossaryService:
         
         try:
             response = requests.post(url, headers=self._get_headers(), json=data)
+            if self.debug:
+                try:
+                    click.echo(f"{Fore.CYAN}[DEBUG] Response {response.status_code}: {response.text[:2000]}{Fore.RESET}")
+                except Exception:
+                    pass
             response.raise_for_status()
             
             result = response.json()
@@ -82,6 +87,12 @@ class GlossaryService:
                     error_msg = error_data.get('error', {}).get('message', str(e))
                 except:
                     error_msg = str(e)
+                finally:
+                    if self.debug:
+                        try:
+                            click.echo(f"{Fore.CYAN}[DEBUG] Error response {e.response.status_code}: {e.response.text[:2000]}{Fore.RESET}")
+                        except Exception:
+                            pass
             else:
                 error_msg = str(e)
             raise requests.RequestException(f"Failed to create glossary: {error_msg}")
@@ -137,6 +148,11 @@ class GlossaryService:
         
         try:
             response = requests.post(url, headers=self._get_headers(), json=data)
+            if should_debug:
+                try:
+                    click.echo(f"{Fore.CYAN}[DEBUG] Response {response.status_code}: {response.text[:2000]}{Fore.RESET}")
+                except Exception:
+                    pass
             response.raise_for_status()
             
             result = response.json()
@@ -182,6 +198,12 @@ class GlossaryService:
                             error_msg += f" Response: {e.response.text[:500]}"
                     except:
                         pass
+                finally:
+                    if should_debug:
+                        try:
+                            click.echo(f"{Fore.CYAN}[DEBUG] Error response {e.response.status_code}: {e.response.text[:2000]}{Fore.RESET}")
+                        except Exception:
+                            pass
             else:
                 error_msg = str(e)
             raise requests.RequestException(f"Failed to add terms to glossary: {error_msg}")

@@ -107,6 +107,8 @@ class GlossaryCSVParser:
                     # Only add term if it has at least one definition
                     if definitions:
                         terms.append({
+                            "record_id": record_id,
+                            "row_number": row_num,
                             "definitions": definitions
                         })
                     else:
@@ -142,6 +144,8 @@ class GlossaryCSVParser:
                         
                         if definitions:
                             terms.append({
+                                "record_id": record_id,
+                                "row_number": row_num,
                                 "definitions": definitions
                             })
             except Exception as e:
@@ -331,6 +335,8 @@ class GlossaryXLSXParser:
                 # Only add term if it has at least one definition
                 if definitions:
                     terms.append({
+                        "record_id": record_id,
+                        "row_number": row_num,
                         "definitions": definitions
                     })
                 else:
