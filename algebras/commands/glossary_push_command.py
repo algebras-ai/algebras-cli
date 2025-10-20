@@ -10,6 +10,7 @@ from pathlib import Path
 from algebras.config import Config
 from algebras.services.glossary_service import GlossaryService, PayloadTooLargeError
 from algebras.utils.csv_parser import GlossaryCSVParser, GlossaryXLSXParser
+from algebras.utils.string_normalizer import normalize_for_glossary
 
 
 def _upload_terms_adaptive(glossary_service: GlossaryService, glossary_id: str, terms: List[Dict[str, Any]], 
@@ -116,6 +117,26 @@ def execute(csv_file: str, name: str, batch_size: int = 100, debug: bool = False
         
         # Parse the actual data
         language_codes, terms = parser.parse()
+
+        # Normalize problematic Unicode in parsed terms (ellipsis, NBSP)
+        def _normalize_term_object(term_obj: Dict[str, Any]) -> Dict[str, Any]:
+            # Expected structure: { "definitions": [ { "language": str, "term": str, "definition": str }, ... ] }
+            if not isinstance(term_obj, dict):
+                return term_obj
+            definitions = term_obj.get("definitions")
+            if isinstance(definitions, list):
+                for defn in definitions:
+                    if not isinstance(defn, dict):
+                        continue
+                    term_text = defn.get("term")
+                    def_text = defn.get("definition")
+                    if isinstance(term_text, str):
+                        defn["term"] = normalize_for_glossary(term_text)
+                    if isinstance(def_text, str):
+                        defn["definition"] = normalize_for_glossary(def_text)
+            return term_obj
+
+        terms = [_normalize_term_object(t) for t in terms]
         
         if not terms:
             click.echo(f"{Fore.RED}Error: No valid terms found in file{Fore.RESET}")
