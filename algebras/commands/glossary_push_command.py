@@ -114,6 +114,11 @@ def execute(csv_file: str, name: str, batch_size: int = 100, debug: bool = False
         
         click.echo(f"Found {summary['total_rows'] - 1} terms in {summary['total_languages']} languages")
         click.echo(f"Languages: {', '.join(summary['language_codes'])}")
+
+        # Apply default max-length if not provided and inform the user once
+        if max_length is None:
+            max_length = 255
+            click.echo(f"{Fore.BLUE}Using default --max-length=255. Terms longer than 255 will be skipped.{Fore.RESET}")
         
         # Parse the actual data
         language_codes, terms = parser.parse()
