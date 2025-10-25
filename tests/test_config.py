@@ -107,7 +107,7 @@ class TestConfig:
         assert save_called[0] is True
         assert "languages" in config.data
         assert "en" in config.data["languages"]
-        assert "path_rules" in config.data
+        assert "source_files" in config.data
         assert "api" in config.data
         assert config.data["api"]["provider"] == "algebras-ai"
 
@@ -165,8 +165,27 @@ class TestConfig:
         assert save_called[0] is False
         assert config.data["languages"] == ["en", "fr"]
 
+    def test_get_source_files_empty(self, monkeypatch):
+        """Test get_source_files with empty config"""
+        config = Config()
+        config.data = {}
+        # Mock exists() to return False to prevent loading the actual config file
+        monkeypatch.setattr(config, 'exists', lambda: False)
+        assert config.get_source_files() == {}
+
+    def test_get_source_files(self):
+        """Test get_source_files with source files in config"""
+        config = Config()
+        source_files = {
+            "src/locales/en.json": {
+                "destination_path": "src/locales/%algebras_locale_code%/common.json"
+            }
+        }
+        config.data = {"source_files": source_files}
+        assert config.get_source_files() == source_files
+
     def test_get_path_rules_empty(self, monkeypatch):
-        """Test get_path_rules with empty config"""
+        """Test get_path_rules with empty config (deprecated)"""
         config = Config()
         config.data = {}
         # Mock exists() to return False to prevent loading the actual config file
@@ -174,7 +193,7 @@ class TestConfig:
         assert config.get_path_rules() == []
 
     def test_get_path_rules(self):
-        """Test get_path_rules with rules in config"""
+        """Test get_path_rules with rules in config (deprecated)"""
         config = Config()
         path_rules = ["**/*.json", "!**/node_modules/**"]
         config.data = {"path_rules": path_rules}
