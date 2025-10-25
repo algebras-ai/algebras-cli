@@ -6,7 +6,6 @@ import os
 import tempfile
 import json
 import pytest
-from algebras.services.translator import Translator
 from algebras.utils.arb_handler import read_arb_file, write_arb_file
 
 
@@ -37,9 +36,6 @@ class TestFlutterTranslation:
             temp_file = f.name
         
         try:
-            # Mock the translator to avoid API calls
-            translator = Translator()
-            
             # Test that the file can be read
             content = read_arb_file(temp_file)
             assert content == arb_content
