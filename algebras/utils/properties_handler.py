@@ -259,10 +259,11 @@ def get_properties_language_code(file_path: str) -> Optional[str]:
             last_two = '_'.join(parts[-2:]).split('.')[0]
             if len(last_two) == 5 and '_' in last_two:  # en_US format
                 return last_two
-        elif len(parts) >= 2:
+        if len(parts) >= 2:
             # Get the part before .properties
             name_part = parts[-1].split('.')[0]
-            if len(name_part) == 2:  # en, de, etc.
+            # Only return if it looks like a valid language code (2-3 letters)
+            if len(name_part) in [2, 3] and name_part.isalpha():
                 return name_part
     
     return None
