@@ -71,17 +71,33 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
     
     body_elem = ET.SubElement(file_elem, 'body')
     
-    # Add translation units
-    for key, value in content.items():
-        if isinstance(value, str):
-            trans_unit = ET.SubElement(body_elem, 'trans-unit')
-            trans_unit.set('id', key)
-            
-            source_elem = ET.SubElement(trans_unit, 'source')
-            source_elem.text = value
-            
-            target_elem = ET.SubElement(trans_unit, 'target')
-            target_elem.text = value
+    # Handle different content structures
+    if 'files' in content and isinstance(content['files'], list) and content['files']:
+        # Use the first file's data
+        file_data = content['files'][0]
+        if 'trans-units' in file_data:
+            for unit in file_data['trans-units']:
+                if 'id' in unit and 'source' in unit:
+                    trans_unit = ET.SubElement(body_elem, 'trans-unit')
+                    trans_unit.set('id', unit['id'])
+                    
+                    source_elem = ET.SubElement(trans_unit, 'source')
+                    source_elem.text = unit['source']
+                    
+                    target_elem = ET.SubElement(trans_unit, 'target')
+                    target_elem.text = unit.get('target', unit['source'])
+    else:
+        # Handle flat dictionary structure
+        for key, value in content.items():
+            if isinstance(value, str):
+                trans_unit = ET.SubElement(body_elem, 'trans-unit')
+                trans_unit.set('id', key)
+                
+                source_elem = ET.SubElement(trans_unit, 'source')
+                source_elem.text = value
+                
+                target_elem = ET.SubElement(trans_unit, 'target')
+                target_elem.text = value
     
     # Write to file with proper formatting
     rough_string = ET.tostring(xliff_root, encoding='unicode')
@@ -167,8 +183,13 @@ def _parse_xliff_root(root: ET.Element) -> Dict[str, Any]:
         'files': []
     }
     
-    # Parse file elements
-    for file_elem in root.findall('.//file'):
+    # Define namespace for XLIFF elements
+    namespace = 'urn:oasis:names:tc:xliff:document:1.2'
+    
+    # Parse file elements (handle both with and without namespace)
+    file_elements = root.findall('.//file') or root.findall(f'.//{{{namespace}}}file')
+    
+    for file_elem in file_elements:
         file_data = {
             'original': file_elem.get('original', ''),
             'source-language': file_elem.get('source-language', ''),
@@ -177,19 +198,22 @@ def _parse_xliff_root(root: ET.Element) -> Dict[str, Any]:
             'trans-units': []
         }
         
-        # Parse translation units
-        for trans_unit in file_elem.findall('.//trans-unit'):
+        # Parse translation units (handle both with and without namespace)
+        trans_units = file_elem.findall('.//trans-unit') or file_elem.findall(f'.//{{{namespace}}}trans-unit')
+        
+        for trans_unit in trans_units:
             unit_data = {
                 'id': trans_unit.get('id', ''),
                 'source': '',
                 'target': ''
             }
             
-            source_elem = trans_unit.find('source')
+            # Find source and target elements (handle both with and without namespace)
+            source_elem = trans_unit.find('source') or trans_unit.find(f'{{{namespace}}}source')
             if source_elem is not None:
                 unit_data['source'] = source_elem.text or ''
             
-            target_elem = trans_unit.find('target')
+            target_elem = trans_unit.find('target') or trans_unit.find(f'{{{namespace}}}target')
             if target_elem is not None:
                 unit_data['target'] = target_elem.text or ''
             
@@ -227,13 +251,16 @@ def get_xliff_language_code(file_path: str) -> Optional[str]:
     Returns:
         Language code if found, None otherwise
     """
-    # Try to extract from filename (e.g., messages.en.xlf -> en)
+    # Try to extract from filename (e.g., messages.en.xlf -> en, messages.en_US.xlf -> en_US)
     filename = os.path.basename(file_path)
     if '.' in filename:
         parts = filename.split('.')
-        if len(parts) >= 3:  # messages.en.xlf
+        if len(parts) >= 3:  # messages.en.xlf or messages.en_US.xlf
             potential_lang = parts[-2]
             if len(potential_lang) == 2 or len(potential_lang) == 5:  # en or en_US
+                return potential_lang
+            # Handle cases like messages.en_US.xlf where we need to check for underscore
+            elif '_' in potential_lang and len(potential_lang) == 5:  # en_US format
                 return potential_lang
     
     # Try to extract from XLIFF content
@@ -242,7 +269,7 @@ def get_xliff_language_code(file_path: str) -> Optional[str]:
         if 'files' in content and content['files']:
             file_data = content['files'][0]
             return file_data.get('target-language')
-    except (ValueError, ET.ParseError):
+    except (ValueError, ET.ParseError, FileNotFoundError):
         pass
     
     return None

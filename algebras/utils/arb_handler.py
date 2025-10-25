@@ -154,23 +154,33 @@ def get_arb_language_code(file_path: str) -> Optional[str]:
     Returns:
         Language code if found, None otherwise
     """
-    # Try to extract from filename (e.g., app_en.arb -> en)
+    # Try to extract from filename (e.g., app_en.arb -> en, app_en_US.arb -> en_US)
     filename = os.path.basename(file_path)
     if '_' in filename:
         parts = filename.split('_')
-        if len(parts) >= 2:
+        if len(parts) >= 3:
+            # Check if the last two parts form a valid locale (e.g., en_US)
+            last_two = '_'.join(parts[-2:]).split('.')[0]
+            if len(last_two) == 5 and '_' in last_two:  # en_US format
+                return last_two
+        elif len(parts) >= 2:
             # Get the part before .arb
             name_part = parts[-1].split('.')[0]
-            if len(name_part) == 2 or len(name_part) == 5:  # en or en_US
+            if len(name_part) == 2:  # en, de, etc.
                 return name_part
     
     # Try to extract from @locale metadata
     try:
         content = read_arb_file(file_path)
+        # Check for @locale metadata object first (higher priority)
         locale_metadata = content.get('@locale')
         if isinstance(locale_metadata, dict) and 'locale' in locale_metadata:
             return locale_metadata['locale']
-    except (ValueError, json.JSONDecodeError):
+        # Check for @@locale field (common in ARB files)
+        locale_value = content.get('@@locale')
+        if isinstance(locale_value, str):
+            return locale_value
+    except (ValueError, json.JSONDecodeError, FileNotFoundError):
         pass
     
     return None

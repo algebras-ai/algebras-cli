@@ -250,14 +250,19 @@ def get_properties_language_code(file_path: str) -> Optional[str]:
     Returns:
         Language code if found, None otherwise
     """
-    # Try to extract from filename (e.g., messages_en.properties -> en)
+    # Try to extract from filename (e.g., messages_en.properties -> en, messages_en_US.properties -> en_US)
     filename = os.path.basename(file_path)
     if '_' in filename:
         parts = filename.split('_')
-        if len(parts) >= 2:
+        if len(parts) >= 3:
+            # Check if the last two parts form a valid locale (e.g., en_US)
+            last_two = '_'.join(parts[-2:]).split('.')[0]
+            if len(last_two) == 5 and '_' in last_two:  # en_US format
+                return last_two
+        elif len(parts) >= 2:
             # Get the part before .properties
             name_part = parts[-1].split('.')[0]
-            if len(name_part) == 2 or len(name_part) == 5:  # en or en_US
+            if len(name_part) == 2:  # en, de, etc.
                 return name_part
     
     return None
