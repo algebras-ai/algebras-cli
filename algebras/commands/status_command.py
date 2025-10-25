@@ -5,6 +5,7 @@ Check the status of your translations
 import os
 import click
 import requests
+from colorama import Fore
 from typing import Optional, Dict, List, Set, Tuple
 
 from algebras.config import Config
@@ -232,6 +233,12 @@ def execute(language: Optional[str] = None) -> None:
     
     # Load configuration
     config.load()
+    
+    # Check for deprecated config format
+    if config.check_deprecated_format():
+        click.echo(f"{Fore.RED}🚨 ⚠️  WARNING: Your configuration uses the deprecated 'path_rules' format! ⚠️ 🚨{Fore.RESET}")
+        click.echo(f"{Fore.RED}🔴 Please update to the new 'source_files' format.{Fore.RESET}")
+        click.echo(f"{Fore.RED}📖 See documentation: https://github.com/algebras-ai/algebras-cli{Fore.RESET}")
     
     # Get languages
     all_languages = config.get_languages()

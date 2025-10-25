@@ -33,6 +33,12 @@ def execute(language: str) -> None:
     # Load configuration
     config.load()
     
+    # Check for deprecated config format
+    if config.check_deprecated_format():
+        click.echo(f"{Fore.RED}🚨 ⚠️  WARNING: Your configuration uses the deprecated 'path_rules' format! ⚠️ 🚨{Fore.RESET}")
+        click.echo(f"{Fore.RED}🔴 Please update to the new 'source_files' format.{Fore.RESET}")
+        click.echo(f"{Fore.RED}📖 See documentation: https://github.com/algebras-ai/algebras-cli{Fore.RESET}")
+    
     # Check if language already exists
     languages = config.get_languages()
     if language in languages:

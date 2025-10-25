@@ -346,6 +346,16 @@ class Config:
         
         self.save()
     
+    def check_deprecated_format(self) -> bool:
+        """Check if the configuration uses the deprecated path_rules format."""
+        if not self.data:
+            if not self.exists():
+                return False
+            self.load()
+        
+        # Check if path_rules field exists (even if empty)
+        return "path_rules" in self.data
+    
     def get_base_url(self) -> str:
         """Get the Algebras AI API base URL from environment variable or default."""
         base_url = os.environ.get("ALGEBRAS_BASE_URL", "https://platform.algebras.ai")

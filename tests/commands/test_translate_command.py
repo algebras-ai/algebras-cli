@@ -44,6 +44,7 @@ class TestTranslateCommand:
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en"]
+        mock_config.check_deprecated_format.return_value = False
         
         # Patch Config and click.echo
         with patch("algebras.commands.translate_command.Config", return_value=mock_config), \
@@ -66,6 +67,7 @@ class TestTranslateCommand:
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.check_deprecated_format.return_value = False
         
         # Patch Config and click.echo
         with patch("algebras.commands.translate_command.Config", return_value=mock_config), \

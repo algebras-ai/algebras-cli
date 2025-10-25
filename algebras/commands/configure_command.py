@@ -32,6 +32,12 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
     # Load configuration
     config.load()
     
+    # Check for deprecated config format
+    if config.check_deprecated_format():
+        click.echo(f"{Fore.RED}🚨 ⚠️  WARNING: Your configuration uses the deprecated 'path_rules' format! ⚠️ 🚨{Fore.RESET}")
+        click.echo(f"{Fore.RED}🔴 Please update to the new 'source_files' format.{Fore.RESET}")
+        click.echo(f"{Fore.RED}📖 See documentation: https://github.com/algebras-ai/algebras-cli{Fore.RESET}")
+    
     # Initialize API configuration if it doesn't exist
     if "api" not in config.data:
         config.data["api"] = {}
