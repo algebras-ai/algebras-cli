@@ -92,6 +92,7 @@ class TestStatusCommand:
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en", "fr", "es"]
         mock_config.get_source_language.return_value = "en"
+        mock_config.get_source_files.return_value = None  # Use filename-based matching
         
         # Mock FileScanner
         mock_scanner = MagicMock(spec=FileScanner)
@@ -101,13 +102,40 @@ class TestStatusCommand:
             "es": ["messages.es.json", "labels.es.json"]
         }
         
+        # Create a side effect function for count_translated_keys to return different values
+        # based on the file being processed
+        def count_translated_keys_side_effect(file_path):
+            if "messages.en.json" in file_path:
+                return (2, 2)  # 2 translated out of 2 total keys
+            elif "labels.en.json" in file_path:
+                return (2, 2)  # 2 translated out of 2 total keys
+            elif "messages.fr.json" in file_path:
+                return (1, 2)  # 1 translated out of 2 total keys
+            elif "messages.es.json" in file_path:
+                return (2, 2)  # 2 translated out of 2 total keys
+            elif "labels.es.json" in file_path:
+                return (2, 2)  # 2 translated out of 2 total keys
+            else:
+                return (0, 0)
+        
+        # Create a side effect function for count_current_and_outdated_keys
+        def count_current_and_outdated_keys_side_effect(source_file, target_file):
+            if "messages.fr.json" in target_file:
+                return (1, 0)  # 1 current translated, 0 outdated
+            elif "messages.es.json" in target_file:
+                return (2, 0)  # 2 current translated, 0 outdated
+            elif "labels.es.json" in target_file:
+                return (2, 0)  # 2 current translated, 0 outdated
+            else:
+                return (0, 0)
+        
         # Patch dependencies and file operations
         with patch("algebras.commands.status_command.Config", return_value=mock_config), \
              patch("algebras.commands.status_command.FileScanner", return_value=mock_scanner), \
              patch("os.path.getmtime", return_value=1000), \
              patch("algebras.commands.status_command.validate_languages_with_api", return_value=(["en", "fr", "es"], [])), \
-             patch("algebras.commands.status_command.count_translated_keys", return_value=(1, 2)), \
-             patch("algebras.commands.status_command.count_current_and_outdated_keys", return_value=(1, 0)), \
+             patch("algebras.commands.status_command.count_translated_keys", side_effect=count_translated_keys_side_effect), \
+             patch("algebras.commands.status_command.count_current_and_outdated_keys", side_effect=count_current_and_outdated_keys_side_effect), \
              patch("algebras.commands.status_command.click.echo") as mock_echo:
             
             # Call execute
@@ -125,7 +153,7 @@ class TestStatusCommand:
             mock_echo.assert_any_call(f"Source language: en (2 files)")
             # Updated format: shows keys and files
             mock_echo.assert_any_call(f"fr: {click.style('1/2 keys (50.0%) in 1/2 files (50.0%)', fg='yellow')}")
-            mock_echo.assert_any_call(f"es: {click.style('2/4 keys (50.0%) in 2/2 files (100.0%)', fg='yellow')}")
+            mock_echo.assert_any_call(f"es: {click.style('4/4 keys (100.0%) in 2/2 files (100.0%)', fg='green')}")
 
     def test_execute_status_single_language(self):
         """Test execute status for a specific language"""
@@ -134,6 +162,7 @@ class TestStatusCommand:
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en", "fr", "es"]
         mock_config.get_source_language.return_value = "en"
+        mock_config.get_source_files.return_value = None  # Use filename-based matching
         
         # Mock FileScanner
         mock_scanner = MagicMock(spec=FileScanner)
@@ -142,13 +171,32 @@ class TestStatusCommand:
             "fr": ["messages.fr.json"]
         }
         
+        # Create a side effect function for count_translated_keys to return different values
+        # based on the file being processed
+        def count_translated_keys_side_effect(file_path):
+            if "messages.en.json" in file_path:
+                return (2, 2)  # 2 translated out of 2 total keys
+            elif "labels.en.json" in file_path:
+                return (2, 2)  # 2 translated out of 2 total keys
+            elif "messages.fr.json" in file_path:
+                return (1, 2)  # 1 translated out of 2 total keys
+            else:
+                return (0, 0)
+        
+        # Create a side effect function for count_current_and_outdated_keys
+        def count_current_and_outdated_keys_side_effect(source_file, target_file):
+            if "messages.fr.json" in target_file:
+                return (1, 0)  # 1 current translated, 0 outdated
+            else:
+                return (0, 0)
+        
         # Patch dependencies and file operations
         with patch("algebras.commands.status_command.Config", return_value=mock_config), \
              patch("algebras.commands.status_command.FileScanner", return_value=mock_scanner), \
              patch("os.path.getmtime", return_value=1000), \
              patch("algebras.commands.status_command.validate_languages_with_api", return_value=(["en", "fr", "es"], [])), \
-             patch("algebras.commands.status_command.count_translated_keys", return_value=(1, 2)), \
-             patch("algebras.commands.status_command.count_current_and_outdated_keys", return_value=(1, 0)), \
+             patch("algebras.commands.status_command.count_translated_keys", side_effect=count_translated_keys_side_effect), \
+             patch("algebras.commands.status_command.count_current_and_outdated_keys", side_effect=count_current_and_outdated_keys_side_effect), \
              patch("algebras.commands.status_command.click.echo") as mock_echo:
             
             # Call execute
