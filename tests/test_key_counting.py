@@ -72,7 +72,7 @@ class TestKeyCounting:
 
     def test_count_translated_keys_po(self):
         """Test counting keys in PO file"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.po', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.po', delete=False) as f:
             po_content = '''msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\\n"
@@ -257,7 +257,7 @@ buttons:
     def test_count_current_and_outdated_keys_po(self):
         """Test counting current and outdated keys in PO files"""
         # Create source PO file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.po', delete=False) as source_f:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.po', delete=False) as source_f:
             source_content = '''msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\\n"
@@ -278,7 +278,7 @@ msgstr "Thank you"
             source_file = source_f.name
 
         # Create target PO file (partially translated)
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.po', delete=False) as target_f:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.po', delete=False) as target_f:
             target_content = '''msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\\n"
@@ -317,7 +317,7 @@ msgstr "Mensaje antiguo"  # outdated key
     def test_count_current_and_outdated_keys_xml(self):
         """Test counting current and outdated keys in Android XML files"""
         # Create source XML file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False) as source_f:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.xml', delete=False) as source_f:
             source_content = '''<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Test App</string>
@@ -329,7 +329,7 @@ msgstr "Mensaje antiguo"  # outdated key
             source_file = source_f.name
 
         # Create target XML file (partially translated)
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False) as target_f:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.xml', delete=False) as target_f:
             target_content = '''<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Aplicación de Prueba</string>
