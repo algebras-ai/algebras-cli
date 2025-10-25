@@ -54,6 +54,39 @@ Algebras CLI supports a wide range of localization file formats:
 - **CSV** (`.csv`) - Comma-separated values for multi-language translations
 - **XLSX** (`.xlsx`) - Excel files for multi-language translations
 
+## Format Guides
+
+Comprehensive guides for each supported file format with detailed usage examples, best practices, and configuration instructions:
+
+### Web/General Formats
+[![JSON](https://img.shields.io/badge/JSON-000000?style=flat&logo=json&logoColor=white)](https://www.json.org/) [![YAML](https://img.shields.io/badge/YAML-CB171E?style=flat&logo=yaml&logoColor=white)](https://yaml.org/) [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/) [![HTML](https://img.shields.io/badge/HTML-E34F26?style=flat&logo=html5&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/HTML)
+
+- **[JSON Format Guide](docs/formats/JSON.md)** - JSON localization files (Next.js, React, Vue)
+- **[YAML Format Guide](docs/formats/YAML.md)** - YAML/YML configuration files
+- **[TypeScript Format Guide](docs/formats/TypeScript.md)** - TypeScript translation files
+- **[HTML Format Guide](docs/formats/HTML.md)** - HTML files with translatable content
+
+### Mobile Formats
+[![Android](https://img.shields.io/badge/Android-3DDC84?style=flat&logo=android&logoColor=white)](https://developer.android.com/) [![iOS](https://img.shields.io/badge/iOS-000000?style=flat&logo=ios&logoColor=white)](https://developer.apple.com/ios/) [![Flutter](https://img.shields.io/badge/Flutter-02569B?style=flat&logo=flutter&logoColor=white)](https://flutter.dev/)
+
+- **[Android XML Format Guide](docs/formats/Android-XML.md)** - Android string resources (values directories)
+- **[iOS Strings Format Guide](docs/formats/iOS-Strings.md)** - iOS .strings files
+- **[iOS StringsDict Format Guide](docs/formats/iOS-StringsDict.md)** - iOS pluralization files
+- **[Flutter ARB Format Guide](docs/formats/Flutter-ARB.md)** - Application Resource Bundle for Flutter
+
+### Enterprise/Framework Formats
+[![Django](https://img.shields.io/badge/Django-092E20?style=flat&logo=django&logoColor=white)](https://djangoproject.com/) [![Angular](https://img.shields.io/badge/Angular-DD0031?style=flat&logo=angular&logoColor=white)](https://angular.io/) [![Java](https://img.shields.io/badge/Java-ED8B00?style=flat&logo=java&logoColor=white)](https://www.java.com/)
+
+- **[Gettext PO Format Guide](docs/formats/Gettext-PO.md)** - GNU gettext files (Django, Flask, Rails)
+- **[XLIFF Format Guide](docs/formats/XLIFF.md)** - XML Localization Interchange File Format (Angular)
+- **[Java Properties Format Guide](docs/formats/Java-Properties.md)** - Java ResourceBundle property files
+
+### Multi-Language Formats
+[![CSV](https://img.shields.io/badge/CSV-239120?style=flat&logo=csv&logoColor=white)](https://en.wikipedia.org/wiki/Comma-separated_values) [![Excel](https://img.shields.io/badge/Excel-217346?style=flat&logo=microsoft-excel&logoColor=white)](https://www.microsoft.com/en-us/microsoft-365/excel)
+
+- **[CSV Format Guide](docs/formats/CSV.md)** - Comma-separated values for translations
+- **[XLSX Format Guide](docs/formats/XLSX.md)** - Excel files for translations
+
 ## Installation
 
 ```bash
