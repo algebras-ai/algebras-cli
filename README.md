@@ -179,9 +179,6 @@ algebras configure
 # Set Algebras AI as the provider
 algebras configure --provider algebras-ai
 
-# Set the model for Algebras AI provider
-algebras configure --model gpt-4
-
 # Set batch size for translation processing
 algebras configure --batch-size 10
 

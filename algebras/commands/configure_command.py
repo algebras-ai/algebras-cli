@@ -9,13 +9,14 @@ from colorama import Fore
 from algebras.config import Config
 
 
-def execute(provider: str = None, model: str = None, batch_size: int = None, max_parallel_batches: int = None, glossary_id: str = None, prompt: str = None, normalize_strings: bool = None) -> None:
+def execute(provider: str = None, model: str = None, path_rules: str = None, batch_size: int = None, max_parallel_batches: int = None, glossary_id: str = None, prompt: str = None, normalize_strings: bool = None) -> None:
     """
     Configure your Algebras project settings.
     
     Args:
         provider: Set the API provider (e.g., 'algebras-ai')
         model: Set the model for the provider (only applicable for some providers)
+        path_rules: Set the path rules for file patterns to process
         batch_size: Set the batch size for translation processing
         max_parallel_batches: Set the maximum number of parallel batches for translation processing
         glossary_id: Set the glossary ID for Algebras AI translations
@@ -106,8 +107,16 @@ def execute(provider: str = None, model: str = None, batch_size: int = None, max
         else:
             click.echo(f"{Fore.GREEN}String normalization disabled (will preserve all escaped characters).\x1b[0m")
     
+    # Handle path_rules change
+    if path_rules is not None:
+        config.set_setting("path_rules", path_rules)
+        if path_rules:
+            click.echo(f"{Fore.GREEN}Path rules set to '{path_rules}'.\x1b[0m")
+        else:
+            click.echo(f"{Fore.GREEN}Path rules cleared.\x1b[0m")
+    
     # If no arguments provided, show current configuration
-    if not provider and not model and batch_size is None and max_parallel_batches is None and glossary_id is None and prompt is None and normalize_strings is None:
+    if not provider and not model and path_rules is None and batch_size is None and max_parallel_batches is None and glossary_id is None and prompt is None and normalize_strings is None:
         click.echo(f"\nCurrent configuration:")
         click.echo(f"  Provider: {Fore.BLUE}{current_provider}\x1b[0m")
         click.echo(f"  Model: {Fore.BLUE}{config.data['api'].get('model', 'Not set')}\x1b[0m")
@@ -129,6 +138,13 @@ def execute(provider: str = None, model: str = None, batch_size: int = None, max
         # Show string normalization setting
         normalize_strings_setting = config.get_setting("api.normalize_strings", True)
         click.echo(f"  String normalization: {Fore.BLUE}{'Enabled' if normalize_strings_setting else 'Disabled'}\x1b[0m")
+        
+        # Show path rules
+        current_path_rules = config.get_setting("path_rules", "")
+        if current_path_rules:
+            click.echo(f"  Path rules: {Fore.BLUE}{current_path_rules}\x1b[0m")
+        else:
+            click.echo(f"  Path rules: {Fore.BLUE}Not set\x1b[0m")
         
         # Show source files configuration
         source_files = config.get_source_files()
@@ -160,6 +176,7 @@ def execute(provider: str = None, model: str = None, batch_size: int = None, max
         
         click.echo(f"\nTo change the provider, run: {Fore.BLUE}algebras configure --provider <provider>\x1b[0m")
         click.echo(f"To change the model, run: {Fore.BLUE}algebras configure --model <model>\x1b[0m")
+        click.echo(f"To set path rules, run: {Fore.BLUE}algebras configure --path-rules <path_rules>\x1b[0m")
         click.echo(f"To set the glossary ID, run: {Fore.BLUE}algebras configure --glossary-id <glossary_id>\x1b[0m")
         click.echo(f"To set batch size, run: {Fore.BLUE}algebras configure --batch-size <batch_size>\x1b[0m")
         click.echo(f"To set max parallel batches, run: {Fore.BLUE}algebras configure --max-parallel-batches <max_parallel_batches>\x1b[0m")
