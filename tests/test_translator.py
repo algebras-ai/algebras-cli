@@ -59,6 +59,9 @@ class TestTranslator:
         mock_config.exists.return_value = True
         mock_config.load.return_value = {}
         mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        mock_config.get_base_url.return_value = "https://platform.algebras.ai"
+        mock_config.get_setting.return_value = ""
+        mock_config.has_setting.return_value = False
 
         # Patch Config class
         monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
@@ -66,9 +69,15 @@ class TestTranslator:
         # Mock environment variable
         monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
 
+        # Mock the cache to return None (cache miss)
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None
+        mock_cache.get_cache_key.return_value = "test-cache-key"
+        monkeypatch.setattr("algebras.services.translator.TranslationCache", lambda: mock_cache)
+
         # Mock Algebras AI API response
         mock_response = MagicMock()
-        mock_response.json.return_value = {"translation": "Bonjour le monde"}
+        mock_response.json.return_value = {"data": "Bonjour le monde"}
         mock_response.status_code = 200
         
         monkeypatch.setattr("algebras.services.translator.requests.post", lambda *args, **kwargs: mock_response)
@@ -155,9 +164,18 @@ class TestTranslator:
         mock_config.load.return_value = {}
         mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
         mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_base_url.return_value = "https://platform.algebras.ai"
+        mock_config.get_setting.return_value = ""
+        mock_config.has_setting.return_value = False
 
         # Patch Config class
         monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+        
+        # Mock the cache
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None
+        mock_cache.get_cache_key.return_value = "test-cache-key"
+        monkeypatch.setattr("algebras.services.translator.TranslationCache", lambda: mock_cache)
         
         # Mock environment variable
         monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
@@ -165,20 +183,24 @@ class TestTranslator:
         # Mock open to return the JSON content
         m = mock_open(read_data=json.dumps(json_content))
         
-        # Mock translate_text to return expected translations
-        def mock_translate_text(text, source_lang, target_lang, ui_safe=False, glossary_id=None):
-            if text == "Welcome to our application!":
-                return "Bienvenue dans notre application!"
-            elif text == "Login":
-                return "Connexion"
-            elif text == "Sign In":
-                return "Se connecter"
-            return text
+        # Mock batch translation method
+        def mock_translate_batch(texts, source_lang, target_lang, ui_safe=False, glossary_id=""):
+            translations = []
+            for text in texts:
+                if text == "Welcome to our application!":
+                    translations.append("Bienvenue dans notre application!")
+                elif text == "Login":
+                    translations.append("Connexion")
+                elif text == "Sign In":
+                    translations.append("Se connecter")
+                else:
+                    translations.append(text)
+            return translations
         
-        with patch("builtins.open", m), \
-             patch.object(Translator, "translate_text", side_effect=mock_translate_text):
-            
+        with patch("builtins.open", m):
             translator = Translator()
+            # Mock the batch translation method
+            translator._translate_with_algebras_ai_batch = mock_translate_batch
             result = translator.translate_file("messages.en.json", "fr")
             
             # Verify the translation
@@ -218,9 +240,18 @@ class TestTranslator:
         mock_config.load.return_value = {}
         mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
         mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_base_url.return_value = "https://platform.algebras.ai"
+        mock_config.get_setting.return_value = ""
+        mock_config.has_setting.return_value = False
 
         # Patch Config class
         monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+        
+        # Mock the cache
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None
+        mock_cache.get_cache_key.return_value = "test-cache-key"
+        monkeypatch.setattr("algebras.services.translator.TranslationCache", lambda: mock_cache)
         
         # Mock environment variable
         monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
@@ -231,20 +262,24 @@ class TestTranslator:
         # Mock yaml.safe_load to return parsed content
         monkeypatch.setattr(yaml, "safe_load", lambda f: parsed_yaml)
         
-        # Mock translate_text to return expected translations
-        def mock_translate_text(text, source_lang, target_lang, ui_safe=False, glossary_id=None):
-            if text == "Welcome to our application!":
-                return "Bienvenue dans notre application!"
-            elif text == "Login":
-                return "Connexion"
-            elif text == "Sign In":
-                return "Se connecter"
-            return text
+        # Mock batch translation method
+        def mock_translate_batch(texts, source_lang, target_lang, ui_safe=False, glossary_id=""):
+            translations = []
+            for text in texts:
+                if text == "Welcome to our application!":
+                    translations.append("Bienvenue dans notre application!")
+                elif text == "Login":
+                    translations.append("Connexion")
+                elif text == "Sign In":
+                    translations.append("Se connecter")
+                else:
+                    translations.append(text)
+            return translations
         
-        with patch("builtins.open", m), \
-             patch.object(Translator, "translate_text", side_effect=mock_translate_text):
-            
+        with patch("builtins.open", m):
             translator = Translator()
+            # Mock the batch translation method
+            translator._translate_with_algebras_ai_batch = mock_translate_batch
             result = translator.translate_file("messages.en.yaml", "fr")
             
             # Verify the translation
@@ -258,9 +293,18 @@ class TestTranslator:
         mock_config.load.return_value = {}
         mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
         mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_base_url.return_value = "https://platform.algebras.ai"
+        mock_config.get_setting.return_value = ""
+        mock_config.has_setting.return_value = False
 
         # Patch Config class
         monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+        
+        # Mock the cache
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None
+        mock_cache.get_cache_key.return_value = "test-cache-key"
+        monkeypatch.setattr("algebras.services.translator.TranslationCache", lambda: mock_cache)
         
         # Mock environment variable
         monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
@@ -299,25 +343,39 @@ class TestTranslator:
         mock_config.exists.return_value = True
         mock_config.load.return_value = {}
         mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        mock_config.get_base_url.return_value = "https://platform.algebras.ai"
+        mock_config.get_setting.return_value = ""
+        mock_config.has_setting.return_value = False
 
         # Patch Config class
         monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
         
+        # Mock the cache
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None
+        mock_cache.get_cache_key.return_value = "test-cache-key"
+        monkeypatch.setattr("algebras.services.translator.TranslationCache", lambda: mock_cache)
+        
         # Mock environment variable
         monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
 
-        # Mock translate_text to return expected translations
-        def mock_translate_text(text, source_lang, target_lang, ui_safe=False, glossary_id=None):
-            if text == "Welcome to our application!":
-                return "Bienvenue dans notre application!"
-            elif text == "Login":
-                return "Connexion"
-            elif text == "Sign In":
-                return "Se connecter"
-            return text
+        # Mock batch translation method
+        def mock_translate_batch(texts, source_lang, target_lang, ui_safe=False, glossary_id=""):
+            translations = []
+            for text in texts:
+                if text == "Welcome to our application!":
+                    translations.append("Bienvenue dans notre application!")
+                elif text == "Login":
+                    translations.append("Connexion")
+                elif text == "Sign In":
+                    translations.append("Se connecter")
+                else:
+                    translations.append(text)
+            return translations
         
         translator = Translator()
-        translator.translate_text = mock_translate_text
+        # Mock the batch translation method
+        translator._translate_with_algebras_ai_batch = mock_translate_batch
         
         # Test _translate_nested_dict
         result = translator._translate_nested_dict(nested_dict, "en", "fr")
