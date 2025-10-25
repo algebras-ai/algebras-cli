@@ -63,6 +63,7 @@ def test_android_values_file_detection():
             mock_config.get_languages.return_value = ["en", "es", "ru"]
             mock_config.get_source_language.return_value = "en"
             mock_config.get_path_rules.return_value = ["**/*.xml"]
+            mock_config.get_source_files.return_value = {}
             
             with patch("algebras.services.file_scanner.Config", return_value=mock_config):
                 scanner = FileScanner()
@@ -147,6 +148,7 @@ def test_android_values_file_scanning_patterns():
     mock_config.get_languages.return_value = ["en", "es"]
     mock_config.get_source_language.return_value = "en"
     mock_config.get_path_rules.return_value = ["**/*.xml"]
+    mock_config.get_source_files.return_value = {}
     
     with patch("algebras.services.file_scanner.Config", return_value=mock_config):
         scanner = FileScanner()

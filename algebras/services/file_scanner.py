@@ -32,7 +32,7 @@ class FileScanner:
         all_files = set()
         
         # If we have source_files configuration, use it
-        if self.source_files:
+        if self.source_files and len(self.source_files) > 0:
             for source_file in self.source_files.keys():
                 if os.path.isfile(source_file):
                     all_files.add(os.path.normpath(source_file))
