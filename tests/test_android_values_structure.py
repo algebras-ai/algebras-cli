@@ -76,17 +76,17 @@ def test_android_values_file_detection():
                 # Base language files should be in 'en' (source language)
                 en_files = grouped_files["en"]
                 assert len(en_files) == 2  # strings.xml and app_strings.xml
-                assert any("values/strings.xml" in f for f in en_files)
-                assert any("values/app_strings.xml" in f for f in en_files)
+                assert any(os.path.join("values", "strings.xml") in f for f in en_files)
+                assert any(os.path.join("values", "app_strings.xml") in f for f in en_files)
                 
                 # Translated files should be in respective languages
                 es_files = grouped_files["es"]
                 assert len(es_files) == 1
-                assert any("values-es/strings.xml" in f for f in es_files)
+                assert any(os.path.join("values-es", "strings.xml") in f for f in es_files)
                 
                 ru_files = grouped_files["ru"]
                 assert len(ru_files) == 1
-                assert any("values-ru/strings.xml" in f for f in ru_files)
+                assert any(os.path.join("values-ru", "strings.xml") in f for f in ru_files)
                 
         finally:
             os.chdir(original_cwd)
@@ -97,25 +97,25 @@ def test_android_values_path_determination():
     # Test base values to target language
     source_path = "app/src/main/res/values/strings.xml"
     target_path = determine_target_path(source_path, "en", "es")
-    expected = "app/src/main/res/values-es/strings.xml"
+    expected = os.path.join("app", "src", "main", "res", "values-es", "strings.xml")
     assert target_path == expected
     
     # Test preserving filename
     source_path = "app/src/main/res/values/app_strings.xml"
     target_path = determine_target_path(source_path, "en", "ru")
-    expected = "app/src/main/res/values-ru/app_strings.xml"
+    expected = os.path.join("app", "src", "main", "res", "values-ru", "app_strings.xml")
     assert target_path == expected
     
     # Test values-{lang} to another language
     source_path = "app/src/main/res/values-es/strings.xml"
     target_path = determine_target_path(source_path, "es", "fr")
-    expected = "app/src/main/res/values-fr/strings.xml"
+    expected = os.path.join("app", "src", "main", "res", "values-fr", "strings.xml")
     assert target_path == expected
     
     # Test nested subdirectories
     source_path = "project/mobile/android/app/src/main/res/values/ui_strings.xml"
     target_path = determine_target_path(source_path, "en", "de")
-    expected = "project/mobile/android/app/src/main/res/values-de/ui_strings.xml"
+    expected = os.path.join("project", "mobile", "android", "app", "src", "main", "res", "values-de", "ui_strings.xml")
     assert target_path == expected
 
 
@@ -126,7 +126,7 @@ def test_android_values_priority_over_other_patterns():
     target_path = determine_target_path(source_path, "en", "es")
     
     # Should use Android pattern (values -> values-es) not filename pattern (.en. -> .es.)
-    expected = "app/src/main/res/values-es/strings.en.xml"
+    expected = os.path.join("app", "src", "main", "res", "values-es", "strings.en.xml")
     assert target_path == expected
 
 

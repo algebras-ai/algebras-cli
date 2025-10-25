@@ -115,6 +115,8 @@ class TestConfig:
         """Test get_languages with empty config"""
         config = Config()
         config.data = {}
+        # Mock exists() to return False to prevent loading the actual config file
+        monkeypatch.setattr(config, 'exists', lambda: False)
         assert config.get_languages() == []
 
     def test_get_languages(self):
@@ -163,10 +165,12 @@ class TestConfig:
         assert save_called[0] is False
         assert config.data["languages"] == ["en", "fr"]
 
-    def test_get_path_rules_empty(self):
+    def test_get_path_rules_empty(self, monkeypatch):
         """Test get_path_rules with empty config"""
         config = Config()
         config.data = {}
+        # Mock exists() to return False to prevent loading the actual config file
+        monkeypatch.setattr(config, 'exists', lambda: False)
         assert config.get_path_rules() == []
 
     def test_get_path_rules(self):
@@ -176,10 +180,12 @@ class TestConfig:
         config.data = {"path_rules": path_rules}
         assert config.get_path_rules() == path_rules
 
-    def test_get_api_config_empty(self):
+    def test_get_api_config_empty(self, monkeypatch):
         """Test get_api_config with empty config"""
         config = Config()
         config.data = {}
+        # Mock exists() to return False to prevent loading the actual config file
+        monkeypatch.setattr(config, 'exists', lambda: False)
         assert config.get_api_config() == {}
 
     def test_get_api_config(self):

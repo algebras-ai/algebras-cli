@@ -1,4 +1,5 @@
 import unittest
+import os
 from algebras.utils.path_utils import determine_target_path
 
 def test_determine_target_path():
@@ -7,8 +8,8 @@ def test_determine_target_path():
     source_path = "public/locales/en/common.json"
     
     # For different target languages
-    assert determine_target_path(source_path, "en", "fr") == "public/locales/fr/common.json"
-    assert determine_target_path(source_path, "en", "es") == "public/locales/es/common.json"
+    assert determine_target_path(source_path, "en", "fr") == os.path.join("public", "locales", "fr", "common.json")
+    assert determine_target_path(source_path, "en", "es") == os.path.join("public", "locales", "es", "common.json")
     
     # Test with Windows-style paths
     win_source = "public\\locales\\en\\common.json"
