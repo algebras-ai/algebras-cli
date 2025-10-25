@@ -220,6 +220,8 @@ def _parse_po_content(content: str) -> List[Dict[str, Any]]:
         if line.startswith('#') or line.startswith('msgid'):
             entry = {
                 'comments': [],
+                'msgctxt': '',
+                'msgctxt_lines': [],
                 'msgid': '',
                 'msgstr': '',
                 'msgid_lines': [],
@@ -232,6 +234,20 @@ def _parse_po_content(content: str) -> List[Dict[str, Any]]:
             while i < len(lines) and lines[i].strip().startswith('#'):
                 entry['comments'].append(lines[i])
                 i += 1
+            
+            # Parse msgctxt (message context) - comes after comments, before msgid
+            if i < len(lines) and lines[i].strip().startswith('msgctxt'):
+                msgctxt_line = lines[i].strip()
+                entry['msgctxt_lines'].append(msgctxt_line)
+                entry['msgctxt'] = _extract_quoted_string(msgctxt_line)
+                i += 1
+                
+                # Handle multi-line msgctxt
+                while i < len(lines) and lines[i].strip().startswith('"'):
+                    continued_line = lines[i].strip()
+                    entry['msgctxt_lines'].append(continued_line)
+                    entry['msgctxt'] += _extract_quoted_string(continued_line)
+                    i += 1
             
             # Parse msgid
             if i < len(lines) and lines[i].strip().startswith('msgid'):
@@ -372,6 +388,29 @@ def _reconstruct_po_content(entries: List[Dict[str, Any]], original_content: str
         for comment in entry['comments']:
             result_lines.append(comment)
         
+        # Add msgctxt - preserve original format style
+        if 'msgctxt_lines' in entry and len(entry['msgctxt_lines']) > 1:
+            # Original was multi-line, preserve format but check if content changed
+            original_msgctxt_content = ''.join(_extract_quoted_string(line) for line in entry['msgctxt_lines'])
+            if original_msgctxt_content == entry['msgctxt']:
+                # Content unchanged, use original lines
+                for line in entry['msgctxt_lines']:
+                    result_lines.append(line)
+            else:
+                # Content changed, format as multi-line to preserve style
+                result_lines.extend(_format_multiline_entry('msgctxt', entry['msgctxt']))
+        elif 'msgctxt_lines' in entry and len(entry['msgctxt_lines']) == 1:
+            # Original was single-line, preserve format
+            escaped_msgctxt = _escape_po_string(entry['msgctxt'])
+            result_lines.append(f'msgctxt "{escaped_msgctxt}"')
+        elif 'msgctxt' in entry and entry['msgctxt']:
+            # New entry - apply multiline logic only for very long strings or those with newlines
+            if entry['msgctxt'] == "" or '\n' in entry['msgctxt'] or len(entry['msgctxt']) > 120:
+                result_lines.extend(_format_multiline_entry('msgctxt', entry['msgctxt']))
+            else:
+                escaped_msgctxt = _escape_po_string(entry['msgctxt'])
+                result_lines.append(f'msgctxt "{escaped_msgctxt}"')
+        
         # Add msgid - preserve original format style
         if 'msgid_lines' in entry and len(entry['msgid_lines']) > 1:
             # Original was multi-line, preserve format but check if content changed
@@ -440,6 +479,14 @@ def _reconstruct_po_content(entries: List[Dict[str, Any]], original_content: str
         # Add comments
         for comment in entry['comments']:
             result_lines.append(comment)
+        
+        # Add msgctxt - for new entries, be more conservative with multiline
+        if 'msgctxt' in entry and entry['msgctxt']:
+            if entry['msgctxt'] == "" or '\n' in entry['msgctxt'] or len(entry['msgctxt']) > 120:
+                result_lines.extend(_format_multiline_entry('msgctxt', entry['msgctxt']))
+            else:
+                escaped_msgctxt = _escape_po_string(entry['msgctxt'])
+                result_lines.append(f'msgctxt "{escaped_msgctxt}"')
         
         # Add msgid - for new entries, be more conservative with multiline
         if entry['msgid'] == "" or '\n' in entry['msgid'] or len(entry['msgid']) > 120:
