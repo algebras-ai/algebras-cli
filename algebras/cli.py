@@ -11,7 +11,7 @@ from algebras.config import Config
 from algebras.commands import init_command, add_command
 from algebras.commands import translate_command, update_command
 from algebras.commands import review_command, status_command
-from algebras.commands import configure_command
+from algebras.commands import configure_command, glossary_push_command
 
 # Initialize colorama
 init()
@@ -105,6 +105,24 @@ def status(language):
 def configure(provider, model, path_rules, batch_size, max_parallel_batches, glossary_id, prompt, normalize_strings):
     """Configure your Algebras project settings."""
     configure_command.execute(provider, model, path_rules, batch_size, max_parallel_batches, glossary_id, prompt, normalize_strings)
+
+
+@cli.group("glossary")
+def glossary():
+    """Manage glossaries for translation."""
+    pass
+
+
+@glossary.command("push")
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--name", required=True, help="Name of the glossary to create")
+@click.option("--batch-size", default=100, type=int, help="Number of terms to upload per batch (default: 100)")
+@click.option("--debug", is_flag=True, help="Enable debug mode to log all requests before sending")
+@click.option("--rows-ids", help="Comma-separated list of row IDs (Record ID column) to include")
+@click.option("--max-length", type=int, help="Maximum allowed length for a term; longer terms are skipped")
+def glossary_push(file, name, batch_size, debug, rows_ids, max_length):
+    """Upload glossary terms from CSV or XLSX file."""
+    glossary_push_command.execute(file, name, batch_size=batch_size, debug=debug, rows_ids=rows_ids, max_length=max_length)
 
 
 def main():

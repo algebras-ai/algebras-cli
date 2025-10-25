@@ -306,7 +306,8 @@ class Translator:
         if not api_key:
             raise ValueError("Algebras API key not found. Set the ALGEBRAS_API_KEY environment variable.")
         
-        url = "https://platform.algebras.ai/api/v1/translation/translate"
+        base_url = self.config.get_base_url()
+        url = f"{base_url}/api/v1/translation/translate"
         headers = {
             "accept": "application/json",
             "X-Api-Key": api_key
@@ -646,7 +647,8 @@ class Translator:
         if not api_key:
             raise ValueError("Algebras API key not found. Set the ALGEBRAS_API_KEY environment variable.")
         
-        url = "https://platform.algebras.ai/api/v1/translation/translate-batch"
+        base_url = self.config.get_base_url()
+        url = f"{base_url}/api/v1/translation/translate-batch"
         headers = {
             "accept": "application/json",
             "Content-Type": "application/json",

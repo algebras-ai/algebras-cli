@@ -96,6 +96,16 @@ The `.algebras.config` file is used to configure the Algebras CLI. It contains t
     - `openai`: Use OpenAI's GPT models for translation (requires `OPENAI_API_KEY` environment variable)
   - `model`: The model to use (for OpenAI provider)
 
+### Environment Variables
+
+The following environment variables can be used to configure the Algebras CLI:
+
+- `ALGEBRAS_API_KEY`: (Required) API key for Algebras AI translation service
+- `ALGEBRAS_BASE_URL`: (Optional) Custom base URL for Algebras AI API (defaults to `https://platform.algebras.ai`)
+- `ALGEBRAS_BATCH_SIZE`: (Optional) Number of translations to process in each batch (defaults to 20)
+- `ALGEBRAS_MAX_PARALLEL_BATCHES`: (Optional) Maximum number of parallel batches to run (defaults to 5)
+- `OPENAI_API_KEY`: (Required when using OpenAI provider) API key for OpenAI translation service
+
 
 
 ## Contributing

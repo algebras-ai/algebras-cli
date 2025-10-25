@@ -271,4 +271,10 @@ class Config:
         else:
             self.data[key] = value
         
-        self.save() 
+        self.save()
+    
+    def get_base_url(self) -> str:
+        """Get the Algebras AI API base URL from environment variable or default."""
+        base_url = os.environ.get("ALGEBRAS_BASE_URL", "https://platform.algebras.ai")
+        # Strip trailing slashes for consistency
+        return base_url.rstrip("/") 

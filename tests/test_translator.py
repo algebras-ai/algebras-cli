@@ -349,6 +349,7 @@ class TestTranslator:
         mock_config.exists.return_value = True
         mock_config.load.return_value = {}
         mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        mock_config.get_base_url.return_value = "https://platform.algebras.ai"
 
         # Patch Config class
         monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
@@ -366,6 +367,8 @@ class TestTranslator:
 
         # Initialize Translator
         translator = Translator()
+        # Clear cache to ensure we make a fresh API call
+        translator.cache.clear()
         result = translator.translate_text("Hello world", "en", "de")
 
         # Verify the translation
