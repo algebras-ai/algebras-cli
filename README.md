@@ -8,14 +8,22 @@
 
 [![Next.js](https://img.shields.io/badge/Next.js-000000?style=flat&logo=next.js&logoColor=white)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-20232A?style=flat&logo=react&logoColor=61DAFB)](https://reactjs.org/)
+[![Vue.js](https://img.shields.io/badge/Vue.js-4FC08D?style=flat&logo=vue.js&logoColor=white)](https://vuejs.org/)
+[![Svelte](https://img.shields.io/badge/Svelte-FF3E00?style=flat&logo=svelte&logoColor=white)](https://svelte.dev/)
 [![Flutter](https://img.shields.io/badge/Flutter-02569B?style=flat&logo=flutter&logoColor=white)](https://flutter.dev/)
 [![Angular](https://img.shields.io/badge/Angular-DD0031?style=flat&logo=angular&logoColor=white)](https://angular.io/)
 [![Django](https://img.shields.io/badge/Django-092E20?style=flat&logo=django&logoColor=white)](https://djangoproject.com/)
+[![Flask](https://img.shields.io/badge/Flask-000000?style=flat&logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Android](https://img.shields.io/badge/Android-3DDC84?style=flat&logo=android&logoColor=white)](https://developer.android.com/)
 [![iOS](https://img.shields.io/badge/iOS-000000?style=flat&logo=ios&logoColor=white)](https://developer.apple.com/ios/)
 [![Java](https://img.shields.io/badge/Java-ED8B00?style=flat&logo=java&logoColor=white)](https://www.java.com/)
+[![Spring](https://img.shields.io/badge/Spring-6DB33F?style=flat&logo=spring&logoColor=white)](https://spring.io/)
 [![Rails](https://img.shields.io/badge/Rails-CC0000?style=flat&logo=ruby-on-rails&logoColor=white)](https://rubyonrails.org/)
 [![Nuxt.js](https://img.shields.io/badge/Nuxt.js-00C58E?style=flat&logo=nuxt.js&logoColor=white)](https://nuxtjs.org/)
+[![SvelteKit](https://img.shields.io/badge/SvelteKit-FF3E00?style=flat&logo=svelte&logoColor=white)](https://kit.svelte.dev/)
+[![Gatsby](https://img.shields.io/badge/Gatsby-663399?style=flat&logo=gatsby&logoColor=white)](https://www.gatsbyjs.com/)
+[![WordPress](https://img.shields.io/badge/WordPress-21759B?style=flat&logo=wordpress&logoColor=white)](https://wordpress.org/)
 
 
 > Powerful AI-driven localization tool for your applications
@@ -29,6 +37,8 @@ Algebras CLI is a Python package that simplifies application localization by tra
 ## Supported File Formats
 
 Algebras CLI supports a wide range of localization file formats:
+
+[![JSON](https://img.shields.io/badge/JSON-000000?style=flat&logo=json&logoColor=white)](https://www.json.org/) [![YAML](https://img.shields.io/badge/YAML-CB171E?style=flat&logo=yaml&logoColor=white)](https://yaml.org/) [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/) [![XML](https://img.shields.io/badge/XML-FF6600?style=flat&logo=xml&logoColor=white)](https://www.w3.org/XML/) [![HTML](https://img.shields.io/badge/HTML-E34F26?style=flat&logo=html5&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/HTML) [![CSV](https://img.shields.io/badge/CSV-239120?style=flat&logo=csv&logoColor=white)](https://en.wikipedia.org/wiki/Comma-separated_values) [![Excel](https://img.shields.io/badge/Excel-217346?style=flat&logo=microsoft-excel&logoColor=white)](https://www.microsoft.com/en-us/microsoft-365/excel)
 
 - **JSON** (`.json`) - Common for web applications (Next.js, React, etc.)
 - **YAML/YML** (`.yaml`, `.yml`) - Alternative format for configuration files
@@ -239,6 +249,8 @@ algebras glossary push glossary.csv --name "My Glossary" --debug
 
 ## Advanced Features
 
+[![AI](https://img.shields.io/badge/AI-FF6B6B?style=flat&logo=openai&logoColor=white)](https://openai.com/) [![Translation](https://img.shields.io/badge/Translation-4ECDC4?style=flat&logo=google-translate&logoColor=white)](https://translate.google.com/) [![Git](https://img.shields.io/badge/Git-F05032?style=flat&logo=git&logoColor=white)](https://git-scm.com/) [![CI/CD](https://img.shields.io/badge/CI/CD-2088FF?style=flat&logo=github-actions&logoColor=white)](https://github.com/features/actions)
+
 ### UI-Safe Translations
 
 The `--ui-safe` flag ensures that translations won't exceed the original text length, which is crucial for maintaining consistent UI layouts:
@@ -305,6 +317,8 @@ algebras configure --normalize-strings false
 ```
 
 ## Configuration
+
+[![YAML](https://img.shields.io/badge/YAML-CB171E?style=flat&logo=yaml&logoColor=white)](https://yaml.org/) [![JSON](https://img.shields.io/badge/JSON-000000?style=flat&logo=json&logoColor=white)](https://www.json.org/) [![Environment](https://img.shields.io/badge/Environment-4CAF50?style=flat&logo=environment&logoColor=white)](https://en.wikipedia.org/wiki/Environment_variable)
 
 ### .algebras.config
 
@@ -453,6 +467,8 @@ We provide comprehensive examples for different frameworks and file formats:
 
 ### Framework Examples
 
+[![Next.js](https://img.shields.io/badge/Next.js-000000?style=flat&logo=next.js&logoColor=white)](https://nextjs.org/) [![React](https://img.shields.io/badge/React-20232A?style=flat&logo=react&logoColor=61DAFB)](https://reactjs.org/) [![Flutter](https://img.shields.io/badge/Flutter-02569B?style=flat&logo=flutter&logoColor=white)](https://flutter.dev/) [![Angular](https://img.shields.io/badge/Angular-DD0031?style=flat&logo=angular&logoColor=white)](https://angular.io/) [![Java](https://img.shields.io/badge/Java-ED8B00?style=flat&logo=java&logoColor=white)](https://www.java.com/) [![Django](https://img.shields.io/badge/Django-092E20?style=flat&logo=django&logoColor=white)](https://djangoproject.com/)
+
 - **[Next.js/React](examples/nextjs-app/)** - JSON-based localization with i18next
 - **[Flutter](examples/flutter-app/)** - ARB files for Flutter internationalization
 - **[Angular](examples/angular-app/)** - XLIFF files for Angular i18n
@@ -460,6 +476,8 @@ We provide comprehensive examples for different frameworks and file formats:
 - **[Django](examples/django-app/)** - Gettext PO files for Django
 
 ### Format Examples
+
+[![CSV](https://img.shields.io/badge/CSV-239120?style=flat&logo=csv&logoColor=white)](https://en.wikipedia.org/wiki/Comma-separated_values) [![Excel](https://img.shields.io/badge/Excel-217346?style=flat&logo=microsoft-excel&logoColor=white)](https://www.microsoft.com/en-us/microsoft-365/excel) [![HTML](https://img.shields.io/badge/HTML-E34F26?style=flat&logo=html5&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/HTML) [![Android](https://img.shields.io/badge/Android-3DDC84?style=flat&logo=android&logoColor=white)](https://developer.android.com/)
 
 - **[CSV Translations](examples/csv-translations/)** - Multi-language CSV files
 - **[XLSX Translations](examples/xlsx-translations/)** - Multi-language Excel files
