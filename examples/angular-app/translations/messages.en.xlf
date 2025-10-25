@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file original="messages" source-language="en" target-language="en" datatype="plaintext">
+    <body>
+      <trans-unit id="app.title">
+        <source>My Angular App</source>
+        <target>My Angular App</target>
+      </trans-unit>
+      <trans-unit id="welcome.message">
+        <source>Welcome to our amazing Angular application!</source>
+        <target>Welcome to our amazing Angular application!</target>
+      </trans-unit>
+      <trans-unit id="login.button">
+        <source>Log In</source>
+        <target>Log In</target>
+      </trans-unit>
+      <trans-unit id="register.button">
+        <source>Register</source>
+        <target>Register</target>
+      </trans-unit>
+      <trans-unit id="error.message">
+        <source>Something went wrong. Please try again.</source>
+        <target>Something went wrong. Please try again.</target>
+      </trans-unit>
+      <trans-unit id="settings.title">
+        <source>Settings</source>
+        <target>Settings</target>
+      </trans-unit>
+      <trans-unit id="language.selection">
+        <source>Select Language</source>
+        <target>Select Language</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

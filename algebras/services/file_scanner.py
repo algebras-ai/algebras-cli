@@ -70,6 +70,27 @@ class FileScanner:
                 "locales/*/*.po",
                 "src/locale/*/*.po",
                 "src/locales/*/*.po",
+                # Flutter ARB files
+                "lib/l10n/*.arb",
+                "**/l10n/*.arb",
+                "**/*.arb",
+                # XLIFF files
+                "translations/*.xlf",
+                "translations/*.xliff",
+                "**/*.xlf",
+                "**/*.xliff",
+                # Java Properties files
+                "src/main/resources/*.properties",
+                "**/resources/*.properties",
+                "**/*.properties",
+                # CSV translation files
+                "locales/*.csv",
+                "**/locales/*.csv",
+                "**/*.csv",
+                # XLSX translation files
+                "locales/*.xlsx",
+                "**/locales/*.xlsx",
+                "**/*.xlsx",
             ]
             
             # Separate include and exclude patterns

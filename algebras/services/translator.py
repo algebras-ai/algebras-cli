@@ -27,6 +27,11 @@ from algebras.utils.ios_strings_handler import read_ios_strings_file
 from algebras.utils.ios_stringsdict_handler import read_ios_stringsdict_file, extract_translatable_strings
 from algebras.utils.po_handler import read_po_file
 from algebras.utils.html_handler import read_html_file
+from algebras.utils.arb_handler import read_arb_file, extract_translatable_strings as extract_arb_strings
+from algebras.utils.xliff_handler import read_xliff_file, extract_translatable_strings as extract_xliff_strings
+from algebras.utils.properties_handler import read_properties_file
+from algebras.utils.csv_handler import read_csv_file, extract_translatable_strings as extract_csv_strings, is_glossary_csv
+from algebras.utils.xlsx_handler import read_xlsx_file, extract_translatable_strings as extract_xlsx_strings, is_glossary_xlsx
 
 
 class TranslationCache:
@@ -315,6 +320,22 @@ class Translator:
             content = read_po_file(file_path)
         elif file_path.endswith(".html"):
             content = read_html_file(file_path)
+        elif file_path.endswith(".arb"):
+            content = read_arb_file(file_path)
+        elif file_path.endswith((".xlf", ".xliff")):
+            content = read_xliff_file(file_path)
+        elif file_path.endswith(".properties"):
+            content = read_properties_file(file_path)
+        elif file_path.endswith(".csv"):
+            # Check if it's a glossary CSV or translation CSV
+            if is_glossary_csv(file_path):
+                raise ValueError(f"CSV file {file_path} appears to be a glossary file, not a translation file")
+            content = read_csv_file(file_path)
+        elif file_path.endswith((".xlsx", ".xls")):
+            # Check if it's a glossary XLSX or translation XLSX
+            if is_glossary_xlsx(file_path):
+                raise ValueError(f"XLSX file {file_path} appears to be a glossary file, not a translation file")
+            content = read_xlsx_file(file_path)
         else:
             raise ValueError(f"Unsupported file format: {file_path}")
         
@@ -325,6 +346,28 @@ class Translator:
         if file_path.endswith(".html"):
             # HTML files are already flat dictionaries, translate directly
             translated = self._translate_flat_dict(content, source_lang, target_lang, ui_safe, glossary_id)
+        elif file_path.endswith(".arb"):
+            # ARB files need special handling to extract translatable strings
+            translatable_strings = extract_arb_strings(content)
+            translated_strings = self._translate_flat_dict(translatable_strings, source_lang, target_lang, ui_safe, glossary_id)
+            # Merge back with original content, preserving metadata
+            translated = content.copy()
+            translated.update(translated_strings)
+        elif file_path.endswith((".xlf", ".xliff")):
+            # XLIFF files need special handling to extract translatable strings
+            translatable_strings = extract_xliff_strings(content)
+            translated_strings = self._translate_flat_dict(translatable_strings, source_lang, target_lang, ui_safe, glossary_id)
+            # For XLIFF, we need to update the target elements
+            translated = self._update_xliff_targets(content, translated_strings)
+        elif file_path.endswith(".properties"):
+            # Properties files are flat dictionaries, translate directly
+            translated = self._translate_flat_dict(content, source_lang, target_lang, ui_safe, glossary_id)
+        elif file_path.endswith(".csv"):
+            # CSV files need special handling for multi-language structure
+            translated = self._translate_csv_content(content, source_lang, target_lang, ui_safe, glossary_id)
+        elif file_path.endswith((".xlsx", ".xls")):
+            # XLSX files need special handling for multi-language structure
+            translated = self._translate_xlsx_content(content, source_lang, target_lang, ui_safe, glossary_id)
         else:
             translated = self._translate_nested_dict(content, source_lang, target_lang, ui_safe, glossary_id)
         
@@ -1182,4 +1225,101 @@ class Translator:
                     # Re-raise the exception instead of falling back to individual translations
                     raise e
         
-        return updated_content 
+        return updated_content
+    
+    
+    def _update_xliff_targets(self, xliff_content: Dict[str, Any], translated_strings: Dict[str, str]) -> Dict[str, Any]:
+        """
+        Update XLIFF target elements with translated strings.
+        
+        Args:
+            xliff_content: Original XLIFF content
+            translated_strings: Dictionary of translated strings
+            
+        Returns:
+            Updated XLIFF content with target elements
+        """
+        updated_content = xliff_content.copy()
+        
+        if 'files' in updated_content:
+            for file_data in updated_content['files']:
+                if 'trans-units' in file_data:
+                    for unit in file_data['trans-units']:
+                        if 'id' in unit and unit['id'] in translated_strings:
+                            unit['target'] = translated_strings[unit['id']]
+        
+        return updated_content
+    
+    def _translate_csv_content(self, csv_content: Dict[str, Any], source_lang: str, target_lang: str, 
+                              ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Translate CSV content for a specific target language.
+        
+        Args:
+            csv_content: CSV content dictionary
+            source_lang: Source language code
+            target_lang: Target language code
+            ui_safe: If True, ensure translations will not be longer than original text
+            glossary_id: Glossary ID to use for translation
+            
+        Returns:
+            Updated CSV content with translated strings
+        """
+        if 'translations' not in csv_content:
+            return csv_content
+        
+        # Extract source language strings
+        source_strings = {}
+        for key, lang_translations in csv_content['translations'].items():
+            if isinstance(lang_translations, dict) and source_lang in lang_translations:
+                source_strings[key] = lang_translations[source_lang]
+        
+        # Translate the strings
+        translated_strings = self._translate_flat_dict(source_strings, source_lang, target_lang, ui_safe, glossary_id)
+        
+        # Update the CSV content
+        updated_content = csv_content.copy()
+        for key, translated_value in translated_strings.items():
+            if key in updated_content['translations']:
+                if target_lang not in updated_content['translations'][key]:
+                    updated_content['translations'][key] = updated_content['translations'][key].copy()
+                updated_content['translations'][key][target_lang] = translated_value
+        
+        return updated_content
+    
+    def _translate_xlsx_content(self, xlsx_content: Dict[str, Any], source_lang: str, target_lang: str, 
+                               ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Translate XLSX content for a specific target language.
+        
+        Args:
+            xlsx_content: XLSX content dictionary
+            source_lang: Source language code
+            target_lang: Target language code
+            ui_safe: If True, ensure translations will not be longer than original text
+            glossary_id: Glossary ID to use for translation
+            
+        Returns:
+            Updated XLSX content with translated strings
+        """
+        if 'translations' not in xlsx_content:
+            return xlsx_content
+        
+        # Extract source language strings
+        source_strings = {}
+        for key, lang_translations in xlsx_content['translations'].items():
+            if isinstance(lang_translations, dict) and source_lang in lang_translations:
+                source_strings[key] = lang_translations[source_lang]
+        
+        # Translate the strings
+        translated_strings = self._translate_flat_dict(source_strings, source_lang, target_lang, ui_safe, glossary_id)
+        
+        # Update the XLSX content
+        updated_content = xlsx_content.copy()
+        for key, translated_value in translated_strings.items():
+            if key in updated_content['translations']:
+                if target_lang not in updated_content['translations'][key]:
+                    updated_content['translations'][key] = updated_content['translations'][key].copy()
+                updated_content['translations'][key][target_lang] = translated_value
+        
+        return updated_content

@@ -1,0 +1,12 @@
+key,en,de,fr,es
+app.title,My Application,Meine Anwendung,Mon Application,Mi Aplicación
+welcome.message,Welcome to our amazing application!,Willkommen zu unserer erstaunlichen Anwendung!,Bienvenue dans notre application incroyable!,¡Bienvenido a nuestra increíble aplicación!
+login.button,Log In,Anmelden,Se connecter,Iniciar sesión
+register.button,Register,Registrieren,S'inscrire,Registrarse
+error.message,Something went wrong. Please try again.,Etwas ist schief gelaufen. Bitte versuchen Sie es erneut.,Quelque chose s'est mal passé. Veuillez réessayer.,Algo salió mal. Por favor, inténtalo de nuevo.
+settings.title,Settings,Einstellungen,Paramètres,Configuración
+language.selection,Select Language,Sprache auswählen,Sélectionner la langue,Seleccionar idioma
+user.profile,User Profile,Benutzerprofil,Profil utilisateur,Perfil de usuario
+logout.button,Log Out,Abmelden,Se déconnecter,Cerrar sesión
+save.button,Save,Speichern,Enregistrer,Guardar
+cancel.button,Cancel,Abbrechen,Annuler,Cancelar
