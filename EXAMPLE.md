@@ -21,8 +21,7 @@ path_rules:
 - '!**/node_modules/**'
 - '!**/build/**'
 api:
-  provider: openai
-  model: gpt-4
+  provider: algebras-ai
 ```
 
 ### 2. Add Target Languages
@@ -64,10 +63,10 @@ This will show you that French, Spanish, and German translations are missing.
 
 ### 5. Translate Your Application
 
-Make sure you have set your OpenAI API key:
+Make sure you have set your Algebras AI API key:
 
 ```bash
-export OPENAI_API_KEY=your-api-key-here
+export ALGEBRAS_API_KEY=your-api-key-here
 ```
 
 Then run:

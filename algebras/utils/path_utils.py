@@ -1,5 +1,18 @@
 import os
 
+def resolve_destination_path(destination_pattern: str, locale_code: str) -> str:
+    """
+    Resolve a destination path pattern by replacing placeholders with actual locale code.
+    
+    Args:
+        destination_pattern: Path pattern with %algebras_locale_code% placeholder
+        locale_code: The actual locale code to substitute
+        
+    Returns:
+        Resolved destination path
+    """
+    return destination_pattern.replace("%algebras_locale_code%", locale_code)
+
 def determine_target_path(source_path: str, source_lang: str, target_lang: str) -> str:
     """
     Determine the target file path by replacing the source language folder with target language folder.

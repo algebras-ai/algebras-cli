@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to My Website</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f4f4f4;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem 0;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+
+        nav {
+            background-color: #333;
+            padding: 1rem 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        nav ul {
+            list-style: none;
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+        }
+
+        nav a {
+            color: white;
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s ease;
+        }
+
+        nav a:hover {
+            color: #667eea;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .hero {
+            background: white;
+            padding: 3rem;
+            margin: 2rem 0;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .hero h2 {
+            color: #667eea;
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin: 2rem 0;
+        }
+
+        .feature-card {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+        }
+
+        .feature-card h3 {
+            color: #764ba2;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card p {
+            color: #666;
+        }
+
+        .cta-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem 2rem;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            margin-top: 1rem;
+        }
+
+        .cta-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        footer {
+            background-color: #333;
+            color: white;
+            text-align: center;
+            padding: 2rem 0;
+            margin-top: 3rem;
+        }
+
+        footer p {
+            opacity: 0.8;
+        }
+
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 2rem;
+            }
+
+            nav ul {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .hero {
+                padding: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Welcome to Our Amazing Website</h1>
+        <p>Discover the future of web development</p>
+    </header>
+
+    <nav>
+        <ul>
+            <li><a href="#home">Home</a></li>
+            <li><a href="#features">Features</a></li>
+            <li><a href="#about">About</a></li>
+            <li><a href="#contact">Contact</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <section class="hero" id="home">
+            <h2>Building the Web of Tomorrow</h2>
+            <p>We create stunning, responsive websites that engage your audience and drive results. Our team of expert developers and designers work together to bring your vision to life with cutting-edge technology and creative solutions.</p>
+            <a href="#contact" class="cta-button">Get Started Today</a>
+        </section>
+
+        <section id="features">
+            <h2 style="text-align: center; margin: 2rem 0; color: #333; font-size: 2rem;">Our Features</h2>
+            <div class="features">
+                <div class="feature-card">
+                    <h3>Responsive Design</h3>
+                    <p>Our websites look perfect on all devices, from smartphones to desktop computers. We ensure a seamless experience across all screen sizes.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>Fast Performance</h3>
+                    <p>Speed matters. We optimize every aspect of your website to ensure lightning-fast load times and smooth interactions.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>Modern Technology</h3>
+                    <p>We use the latest web technologies and best practices to build robust, scalable, and maintainable websites.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>SEO Optimized</h3>
+                    <p>Get found online. Our websites are built with search engine optimization in mind from the ground up.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>Secure & Reliable</h3>
+                    <p>Security is our priority. We implement industry-standard security measures to protect your data and users.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>24/7 Support</h3>
+                    <p>We're here for you around the clock. Our dedicated support team is always ready to help with any questions or issues.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="hero" id="about">
+            <h2>About Us</h2>
+            <p>We are a passionate team of web developers, designers, and digital strategists dedicated to creating exceptional online experiences. With over 10 years of experience in the industry, we've helped hundreds of businesses establish their online presence and achieve their digital goals.</p>
+            <p style="margin-top: 1rem;">Our mission is to make the web more beautiful, accessible, and user-friendly, one website at a time.</p>
+        </section>
+
+        <section class="hero" id="contact">
+            <h2>Get In Touch</h2>
+            <p>Ready to start your project? We'd love to hear from you!</p>
+            <p style="margin-top: 1rem;">
+                <strong>Email:</strong> contact@example.com<br>
+                <strong>Phone:</strong> (555) 123-4567<br>
+                <strong>Address:</strong> 123 Web Street, Internet City, IC 12345
+            </p>
+            <a href="mailto:contact@example.com" class="cta-button">Send Us a Message</a>
+        </section>
+    </div>
+
+    <footer>
+        <p>&copy; 2024 Amazing Website. All rights reserved.</p>
+        <p>Made with ❤️ by our talented team</p>
+    </footer>
+</body>
+</html>

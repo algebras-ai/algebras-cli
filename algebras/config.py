@@ -145,20 +145,15 @@ class Config:
         if not detected_languages:
             detected_languages = ["en"]
         
+        # Detect source files and create destination patterns
+        source_files = self._detect_source_files()
+        
         self.data = {
             "languages": detected_languages,
-            "path_rules": [
-                "**/*.json",  # JSON files
-                "**/*.yaml",  # YAML files
-                "**/*.xml",   # Android XML localization files
-                "**/*.strings",  # iOS strings localization files
-                "!**/node_modules/**",  # Exclude node_modules directory
-                "!**/build/**",  # Exclude build directory
-            ],
+            "source_files": source_files,
             "api": {
                 "provider": "algebras-ai",  # Default provider
-                "model": "gpt-4",     # Default model (for OpenAI)
-                # Provider options include: "openai", "algebras-ai"
+                # Provider options include: "algebras-ai"
                 "normalize_strings": True,  # Default to normalize escaped characters
             },
             "batch_size": 5,  # Default batch size
@@ -166,6 +161,76 @@ class Config:
         }
         
         self.save()
+    
+    def _detect_source_files(self) -> Dict[str, Dict[str, str]]:
+        """Detect source files and generate destination patterns."""
+        import glob
+        import os
+        
+        source_files = {}
+        
+        # Common patterns to detect source files
+        patterns = [
+            "src/locales/*.json",
+            "locales/*.json", 
+            "src/i18n/*.json",
+            "i18n/*.json",
+            "public/locales/*/*.json",
+            "locale/*/*.po",
+            "locales/*/*.po",
+            "src/locale/*/*.po",
+            "src/locales/*/*.po",
+            "**/values/*.xml",
+            "**/*.strings",
+            "**/*.stringsdict"
+        ]
+        
+        for pattern in patterns:
+            for file_path in glob.glob(pattern, recursive=True):
+                if os.path.isfile(file_path):
+                    # Generate destination pattern based on file type and location
+                    destination_pattern = self._generate_destination_pattern(file_path)
+                    if destination_pattern:
+                        source_files[file_path] = {
+                            "destination_path": destination_pattern
+                        }
+        
+        return source_files
+    
+    def _generate_destination_pattern(self, file_path: str) -> str:
+        """Generate destination pattern for a source file."""
+        import os
+        
+        # Handle Android values structure
+        if file_path.endswith('.xml'):
+            path_parts = os.path.normpath(file_path).split(os.sep)
+            for i, part in enumerate(path_parts):
+                if part == "values":
+                    # Convert /values/ to /values-%algebras_locale_code%/
+                    path_parts[i] = "values-%algebras_locale_code%"
+                    return os.path.join(*path_parts)
+                elif part.startswith("values-"):
+                    # Replace /values-{lang}/ with /values-%algebras_locale_code%/
+                    path_parts[i] = "values-%algebras_locale_code%"
+                    return os.path.join(*path_parts)
+        
+        # Handle language-specific directory patterns
+        if "/locales/" in file_path or "\\locales\\" in file_path:
+            # Replace language code with placeholder
+            import re
+            # Match patterns like /en/, /fr/, etc.
+            pattern = r'/([a-z]{2})/'
+            return re.sub(pattern, '/%algebras_locale_code%/', file_path)
+        
+        # Handle other language patterns
+        if "/messages/" in file_path or "\\messages\\" in file_path:
+            import re
+            pattern = r'/([a-z]{2})/'
+            return re.sub(pattern, '/%algebras_locale_code%/', file_path)
+        
+        # Default: add language suffix to filename
+        name, ext = os.path.splitext(file_path)
+        return f"{name}.%algebras_locale_code%{ext}"
     
     def get_languages(self) -> List[str]:
         """Get the list of languages."""
@@ -204,8 +269,16 @@ class Config:
         self.data["languages"] = languages
         self.save()
     
+    def get_source_files(self) -> Dict[str, Dict[str, str]]:
+        """Get the source files configuration."""
+        if not self.data:
+            if not self.exists():
+                return {}
+            self.load()
+        return self.data.get("source_files", {})
+    
     def get_path_rules(self) -> List[str]:
-        """Get the list of path rules."""
+        """Get the list of path rules (deprecated)."""
         if not self.data:
             if not self.exists():
                 return []
@@ -272,6 +345,16 @@ class Config:
             self.data[key] = value
         
         self.save()
+    
+    def check_deprecated_format(self) -> bool:
+        """Check if the configuration uses the deprecated path_rules format."""
+        if not self.data:
+            if not self.exists():
+                return False
+            self.load()
+        
+        # Check if path_rules field exists (even if empty)
+        return "path_rules" in self.data
     
     def get_base_url(self) -> str:
         """Get the Algebras AI API base URL from environment variable or default."""

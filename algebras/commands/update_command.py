@@ -314,6 +314,12 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
     if verbose:
         click.echo(f"{Fore.BLUE}Loaded configuration: {config.config_path}\x1b[0m")
     
+    # Check for deprecated config format
+    if config.check_deprecated_format():
+        click.echo(f"{Fore.RED}🚨 ⚠️  WARNING: Your configuration uses the deprecated 'path_rules' format! ⚠️ 🚨{Fore.RESET}")
+        click.echo(f"{Fore.RED}🔴 Please update to the new 'source_files' format.{Fore.RESET}")
+        click.echo(f"{Fore.RED}📖 See documentation: https://github.com/algebras-ai/algebras-cli{Fore.RESET}")
+    
     # Get languages
     all_languages = config.get_languages()
     if verbose:
@@ -493,6 +499,12 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False, only_missi
     config.load()
     if verbose:
         click.echo(f"{Fore.BLUE}Loaded configuration: {config.config_path}\x1b[0m")
+    
+    # Check for deprecated config format
+    if config.check_deprecated_format():
+        click.echo(f"{Fore.RED}🚨 ⚠️  WARNING: Your configuration uses the deprecated 'path_rules' format! ⚠️ 🚨{Fore.RESET}")
+        click.echo(f"{Fore.RED}🔴 Please update to the new 'source_files' format.{Fore.RESET}")
+        click.echo(f"{Fore.RED}📖 See documentation: https://github.com/algebras-ai/algebras-cli{Fore.RESET}")
     
     # Get languages
     all_languages = config.get_languages()

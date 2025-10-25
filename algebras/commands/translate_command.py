@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional, List, Tuple, Set
 from algebras.config import Config
 from algebras.services.translator import Translator
 from algebras.services.file_scanner import FileScanner
-from algebras.utils.path_utils import determine_target_path
+from algebras.utils.path_utils import determine_target_path, resolve_destination_path
 from algebras.utils.lang_validator import validate_language_files, find_outdated_keys, extract_all_keys
 from algebras.utils.git_utils import is_git_available, is_git_repository
 from algebras.utils.ts_handler import read_ts_translation_file, write_ts_translation_file
@@ -61,6 +61,12 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
     config.load()
     if verbose:
         click.echo(f"{Fore.BLUE}Loaded configuration: {config.config_path}\x1b[0m")
+    
+    # Check for deprecated config format
+    if config.check_deprecated_format():
+        click.echo(f"{Fore.RED}🚨 ⚠️  WARNING: Your configuration uses the deprecated 'path_rules' format! ⚠️ 🚨{Fore.RESET}")
+        click.echo(f"{Fore.RED}🔴 Please update to the new 'source_files' format.{Fore.RESET}")
+        click.echo(f"{Fore.RED}📖 See documentation: https://github.com/algebras-ai/algebras-cli{Fore.RESET}")
     
     # Get languages
     languages = config.get_languages()
@@ -502,31 +508,68 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                 source_dirname = os.path.dirname(source_file)
                 source_ext = source_basename.split('.')[-1] if '.' in source_basename else ''
                 
-                # First, check if there's a direct corresponding file in the target language
-                # Example: src/locales/en.json -> src/locales/es.json
-                if source_basename == f"{source_language}.{source_ext}" and f"{target_lang}.{source_ext}" in existing_file_basenames:
-                    target_file = existing_file_paths[f"{target_lang}.{source_ext}"]
-                    target_basename = os.path.basename(target_file)
-                    target_dirname = os.path.dirname(target_file)
+                # Use new path resolution system if source_files config is available
+                config = Config()
+                config.load()
+                source_files_config = config.get_source_files()
+                
+                if source_files_config and source_file in source_files_config:
+                    # Use the new destination pattern system
+                    destination_pattern = source_files_config[source_file].get("destination_path", "")
+                    if destination_pattern:
+                        target_file = resolve_destination_path(destination_pattern, target_lang)
+                        target_basename = os.path.basename(target_file)
+                        target_dirname = os.path.dirname(target_file)
+                    else:
+                        # Fallback to old system if no destination pattern
+                        target_dirname = os.path.dirname(determine_target_path(source_file, source_language, target_lang))
+                        target_basename = source_basename
+                        target_file = os.path.join(target_dirname, target_basename)
                 else:
-                    # Determine target filename using the more complex logic
-                    if "." in source_basename:
-                        name_parts = source_basename.split(".")
-                        ext = name_parts.pop()
-                        base = ".".join(name_parts)
-                        
-                        # Special case for common localization pattern like "en.json", "es.json" in same directory
-                        if source_basename == f"{source_language}.{ext}" and len(base) == len(source_language):
-                            target_basename = f"{target_lang}.{ext}"
-                        # Check if the base already contains language marker
-                        elif f".{source_language}" in base or f"-{source_language}" in base or f"_{source_language}" in base:
-                            base = base.replace(f".{source_language}", f".{target_lang}")
-                            base = base.replace(f"-{source_language}", f"-{target_lang}")
-                            base = base.replace(f"_{source_language}", f"_{target_lang}")
-                            target_basename = f"{base}.{ext}"
+                    # Fallback to old system for backward compatibility
+                    # First, check if there's a direct corresponding file in the target language
+                    # Example: src/locales/en.json -> src/locales/es.json
+                    if source_basename == f"{source_language}.{source_ext}" and f"{target_lang}.{source_ext}" in existing_file_basenames:
+                        target_file = existing_file_paths[f"{target_lang}.{source_ext}"]
+                        target_basename = os.path.basename(target_file)
+                        target_dirname = os.path.dirname(target_file)
+                    else:
+                        # Determine target filename using the more complex logic
+                        if "." in source_basename:
+                            name_parts = source_basename.split(".")
+                            ext = name_parts.pop()
+                            base = ".".join(name_parts)
+                            
+                            # Special case for common localization pattern like "en.json", "es.json" in same directory
+                            if source_basename == f"{source_language}.{ext}" and len(base) == len(source_language):
+                                target_basename = f"{target_lang}.{ext}"
+                            # Check if the base already contains language marker
+                            elif f".{source_language}" in base or f"-{source_language}" in base or f"_{source_language}" in base:
+                                base = base.replace(f".{source_language}", f".{target_lang}")
+                                base = base.replace(f"-{source_language}", f"-{target_lang}")
+                                base = base.replace(f"_{source_language}", f"_{target_lang}")
+                                target_basename = f"{base}.{ext}"
+                            else:
+                                # Check if source file is in a language-specific directory structure
+                                # If so, preserve the original filename instead of adding language markers
+                                source_dir_parts = os.path.normpath(source_dirname).split(os.sep)
+                                has_lang_directory = any(part == source_language or part.lower() == source_language.lower() 
+                                                       for part in source_dir_parts)
+                                
+                                # Special handling for Android values structure
+                                # Files in .../values/*.xml should preserve filename (not add language suffix)
+                                is_android_values = (source_file.endswith('.xml') and 
+                                                   any(part == 'values' for part in source_dir_parts))
+                                
+                                if has_lang_directory or is_android_values:
+                                    # File is in language-specific directory or Android values, preserve original filename
+                                    target_basename = source_basename
+                                else:
+                                    # File is not in language-specific directory, add language marker to filename
+                                    base = f"{base}.{target_lang}"
+                                    target_basename = f"{base}.{ext}"
                         else:
                             # Check if source file is in a language-specific directory structure
-                            # If so, preserve the original filename instead of adding language markers
                             source_dir_parts = os.path.normpath(source_dirname).split(os.sep)
                             has_lang_directory = any(part == source_language or part.lower() == source_language.lower() 
                                                    for part in source_dir_parts)
@@ -541,34 +584,16 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 target_basename = source_basename
                             else:
                                 # File is not in language-specific directory, add language marker to filename
-                                base = f"{base}.{target_lang}"
-                                target_basename = f"{base}.{ext}"
-                    else:
-                        # Check if source file is in a language-specific directory structure
-                        source_dir_parts = os.path.normpath(source_dirname).split(os.sep)
-                        has_lang_directory = any(part == source_language or part.lower() == source_language.lower() 
-                                               for part in source_dir_parts)
+                                target_basename = f"{source_basename}.{target_lang}"
                         
-                        # Special handling for Android values structure
-                        # Files in .../values/*.xml should preserve filename (not add language suffix)
-                        is_android_values = (source_file.endswith('.xml') and 
-                                           any(part == 'values' for part in source_dir_parts))
-                        
-                        if has_lang_directory or is_android_values:
-                            # File is in language-specific directory or Android values, preserve original filename
-                            target_basename = source_basename
+                        # Check if target file exists in the list of already existing files for this language
+                        if target_basename in existing_file_basenames:
+                            target_file = existing_file_paths[target_basename]
+                            target_dirname = os.path.dirname(target_file)
                         else:
-                            # File is not in language-specific directory, add language marker to filename
-                            target_basename = f"{source_basename}.{target_lang}"
-                    
-                    # Check if target file exists in the list of already existing files for this language
-                    if target_basename in existing_file_basenames:
-                        target_file = existing_file_paths[target_basename]
-                        target_dirname = os.path.dirname(target_file)
-                    else:
-                        # Determine the target directory path
-                        target_dirname = os.path.dirname(determine_target_path(source_file, source_language, target_lang))
-                        target_file = os.path.join(target_dirname, target_basename)
+                            # Determine the target directory path
+                            target_dirname = os.path.dirname(determine_target_path(source_file, source_language, target_lang))
+                            target_file = os.path.join(target_dirname, target_basename)
                 
                 os.makedirs(target_dirname, exist_ok=True)
                 

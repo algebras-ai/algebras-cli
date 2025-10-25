@@ -54,6 +54,7 @@ class TestUpdateCommand(unittest.TestCase):
         mock_config = Mock()
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = self.languages
+        mock_config.check_deprecated_format.return_value = False
         mock_config_class.return_value = mock_config
         
         with patch('algebras.commands.update_command.click.echo') as mock_echo:
@@ -75,6 +76,7 @@ class TestUpdateCommand(unittest.TestCase):
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en"]
         mock_config.get_source_language.return_value = "en"
+        mock_config.check_deprecated_format.return_value = False
         mock_config_class.return_value = mock_config
         
         with patch('algebras.commands.update_command.click.echo') as mock_echo:

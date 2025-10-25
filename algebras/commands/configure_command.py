@@ -14,7 +14,7 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
     Configure your Algebras project settings.
     
     Args:
-        provider: Set the API provider (e.g., 'openai', 'algebras-ai')
+        provider: Set the API provider (e.g., 'algebras-ai')
         model: Set the model for the provider (only applicable for some providers)
         path_rules: Set the path rules for file patterns to process
         batch_size: Set the batch size for translation processing
@@ -32,6 +32,12 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
     # Load configuration
     config.load()
     
+    # Check for deprecated config format
+    if config.check_deprecated_format():
+        click.echo(f"{Fore.RED}🚨 ⚠️  WARNING: Your configuration uses the deprecated 'path_rules' format! ⚠️ 🚨{Fore.RESET}")
+        click.echo(f"{Fore.RED}🔴 Please update to the new 'source_files' format.{Fore.RESET}")
+        click.echo(f"{Fore.RED}📖 See documentation: https://github.com/algebras-ai/algebras-cli{Fore.RESET}")
+    
     # Initialize API configuration if it doesn't exist
     if "api" not in config.data:
         config.data["api"] = {}
@@ -42,14 +48,14 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
     # Handle provider change
     if provider:
         # Validate provider
-        if provider not in ["openai", "algebras-ai"]:
-            click.echo(f"{Fore.RED}Invalid provider. Supported providers are 'openai' and 'algebras-ai'.\x1b[0m")
+        if provider not in ["algebras-ai"]:
+            click.echo(f"{Fore.RED}Invalid provider. Supported provider is 'algebras-ai'.\x1b[0m")
             return
         
         # Check for required environment variables based on provider
-        if provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
-            click.echo(f"{Fore.YELLOW}Warning: OPENAI_API_KEY environment variable is not set.\x1b[0m")
-            click.echo(f"Set it with: export OPENAI_API_KEY=your_api_key")
+        if provider == "algebras-ai" and not os.environ.get("ALGEBRAS_API_KEY"):
+            click.echo(f"{Fore.YELLOW}Warning: ALGEBRAS_API_KEY environment variable is not set.\x1b[0m")
+            click.echo(f"Set it with: export ALGEBRAS_API_KEY=your_api_key")
         
         if provider == "algebras-ai" and not os.environ.get("ALGEBRAS_API_KEY"):
             click.echo(f"{Fore.YELLOW}Warning: ALGEBRAS_API_KEY environment variable is not set.\x1b[0m")
@@ -71,14 +77,6 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
             click.echo(f"{Fore.GREEN}Glossary ID set to '{glossary_id}'.\x1b[0m")
         else:
             click.echo(f"{Fore.GREEN}Glossary ID cleared.\x1b[0m")
-    
-    # Handle path_rules change
-    if path_rules:
-        # Split the path rules by comma
-        rules_list = [rule.strip() for rule in path_rules.split(",")]
-        config.data["path_rules"] = rules_list
-        click.echo(f"{Fore.GREEN}Path rules updated.\x1b[0m")
-        click.echo(f"New rules: {', '.join(rules_list)}")
     
     # Handle batch_size change
     if batch_size is not None:
@@ -115,8 +113,16 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         else:
             click.echo(f"{Fore.GREEN}String normalization disabled (will preserve all escaped characters).\x1b[0m")
     
+    # Handle path_rules change
+    if path_rules is not None:
+        config.set_setting("path_rules", path_rules)
+        if path_rules:
+            click.echo(f"{Fore.GREEN}Path rules set to '{path_rules}'.\x1b[0m")
+        else:
+            click.echo(f"{Fore.GREEN}Path rules cleared.\x1b[0m")
+    
     # If no arguments provided, show current configuration
-    if not provider and not model and not path_rules and batch_size is None and max_parallel_batches is None and glossary_id is None and prompt is None and normalize_strings is None:
+    if not provider and not model and path_rules is None and batch_size is None and max_parallel_batches is None and glossary_id is None and prompt is None and normalize_strings is None:
         click.echo(f"\nCurrent configuration:")
         click.echo(f"  Provider: {Fore.BLUE}{current_provider}\x1b[0m")
         click.echo(f"  Model: {Fore.BLUE}{config.data['api'].get('model', 'Not set')}\x1b[0m")
@@ -140,13 +146,22 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         click.echo(f"  String normalization: {Fore.BLUE}{'Enabled' if normalize_strings_setting else 'Disabled'}\x1b[0m")
         
         # Show path rules
-        path_rules_list = config.data.get('path_rules', [])
-        if path_rules_list:
-            click.echo(f"  Path rules:")
-            for rule in path_rules_list:
-                click.echo(f"    - {Fore.BLUE}{rule}\x1b[0m")
+        current_path_rules = config.get_setting("path_rules", "")
+        if current_path_rules:
+            click.echo(f"  Path rules: {Fore.BLUE}{current_path_rules}\x1b[0m")
         else:
             click.echo(f"  Path rules: {Fore.BLUE}Not set\x1b[0m")
+        
+        # Show source files configuration
+        source_files = config.get_source_files()
+        if source_files:
+            click.echo(f"  Source files:")
+            for source_file, config_data in source_files.items():
+                destination = config_data.get("destination_path", "Not set")
+                click.echo(f"    - {Fore.BLUE}{source_file}\x1b[0m")
+                click.echo(f"      → {Fore.BLUE}{destination}\x1b[0m")
+        else:
+            click.echo(f"  Source files: {Fore.BLUE}Not configured (using legacy path_rules)\x1b[0m")
         
         # Show batch size if set
         batch_size_value = config.get_setting('batch_size', os.environ.get('ALGEBRAS_BATCH_SIZE', 5))
@@ -157,14 +172,7 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         click.echo(f"  Max parallel batches: {Fore.BLUE}{max_parallel_batches_value}\x1b[0m")
         
         # Show environment variable status
-        if current_provider == "openai":
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if api_key:
-                masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "****"
-                click.echo(f"  OPENAI_API_KEY: {Fore.GREEN}Set ({masked_key})\x1b[0m")
-            else:
-                click.echo(f"  OPENAI_API_KEY: {Fore.RED}Not set\x1b[0m")
-        elif current_provider == "algebras-ai":
+        if current_provider == "algebras-ai":
             api_key = os.environ.get("ALGEBRAS_API_KEY")
             if api_key:
                 masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "****"
@@ -174,12 +182,13 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         
         click.echo(f"\nTo change the provider, run: {Fore.BLUE}algebras configure --provider <provider>\x1b[0m")
         click.echo(f"To change the model, run: {Fore.BLUE}algebras configure --model <model>\x1b[0m")
+        click.echo(f"To set path rules, run: {Fore.BLUE}algebras configure --path-rules <path_rules>\x1b[0m")
         click.echo(f"To set the glossary ID, run: {Fore.BLUE}algebras configure --glossary-id <glossary_id>\x1b[0m")
-        click.echo(f"To set path rules, run: {Fore.BLUE}algebras configure --path-rules \"pattern1,pattern2,...\"\x1b[0m")
         click.echo(f"To set batch size, run: {Fore.BLUE}algebras configure --batch-size <batch_size>\x1b[0m")
         click.echo(f"To set max parallel batches, run: {Fore.BLUE}algebras configure --max-parallel-batches <max_parallel_batches>\x1b[0m")
         click.echo(f"To set a default prompt, run: {Fore.BLUE}algebras configure --prompt \"your custom prompt\"\x1b[0m")
         click.echo(f"To enable/disable string normalization, run: {Fore.BLUE}algebras configure --normalize-strings <true/false>\x1b[0m")
+        click.echo(f"To configure source files, edit the .algebras.config file directly or run {Fore.BLUE}algebras init\x1b[0m")
         return
     
     # Save configuration

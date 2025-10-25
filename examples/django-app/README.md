@@ -24,10 +24,10 @@ django-app/
 
 Follow these steps to test the Algebras CLI with this example:
 
-1. **Set up your OpenAI API key** (if you plan to use AI translation):
+1. **Set up your Algebras AI API key** (if you plan to use AI translation):
 
 ```bash
-export OPENAI_API_KEY=your-api-key-here
+export ALGEBRAS_API_KEY=your-api-key-here
 ```
 
 2. **Check the status of translations**:

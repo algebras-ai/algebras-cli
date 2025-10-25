@@ -5,6 +5,7 @@ Check the status of your translations
 import os
 import click
 import requests
+from colorama import Fore
 from typing import Optional, Dict, List, Set, Tuple
 
 from algebras.config import Config
@@ -106,12 +107,18 @@ def count_translated_keys(file_path: str) -> Tuple[int, int]:
             # Handle nested formats (JSON, YAML, TS)
             all_keys = extract_all_keys(data)
             translated_count = 0
+            leaf_keys = []
+            
             for key in all_keys:
                 value = get_key_value(data, key)
-                # Count as translated if value is not None, not empty string, and not just whitespace
-                if value is not None and str(value).strip():
-                    translated_count += 1
-            return translated_count, len(all_keys)
+                # Only count leaf keys (strings, not objects) as translatable
+                if isinstance(value, str):
+                    leaf_keys.append(key)
+                    # Count as translated if value is not None, not empty string, and not just whitespace
+                    if value is not None and str(value).strip():
+                        translated_count += 1
+            
+            return translated_count, len(leaf_keys)
         
     except Exception as e:
         click.echo(click.style(f"Warning: Could not parse file {file_path}: {str(e)}", fg='yellow'))
@@ -168,16 +175,41 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
                 source_keys = set(extract_all_keys(source_data))
                 target_keys = set(extract_all_keys(target_data))
                 
-                # Count current translated keys (keys that exist in both source and target, and have non-empty values)
-                current_translated = 0
+                # Filter to only leaf keys (strings, not objects) for both source and target
+                source_leaf_keys = set()
+                target_leaf_keys = set()
+                
                 for key in source_keys:
-                    if key in target_keys:
+                    value = get_key_value(source_data, key)
+                    if isinstance(value, str):
+                        source_leaf_keys.add(key)
+                
+                for key in target_keys:
+                    value = get_key_value(target_data, key)
+                    if isinstance(value, str):
+                        target_leaf_keys.add(key)
+                
+                # Count current translated keys (leaf keys that exist in source and are translated in target)
+                current_translated = 0
+                for key in source_leaf_keys:
+                    # Check if this source leaf key exists in target and is translated
+                    if key in target_leaf_keys:
                         value = get_key_value(target_data, key)
                         if value is not None and str(value).strip():
                             current_translated += 1
+                
+                # Update target_keys to only include leaf keys for outdated calculation
+                target_keys = target_leaf_keys
         
         # Find keys that exist in target but not in source (outdated keys)
-        outdated_keys = target_keys - source_keys
+        if target_file_path.endswith('.html'):
+            outdated_keys = target_keys - source_keys
+        elif target_file_path.endswith(('.po', '.xml', '.strings', '.stringsdict')):
+            outdated_keys = target_keys - source_keys
+        else:
+            # For nested formats, use leaf keys
+            outdated_keys = target_keys - source_leaf_keys
+            
         return current_translated, len(outdated_keys)
         
     except Exception as e:
@@ -201,6 +233,12 @@ def execute(language: Optional[str] = None) -> None:
     
     # Load configuration
     config.load()
+    
+    # Check for deprecated config format
+    if config.check_deprecated_format():
+        click.echo(f"{Fore.RED}🚨 ⚠️  WARNING: Your configuration uses the deprecated 'path_rules' format! ⚠️ 🚨{Fore.RESET}")
+        click.echo(f"{Fore.RED}🔴 Please update to the new 'source_files' format.{Fore.RESET}")
+        click.echo(f"{Fore.RED}📖 See documentation: https://github.com/algebras-ai/algebras-cli{Fore.RESET}")
     
     # Get languages
     all_languages = config.get_languages()
@@ -227,6 +265,7 @@ def execute(language: Optional[str] = None) -> None:
     
     # Scan for files
     try:
+        from algebras.utils.path_utils import resolve_destination_path
         scanner = FileScanner()
         files_by_language = scanner.group_files_by_language()
         
@@ -251,7 +290,7 @@ def execute(language: Optional[str] = None) -> None:
         total_source_keys = 0
         for source_file in source_files:
             try:
-                total_keys, key_count = count_translated_keys(source_file)
+                translated_keys, key_count = count_translated_keys(source_file)
                 source_key_counts[source_file] = key_count
                 total_source_keys += key_count
             except Exception as e:
@@ -264,7 +303,19 @@ def execute(language: Optional[str] = None) -> None:
                 continue
             
             lang_files = files_by_language.get(lang, [])
-            file_count = len(lang_files)
+            
+            # If using source_files configuration, count files using the same logic
+            if config.get_source_files():
+                file_count = 0
+                for source_file, source_config in config.get_source_files().items():
+                    if os.path.isfile(source_file):
+                        destination_pattern = source_config.get("destination_path", "")
+                        if destination_pattern:
+                            resolved_path = resolve_destination_path(destination_pattern, lang)
+                            if os.path.isfile(resolved_path):
+                                file_count += 1
+            else:
+                file_count = len(lang_files)
             
             # Calculate file percentage
             if expected_file_counts[lang] > 0:
@@ -277,45 +328,65 @@ def execute(language: Optional[str] = None) -> None:
             total_expected_keys = 0
             total_outdated_keys = 0
             
-            for lang_file in lang_files:
-                # Find corresponding source file to get expected key count
-                source_file = None
-                lang_basename = os.path.basename(lang_file)
-                lang_dirname = os.path.dirname(lang_file)
+            # If using source_files configuration, match files using the same logic as group_files_by_language
+            if config.get_source_files():
                 
-                # Remove language suffix to find base filename
-                if "." in lang_basename:
-                    name_parts = lang_basename.split(".")
-                    ext = name_parts.pop()
-                    base = ".".join(name_parts)
+                for source_file, source_config in config.get_source_files().items():
+                    if os.path.isfile(source_file):
+                        # Check if this source file has a corresponding translated file for this language
+                        destination_pattern = source_config.get("destination_path", "")
+                        if destination_pattern:
+                            resolved_path = resolve_destination_path(destination_pattern, lang)
+                            if os.path.isfile(resolved_path):
+                                expected_keys = source_key_counts.get(source_file, 0)
+                                total_expected_keys += expected_keys
+                                
+                                # Count current translated keys and outdated keys
+                                current_translated_keys, outdated_keys = count_current_and_outdated_keys(source_file, resolved_path)
+                                
+                                total_translated_keys += current_translated_keys
+                                total_outdated_keys += outdated_keys
+            else:
+                # Fallback to old filename-based matching for backward compatibility
+                for lang_file in lang_files:
+                    # Find corresponding source file to get expected key count
+                    source_file = None
+                    lang_basename = os.path.basename(lang_file)
+                    lang_dirname = os.path.dirname(lang_file)
                     
-                    # Replace language marker with source language marker
-                    if f".{lang}" in base:
-                        base_source = base.replace(f".{lang}", f".{source_language}")
-                    elif f"-{lang}" in base:
-                        base_source = base.replace(f"-{lang}", f"-{source_language}")
-                    elif f"_{lang}" in base:
-                        base_source = base.replace(f"_{lang}", f"_{source_language}")
+                    # Remove language suffix to find base filename
+                    if "." in lang_basename:
+                        name_parts = lang_basename.split(".")
+                        ext = name_parts.pop()
+                        base = ".".join(name_parts)
+                        
+                        # Replace language marker with source language marker
+                        if f".{lang}" in base:
+                            base_source = base.replace(f".{lang}", f".{source_language}")
+                        elif f"-{lang}" in base:
+                            base_source = base.replace(f"-{lang}", f"-{source_language}")
+                        elif f"_{lang}" in base:
+                            base_source = base.replace(f"_{lang}", f"_{source_language}")
+                        else:
+                            # Replace language with source language directly
+                            base_source = base.replace(lang, source_language)
+                        
+                        source_basename = f"{base_source}.{ext}"
                     else:
-                        # Replace language with source language directly
-                        base_source = base.replace(lang, source_language)
+                        source_basename = lang_basename.replace(f".{lang}", "")
                     
-                    source_basename = f"{base_source}.{ext}"
-                else:
-                    source_basename = lang_basename.replace(f".{lang}", "")
-                
-                potential_source_file = os.path.join(lang_dirname, source_basename)
-                
-                if potential_source_file in source_files:
-                    source_file = potential_source_file
-                    expected_keys = source_key_counts.get(source_file, 0)
-                    total_expected_keys += expected_keys
+                    potential_source_file = os.path.join(lang_dirname, source_basename)
                     
-                    # Count current translated keys and outdated keys
-                    current_translated_keys, outdated_keys = count_current_and_outdated_keys(source_file, lang_file)
-                    
-                    total_translated_keys += current_translated_keys
-                    total_outdated_keys += outdated_keys
+                    if potential_source_file in source_files:
+                        source_file = potential_source_file
+                        expected_keys = source_key_counts.get(source_file, 0)
+                        total_expected_keys += expected_keys
+                        
+                        # Count current translated keys and outdated keys
+                        current_translated_keys, outdated_keys = count_current_and_outdated_keys(source_file, lang_file)
+                        
+                        total_translated_keys += current_translated_keys
+                        total_outdated_keys += outdated_keys
             
             # Use total source keys if we couldn't match files properly
             if total_expected_keys == 0:

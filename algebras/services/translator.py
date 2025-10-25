@@ -13,7 +13,6 @@ import concurrent.futures
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
 from functools import lru_cache
-from openai import OpenAI
 import re
 import time
 
@@ -126,13 +125,6 @@ class Translator:
         self.max_parallel_batches = int(os.environ.get("ALGEBRAS_MAX_PARALLEL_BATCHES", 5))
         if self.config.has_setting("max_parallel_batches"):
             self.max_parallel_batches = int(self.config.get_setting("max_parallel_batches"))
-        
-        # Set up OpenAI client if available
-        openai_api_key = os.environ.get("OPENAI_API_KEY")
-        if openai_api_key:
-            self.client = OpenAI(api_key=openai_api_key)
-        else:
-            self.client = None
             
         # Initialize the translation cache
         self.cache = TranslationCache()
@@ -216,9 +208,7 @@ class Translator:
         print(f"Cache miss: Translating '{text[:30]}...' ({source_lang} → {target_lang})")
         provider = self.api_config.get("provider", "algebras-ai")
         
-        if provider == "openai":
-            translation = self._translate_with_openai(text, source_lang, target_lang)
-        elif provider == "algebras-ai":
+        if provider == "algebras-ai":
             translation = self._translate_with_algebras_ai(text, source_lang, target_lang, ui_safe, glossary_id)
         else:
             raise ValueError(f"Unsupported provider: {provider}")
@@ -232,61 +222,6 @@ class Translator:
         
         return translation
     
-    def _translate_with_openai(self, text: str, source_lang: str, target_lang: str) -> str:
-        """
-        Translate text using OpenAI API.
-        
-        Args:
-            text: Text to translate
-            source_lang: Source language code (already mapped to ISO 2-letter format)
-            target_lang: Target language code (already mapped to ISO 2-letter format)
-            
-        Returns:
-            Translated text
-        """
-        model = self.api_config.get("model", "gpt-4")
-        
-        if not self.client:
-            raise ValueError("OpenAI API key not found. Set the OPENAI_API_KEY environment variable.")
-        
-        # Build the prompt with custom prompt if provided
-        base_prompt = f"""
-        Translate the following text from {source_lang} to {target_lang}.
-        Preserve all formatting, variables, and placeholders.
-        Only return the translated text, nothing else.
-        """
-        
-        if self.custom_prompt:
-            prompt = f"""
-        {self.custom_prompt}
-        
-        Translate the following text from {source_lang} to {target_lang}.
-        Preserve all formatting, variables, and placeholders.
-        Only return the translated text, nothing else.
-        
-        Text to translate:
-        {text}
-        """
-        else:
-            prompt = f"""
-        Translate the following text from {source_lang} to {target_lang}.
-        Preserve all formatting, variables, and placeholders.
-        Only return the translated text, nothing else.
-        
-        Text to translate:
-        {text}
-        """
-        
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are a professional translator."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-        )
-        
-        return response.choices[0].message.content.strip()
     
     def _translate_with_algebras_ai(self, text: str, source_lang: str, target_lang: str, ui_safe: bool = False, glossary_id: str = "") -> str:
         """
@@ -792,7 +727,7 @@ class Translator:
                         # Re-raise the exception instead of falling back to individual translations
                         raise e
         else:
-            # Use sequential batch processing for other providers (like OpenAI)
+            # Use sequential batch processing for other providers
             for i in range(0, total_strings, self.batch_size):
                 batch = string_items[i:i + self.batch_size]
                 batch_paths = paths[i:i + self.batch_size]
@@ -801,7 +736,7 @@ class Translator:
                 print(f"Processing batch {batch_idx}/{num_batches} ({len(batch)} items)")
                 
                 try:
-                    # Use individual translations for other providers (like OpenAI)
+                    # Use individual translations for other providers
                     # Use ThreadPoolExecutor for parallel processing within the batch
                     with concurrent.futures.ThreadPoolExecutor(max_workers=self.batch_size) as executor:
                         # Create translation tasks
@@ -1048,7 +983,7 @@ class Translator:
                         # Re-raise the exception instead of falling back to individual translations
                         raise e
         else:
-            # Use sequential batch processing for other providers (like OpenAI)
+            # Use sequential batch processing for other providers
             for i in range(0, total_keys, self.batch_size):
                 batch_texts = texts_to_translate[i:i + self.batch_size]
                 batch_key_paths = key_paths_list[i:i + self.batch_size]
@@ -1058,7 +993,7 @@ class Translator:
                 print(f"Processing batch {batch_idx}/{num_batches} ({len(batch_texts)} keys)")
                 
                 try:
-                    # Use individual translations for other providers (like OpenAI)
+                    # Use individual translations for other providers
                     # Use ThreadPoolExecutor for parallel processing within each batch
                     with concurrent.futures.ThreadPoolExecutor(max_workers=self.batch_size) as executor:
                         # Create tasks for each key in the batch
@@ -1200,7 +1135,7 @@ class Translator:
                         # Re-raise the exception instead of falling back to individual translations
                         raise e
         else:
-            # Use sequential batch processing for other providers (like OpenAI)
+            # Use sequential batch processing for other providers
             for i in range(0, total_keys, self.batch_size):
                 batch_texts = texts_to_translate[i:i + self.batch_size]
                 batch_key_paths = key_paths_list[i:i + self.batch_size]
@@ -1210,7 +1145,7 @@ class Translator:
                 print(f"Processing batch {batch_idx}/{num_batches} ({len(batch_texts)} keys)")
                 
                 try:
-                    # Use individual translations for other providers (like OpenAI)
+                    # Use individual translations for other providers
                     # Use ThreadPoolExecutor for parallel processing within each batch
                     with concurrent.futures.ThreadPoolExecutor(max_workers=self.batch_size) as executor:
                         # Create tasks for each key in the batch

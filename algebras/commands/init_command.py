@@ -16,7 +16,7 @@ def execute(force: bool = False, verbose: bool = False, provider: str = None) ->
     Args:
         force: Force initialization even if a config file exists.
         verbose: Show detailed information about locale detection.
-        provider: Set the default provider (e.g., 'openai', 'algebras-ai')
+        provider: Set the default provider (e.g., 'algebras-ai')
     """
     config = Config()
     
@@ -44,16 +44,12 @@ def execute(force: bool = False, verbose: bool = False, provider: str = None) ->
         if "api" not in config.data:
             config.data["api"] = {}
         
-        if provider not in ["openai", "algebras-ai"]:
+        if provider not in ["algebras-ai"]:
             click.echo(f"{Fore.RED}Invalid provider '{provider}'. Using default 'algebras-ai' instead.\x1b[0m")
         else:
             config.data["api"]["provider"] = provider
             
             # Check for required environment variables based on provider
-            if provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
-                click.echo(f"{Fore.YELLOW}Warning: OPENAI_API_KEY environment variable is not set.\x1b[0m")
-                click.echo(f"Set it with: export OPENAI_API_KEY=your_api_key")
-            
             if provider == "algebras-ai" and not os.environ.get("ALGEBRAS_API_KEY"):
                 click.echo(f"{Fore.YELLOW}Warning: ALGEBRAS_API_KEY environment variable is not set.\x1b[0m")
                 click.echo(f"Set it with: export ALGEBRAS_API_KEY=your_api_key")
