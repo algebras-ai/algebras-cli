@@ -56,7 +56,7 @@ class TestConfig:
         config_data = {
             "languages": ["en", "fr"],
             "path_rules": ["**/*.json", "!**/node_modules/**"],
-            "api": {"provider": "openai", "model": "gpt-4"},
+            "api": {"provider": "algebras-ai"},
         }
         yaml_content = yaml.dump(config_data)
 
@@ -210,6 +210,6 @@ class TestConfig:
     def test_get_api_config(self):
         """Test get_api_config with API config in config"""
         config = Config()
-        api_config = {"provider": "openai", "model": "gpt-4"}
+        api_config = {"provider": "algebras-ai"}
         config.data = {"api": api_config}
         assert config.get_api_config() == api_config 

@@ -153,8 +153,7 @@ class Config:
             "source_files": source_files,
             "api": {
                 "provider": "algebras-ai",  # Default provider
-                "model": "gpt-4",     # Default model (for OpenAI)
-                # Provider options include: "openai", "algebras-ai"
+                # Provider options include: "algebras-ai"
                 "normalize_strings": True,  # Default to normalize escaped characters
             },
             "batch_size": 5,  # Default batch size

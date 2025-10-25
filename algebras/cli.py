@@ -27,7 +27,7 @@ def cli():
 @cli.command("init")
 @click.option("--force", is_flag=True, help="Force initialization even if a config file exists.")
 @click.option("--verbose", is_flag=True, help="Show detailed information about locale detection.")
-@click.option("--provider", help="Set the default provider (e.g., 'openai', 'algebras-ai').")
+@click.option("--provider", help="Set the default provider (e.g., 'algebras-ai').")
 def init(force, verbose, provider):
     """Initialize a new Algebras project."""
     init_command.execute(force, verbose, provider)
@@ -94,7 +94,7 @@ def status(language):
 
 
 @cli.command("configure")
-@click.option("--provider", help="Set the API provider (e.g., 'openai', 'algebras-ai').")
+@click.option("--provider", help="Set the API provider (e.g., 'algebras-ai').")
 @click.option("--model", help="Set the model for the provider (only applicable for some providers).")
 @click.option("--path-rules", help="Set the path rules for file patterns to process (comma separated list or glob patterns).")
 @click.option("--batch-size", type=int, help="Set the batch size for translation processing (default: 20).")

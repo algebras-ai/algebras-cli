@@ -26,7 +26,7 @@ Each example directory contains:
 
 To test algebras-cli with any of these examples:
 
-1. Set up your OpenAI API key (for AI-powered translations)
+1. Set up your Algebras AI API key (for AI-powered translations)
 2. Navigate to the specific example directory
 3. Follow the instructions in that example's README.md file
 

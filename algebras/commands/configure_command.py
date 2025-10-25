@@ -14,7 +14,7 @@ def execute(provider: str = None, model: str = None, batch_size: int = None, max
     Configure your Algebras project settings.
     
     Args:
-        provider: Set the API provider (e.g., 'openai', 'algebras-ai')
+        provider: Set the API provider (e.g., 'algebras-ai')
         model: Set the model for the provider (only applicable for some providers)
         batch_size: Set the batch size for translation processing
         max_parallel_batches: Set the maximum number of parallel batches for translation processing
@@ -41,14 +41,14 @@ def execute(provider: str = None, model: str = None, batch_size: int = None, max
     # Handle provider change
     if provider:
         # Validate provider
-        if provider not in ["openai", "algebras-ai"]:
-            click.echo(f"{Fore.RED}Invalid provider. Supported providers are 'openai' and 'algebras-ai'.\x1b[0m")
+        if provider not in ["algebras-ai"]:
+            click.echo(f"{Fore.RED}Invalid provider. Supported provider is 'algebras-ai'.\x1b[0m")
             return
         
         # Check for required environment variables based on provider
-        if provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
-            click.echo(f"{Fore.YELLOW}Warning: OPENAI_API_KEY environment variable is not set.\x1b[0m")
-            click.echo(f"Set it with: export OPENAI_API_KEY=your_api_key")
+        if provider == "algebras-ai" and not os.environ.get("ALGEBRAS_API_KEY"):
+            click.echo(f"{Fore.YELLOW}Warning: ALGEBRAS_API_KEY environment variable is not set.\x1b[0m")
+            click.echo(f"Set it with: export ALGEBRAS_API_KEY=your_api_key")
         
         if provider == "algebras-ai" and not os.environ.get("ALGEBRAS_API_KEY"):
             click.echo(f"{Fore.YELLOW}Warning: ALGEBRAS_API_KEY environment variable is not set.\x1b[0m")
@@ -150,14 +150,7 @@ def execute(provider: str = None, model: str = None, batch_size: int = None, max
         click.echo(f"  Max parallel batches: {Fore.BLUE}{max_parallel_batches_value}\x1b[0m")
         
         # Show environment variable status
-        if current_provider == "openai":
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if api_key:
-                masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "****"
-                click.echo(f"  OPENAI_API_KEY: {Fore.GREEN}Set ({masked_key})\x1b[0m")
-            else:
-                click.echo(f"  OPENAI_API_KEY: {Fore.RED}Not set\x1b[0m")
-        elif current_provider == "algebras-ai":
+        if current_provider == "algebras-ai":
             api_key = os.environ.get("ALGEBRAS_API_KEY")
             if api_key:
                 masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "****"
