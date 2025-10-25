@@ -4,6 +4,19 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Tests](https://github.com/algebras-ai/algebras-cli/actions/workflows/python-tests.yml/badge.svg)](https://github.com/algebras-ai/algebras-cli/actions/workflows/python-tests.yml)
 
+## Supported Frameworks
+
+[![Next.js](https://img.shields.io/badge/Next.js-000000?style=flat&logo=next.js&logoColor=white)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-20232A?style=flat&logo=react&logoColor=61DAFB)](https://reactjs.org/)
+[![Flutter](https://img.shields.io/badge/Flutter-02569B?style=flat&logo=flutter&logoColor=white)](https://flutter.dev/)
+[![Angular](https://img.shields.io/badge/Angular-DD0031?style=flat&logo=angular&logoColor=white)](https://angular.io/)
+[![Django](https://img.shields.io/badge/Django-092E20?style=flat&logo=django&logoColor=white)](https://djangoproject.com/)
+[![Android](https://img.shields.io/badge/Android-3DDC84?style=flat&logo=android&logoColor=white)](https://developer.android.com/)
+[![iOS](https://img.shields.io/badge/iOS-000000?style=flat&logo=ios&logoColor=white)](https://developer.apple.com/ios/)
+[![Java](https://img.shields.io/badge/Java-ED8B00?style=flat&logo=java&logoColor=white)](https://www.java.com/)
+[![Rails](https://img.shields.io/badge/Rails-CC0000?style=flat&logo=ruby-on-rails&logoColor=white)](https://rubyonrails.org/)
+[![Nuxt.js](https://img.shields.io/badge/Nuxt.js-00C58E?style=flat&logo=nuxt.js&logoColor=white)](https://nuxtjs.org/)
+
 
 > Powerful AI-driven localization tool for your applications
 
@@ -25,6 +38,11 @@ Algebras CLI supports a wide range of localization file formats:
 - **iOS StringsDict** (`.stringsdict`) - iOS pluralization files
 - **Gettext** (`.po`) - GNU gettext files (Django, etc.)
 - **HTML** (`.html`) - HTML files with translatable content
+- **Flutter ARB** (`.arb`) - Application Resource Bundle for Flutter apps
+- **XLIFF** (`.xlf`, `.xliff`) - XML Localization Interchange File Format
+- **Java Properties** (`.properties`) - Java ResourceBundle property files
+- **CSV** (`.csv`) - Comma-separated values for multi-language translations
+- **XLSX** (`.xlsx`) - Excel files for multi-language translations
 
 ## Installation
 
@@ -428,6 +446,31 @@ The following environment variables can be used to configure the Algebras CLI:
 - Check the [GitHub Issues](https://github.com/algebras-ai/algebras-cli/issues) for known problems
 - Review the [examples](examples/) directory for usage patterns
 - Ensure you're using the latest version: `pip install --upgrade algebras-cli`
+
+## Examples
+
+We provide comprehensive examples for different frameworks and file formats:
+
+### Framework Examples
+
+- **[Next.js/React](examples/nextjs-app/)** - JSON-based localization with i18next
+- **[Flutter](examples/flutter-app/)** - ARB files for Flutter internationalization
+- **[Angular](examples/angular-app/)** - XLIFF files for Angular i18n
+- **[Java](examples/java-app/)** - Properties files for Java ResourceBundle
+- **[Django](examples/django-app/)** - Gettext PO files for Django
+
+### Format Examples
+
+- **[CSV Translations](examples/csv-translations/)** - Multi-language CSV files
+- **[XLSX Translations](examples/xlsx-translations/)** - Multi-language Excel files
+- **[HTML](examples/html/)** - HTML files with translatable content
+- **[Android](examples/android-app/)** - Android XML string resources
+
+Each example includes:
+- Sample source files
+- Configuration examples
+- Framework-specific setup instructions
+- Best practices and tips
 
 ## Contributing
 
