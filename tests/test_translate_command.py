@@ -60,9 +60,9 @@ class TestTranslateCommand:
                     return source_path.replace(f"/{source_lang}/", f"/{target_lang}/")
                 
                 # Apply monkeypatches
-                monkeypatch.setattr("algebras.commands.translate_command.Config", lambda: mock_config)
-                monkeypatch.setattr("algebras.commands.translate_command.FileScanner", lambda: mock_scanner)
-                monkeypatch.setattr("algebras.commands.translate_command.Translator", lambda: mock_translator)
+                monkeypatch.setattr("algebras.commands.translate_command.Config", lambda *args, **kwargs: mock_config)
+                monkeypatch.setattr("algebras.commands.translate_command.FileScanner", lambda *args, **kwargs: mock_scanner)
+                monkeypatch.setattr("algebras.commands.translate_command.Translator", lambda *args, **kwargs: mock_translator)
                 monkeypatch.setattr("algebras.utils.path_utils.determine_target_path", mock_determine_target_path)
                 
                 # Call the function
@@ -140,9 +140,9 @@ class TestTranslateCommand:
                     return source_path.replace(f"/{source_lang}/", f"/{target_lang}/")
                 
                 # Apply monkeypatches
-                monkeypatch.setattr("algebras.commands.translate_command.Config", lambda: mock_config)
-                monkeypatch.setattr("algebras.commands.translate_command.FileScanner", lambda: mock_scanner)
-                monkeypatch.setattr("algebras.commands.translate_command.Translator", lambda: mock_translator)
+                monkeypatch.setattr("algebras.commands.translate_command.Config", lambda *args, **kwargs: mock_config)
+                monkeypatch.setattr("algebras.commands.translate_command.FileScanner", lambda *args, **kwargs: mock_scanner)
+                monkeypatch.setattr("algebras.commands.translate_command.Translator", lambda *args, **kwargs: mock_translator)
                 monkeypatch.setattr("algebras.utils.path_utils.determine_target_path", mock_determine_target_path)
                 
                 # Call the function

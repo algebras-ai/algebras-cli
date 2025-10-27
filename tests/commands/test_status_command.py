@@ -274,7 +274,7 @@ class TestStatusCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments
-            mock_execute.assert_called_once_with(None)
+            mock_execute.assert_called_once_with(None, None)
             
             # Test with language option
             result = runner.invoke(status, ["--language", "fr"])
@@ -283,4 +283,4 @@ class TestStatusCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments
-            mock_execute.assert_called_with("fr") 
+            mock_execute.assert_called_with("fr", None) 
