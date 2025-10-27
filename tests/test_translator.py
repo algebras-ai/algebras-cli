@@ -24,8 +24,8 @@ class TestTranslator:
         mock_config.load.return_value = {}
         mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
 
-        # Patch Config class
-        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+        # Patch Config class - patch algebras.config.Config since that's what gets imported inside __init__
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
 
         # Mock environment variable
         monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
@@ -46,7 +46,7 @@ class TestTranslator:
         mock_config.exists.return_value = False
 
         # Patch Config class
-        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
 
         # Initialize Translator - should raise FileNotFoundError
         with pytest.raises(FileNotFoundError):
@@ -64,7 +64,7 @@ class TestTranslator:
         mock_config.has_setting.return_value = False
 
         # Patch Config class
-        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
 
         # Mock environment variable
         monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
@@ -98,7 +98,7 @@ class TestTranslator:
         mock_config.get_api_config.return_value = {"provider": "unsupported"}
 
         # Patch Config class
-        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
 
         # Mock the cache to return None (cache miss)
         mock_cache = MagicMock()
@@ -121,7 +121,7 @@ class TestTranslator:
         mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
 
         # Patch Config class
-        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
 
         # Ensure no API key in environment
         monkeypatch.delenv("ALGEBRAS_API_KEY", raising=False)
@@ -169,7 +169,7 @@ class TestTranslator:
         mock_config.has_setting.return_value = False
 
         # Patch Config class
-        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
         
         # Mock the cache
         mock_cache = MagicMock()
@@ -245,7 +245,7 @@ class TestTranslator:
         mock_config.has_setting.return_value = False
 
         # Patch Config class
-        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
         
         # Mock the cache
         mock_cache = MagicMock()
@@ -298,7 +298,7 @@ class TestTranslator:
         mock_config.has_setting.return_value = False
 
         # Patch Config class
-        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
         
         # Mock the cache
         mock_cache = MagicMock()
@@ -348,7 +348,7 @@ class TestTranslator:
         mock_config.has_setting.return_value = False
 
         # Patch Config class
-        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
         
         # Mock the cache
         mock_cache = MagicMock()
@@ -393,7 +393,7 @@ class TestTranslator:
         mock_config.get_base_url.return_value = "https://platform.algebras.ai"
 
         # Patch Config class
-        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
 
         # Mock environment variable
         monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
@@ -446,7 +446,7 @@ class TestTranslator:
         mock_config.get_setting.return_value = True  # normalization enabled
 
         # Patch Config class
-        monkeypatch.setattr("algebras.services.translator.Config", lambda: mock_config)
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
 
         # Mock environment variable
         monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")

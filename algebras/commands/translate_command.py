@@ -33,7 +33,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
            missing_keys_files: List[Tuple[str, Set[str], str]] = None,
            outdated_keys_files: List[Tuple[str, Set[str], str]] = None,
            ui_safe: bool = False, verbose: bool = False, batch_size: Optional[int] = None, 
-           max_parallel_batches: Optional[int] = None, glossary_id: Optional[str] = None, prompt_file: Optional[str] = None) -> None:
+           max_parallel_batches: Optional[int] = None, glossary_id: Optional[str] = None, prompt_file: Optional[str] = None, 
+           config_file: Optional[str] = None) -> None:
     """
     Translate your application.
     
@@ -50,8 +51,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         max_parallel_batches: Override the maximum number of parallel batches for translation processing
         glossary_id: ID of the glossary to use for translation
         prompt_file: Path to a file containing a custom prompt for translation
+        config_file: Path to custom config file (optional)
     """
-    config = Config()
+    config = Config(config_file)
 
     if not config.exists():
         click.echo(f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.\x1b[0m")
@@ -98,7 +100,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         click.echo(f"{Fore.BLUE}Source language: {source_language}\x1b[0m")
     
     # Initialize translator
-    translator = Translator()
+    translator = Translator(config=config)
     if verbose:
         click.echo(f"{Fore.BLUE}Initialized translator\x1b[0m")
     
@@ -463,7 +465,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
     # If no specific files were provided, scan and process all files
     # Scan for files
     try:
-        scanner = FileScanner()
+        scanner = FileScanner(config=config)
         files_by_language = scanner.group_files_by_language()
         
         # Get source files
@@ -509,7 +511,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                 source_ext = source_basename.split('.')[-1] if '.' in source_basename else ''
                 
                 # Use new path resolution system if source_files config is available
-                config = Config()
+                # config_file is already in scope from function parameters
+                # Re-use the existing config instance
                 config.load()
                 source_files_config = config.get_source_files()
                 

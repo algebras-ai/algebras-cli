@@ -9,7 +9,7 @@ from colorama import Fore
 from algebras.config import Config
 
 
-def execute(force: bool = False, verbose: bool = False, provider: str = None) -> None:
+def execute(force: bool = False, verbose: bool = False, provider: str = None, config_file: str = None) -> None:
     """
     Initialize a new Algebras project.
     
@@ -17,8 +17,9 @@ def execute(force: bool = False, verbose: bool = False, provider: str = None) ->
         force: Force initialization even if a config file exists.
         verbose: Show detailed information about locale detection.
         provider: Set the default provider (e.g., 'algebras-ai')
+        config_file: Path to custom config file (optional)
     """
-    config = Config()
+    config = Config(config_file)
     
     if config.exists() and not force:
         click.echo(f"{Fore.YELLOW}Config file already exists. Use --force to overwrite.\x1b[0m")
