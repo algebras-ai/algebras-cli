@@ -33,7 +33,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
            missing_keys_files: List[Tuple[str, Set[str], str]] = None,
            outdated_keys_files: List[Tuple[str, Set[str], str]] = None,
            ui_safe: bool = False, verbose: bool = False, batch_size: Optional[int] = None, 
-           max_parallel_batches: Optional[int] = None, glossary_id: Optional[str] = None, prompt_file: Optional[str] = None) -> None:
+           max_parallel_batches: Optional[int] = None, glossary_id: Optional[str] = None, prompt_file: Optional[str] = None, 
+           config_file: Optional[str] = None) -> None:
     """
     Translate your application.
     
@@ -50,8 +51,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         max_parallel_batches: Override the maximum number of parallel batches for translation processing
         glossary_id: ID of the glossary to use for translation
         prompt_file: Path to a file containing a custom prompt for translation
+        config_file: Path to custom config file (optional)
     """
-    config = Config()
+    config = Config(config_file)
 
     if not config.exists():
         click.echo(f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.\x1b[0m")
@@ -463,7 +465,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
     # If no specific files were provided, scan and process all files
     # Scan for files
     try:
-        scanner = FileScanner()
+        scanner = FileScanner(config=config)
         files_by_language = scanner.group_files_by_language()
         
         # Get source files

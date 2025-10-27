@@ -4,7 +4,7 @@ File scanner for localization files
 
 import os
 import glob
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Optional
 
 from algebras.config import Config
 
@@ -12,8 +12,17 @@ from algebras.config import Config
 class FileScanner:
     """Scanner for finding localization files in the project."""
     
-    def __init__(self):
-        self.config = Config()
+    def __init__(self, config: Optional[Config] = None):
+        """
+        Initialize FileScanner with optional Config instance.
+        
+        Args:
+            config: Optional Config instance. If None, creates a new Config with default path.
+        """
+        if config is None:
+            config = Config()
+        
+        self.config = config
         if not self.config.exists():
             raise FileNotFoundError("No Algebras configuration found. Run 'algebras init' first.")
         

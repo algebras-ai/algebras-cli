@@ -9,12 +9,13 @@ from colorama import Fore
 from algebras.config import Config
 
 
-def execute(language: str) -> None:
+def execute(language: str, config_file: str = None) -> None:
     """
     Add a new language to your application.
     
     Args:
         language: Language code to add (e.g., 'fr', 'es', 'de').
+        config_file: Path to custom config file (optional)
     """
     # Validate language code
     language = language.lower()
@@ -24,7 +25,7 @@ def execute(language: str) -> None:
         click.echo(f"{Fore.RED}Invalid language code. Please use a valid ISO language code (e.g., 'fr', 'es').\x1b[0m")
         return
     
-    config = Config()
+    config = Config(config_file)
     
     if not config.exists():
         click.echo(f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.\x1b[0m")

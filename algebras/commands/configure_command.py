@@ -9,7 +9,7 @@ from colorama import Fore
 from algebras.config import Config
 
 
-def execute(provider: str = None, model: str = None, path_rules: str = None, batch_size: int = None, max_parallel_batches: int = None, glossary_id: str = None, prompt: str = None, normalize_strings: bool = None) -> None:
+def execute(provider: str = None, model: str = None, path_rules: str = None, batch_size: int = None, max_parallel_batches: int = None, glossary_id: str = None, prompt: str = None, normalize_strings: bool = None, config_file: str = None) -> None:
     """
     Configure your Algebras project settings.
     
@@ -22,8 +22,9 @@ def execute(provider: str = None, model: str = None, path_rules: str = None, bat
         glossary_id: Set the glossary ID for Algebras AI translations
         prompt: Set a default prompt for translations
         normalize_strings: Enable/disable string normalization (removes escaped characters like \')
+        config_file: Path to custom config file (optional)
     """
-    config = Config()
+    config = Config(config_file)
     
     if not config.exists():
         click.echo(f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.\x1b[0m")

@@ -292,18 +292,19 @@ def identify_translation_issues(
     return outdated_by_language, missing_keys_by_language, outdated_keys_by_language
 
 
-def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_validation: bool = False, ui_safe: bool = False, verbose: bool = False) -> None:
+def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_validation: bool = False, ui_safe: bool = False, verbose: bool = False, config_file: Optional[str] = None) -> None:
     """
     Update your translations.
     
     Args:
         language: Language to update (if None, update all languages)
+        config_file: Path to custom config file (optional)
         only_missing: If True, only missing keys will be translated (default: True)
         skip_git_validation: If True, git validation will be skipped even if git is available (default: False)
         ui_safe: If True, ensure translations will not be longer than original text (default: False)
         verbose: If True, show detailed logs of the update process (default: False)
     """
-    config = Config()
+    config = Config(config_file)
     
     if not config.exists():
         click.echo(f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.\x1b[0m")
@@ -357,7 +358,7 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
         if verbose:
             click.echo(f"{Fore.BLUE}Scanning for translation files...\x1b[0m")
         
-        scanner = FileScanner()
+        scanner = FileScanner(config=config)
         files_by_language = scanner.group_files_by_language()
         
         if verbose:
@@ -475,12 +476,13 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
             click.echo(f"{Fore.RED}Traceback:\x1b[0m")
             click.echo(traceback.format_exc())
 
-def execute_ci(language: Optional[str] = None, verbose: bool = False, only_missing: bool = False) -> int:
+def execute_ci(language: Optional[str] = None, verbose: bool = False, only_missing: bool = False, config_file: Optional[str] = None) -> int:
     """
     Run CI checks for translations without performing translation.
     Always uses git validation for key changes unless only_missing is set.
     
     Args:
+        config_file: Path to custom config file (optional)
         language: Language to check (if None, check all languages)
         verbose: If True, show detailed logs of the check process
         only_missing: If True, only check for missing keys, skip git validation for outdated keys
@@ -488,7 +490,7 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False, only_missi
     Returns:
         int: 0 if all checks pass, -1 if any errors are found
     """
-    config = Config()
+    config = Config(config_file)
     errors_found = False
     
     if not config.exists():
@@ -540,7 +542,7 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False, only_missi
         if verbose:
             click.echo(f"{Fore.BLUE}Scanning for translation files...\x1b[0m")
             
-        scanner = FileScanner()
+        scanner = FileScanner(config=config)
         files_by_language = scanner.group_files_by_language()
         
         if verbose:

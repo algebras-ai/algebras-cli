@@ -15,8 +15,21 @@ class Config:
     
     CONFIG_FILE = ".algebras.config"
     
-    def __init__(self):
-        self.config_path = os.path.join(os.getcwd(), self.CONFIG_FILE)
+    def __init__(self, config_file_path: Optional[str] = None):
+        """
+        Initialize Config with optional custom config file path.
+        
+        Args:
+            config_file_path: Optional path to config file. If None, uses default .algebras.config
+        """
+        if config_file_path is None:
+            self.config_path = os.path.join(os.getcwd(), self.CONFIG_FILE)
+        else:
+            # Support both relative and absolute paths
+            if os.path.isabs(config_file_path):
+                self.config_path = config_file_path
+            else:
+                self.config_path = os.path.join(os.getcwd(), config_file_path)
         self.data = {}
     
     def exists(self) -> bool:
