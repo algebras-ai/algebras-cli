@@ -100,7 +100,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         click.echo(f"{Fore.BLUE}Source language: {source_language}\x1b[0m")
     
     # Initialize translator
-    translator = Translator()
+    translator = Translator(config=config)
     if verbose:
         click.echo(f"{Fore.BLUE}Initialized translator\x1b[0m")
     
@@ -511,7 +511,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                 source_ext = source_basename.split('.')[-1] if '.' in source_basename else ''
                 
                 # Use new path resolution system if source_files config is available
-                config = Config()
+                # config_file is already in scope from function parameters
+                # Re-use the existing config instance
                 config.load()
                 source_files_config = config.get_source_files()
                 
