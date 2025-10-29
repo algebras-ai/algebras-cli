@@ -1,6 +1,10 @@
 [run]
 source = algebras
-omit = 
+relative_files = true
+parallel = true
+branch = true
+
+omit =
     */tests/*
     */test_*
     */__pycache__/*
@@ -23,5 +27,10 @@ exclude_lines =
     class .*\bProtocol\):
     @(abc\.)?abstractmethod
 
+ignore_errors = true
+
 [html]
 directory = htmlcov
+
+[xml]
+output = coverage.xml

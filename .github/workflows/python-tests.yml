@@ -5,10 +5,14 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      pull-requests: write
     strategy:
       matrix:
         python-version: ['3.12', '3.13']
@@ -27,8 +31,11 @@ jobs:
         pip install -r requirements-dev.txt
     
     - name: Run tests with coverage
+      env:
+        COVERAGE_RCFILE: .coveragerc
       run: |
-        python tests/run_tests.py --cov-report=xml --cov-report=html --cov-fail-under=40
+        pip install pytest pytest-cov
+        pytest --cov=algebras --cov-report=xml --cov-report=html --cov-fail-under=40
     
     - name: Upload coverage reports to Codecov
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
@@ -55,3 +62,4 @@ jobs:
       with:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         COVERAGE_XML_PATH: coverage.xml
+        MERGE_COVERAGE_FILES: false
