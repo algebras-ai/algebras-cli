@@ -110,7 +110,7 @@ class TestAddCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments
-            mock_execute.assert_called_once_with("fr")
+            mock_execute.assert_called_once_with("fr", None)
             
             # Test with missing argument
             result = runner.invoke(add)

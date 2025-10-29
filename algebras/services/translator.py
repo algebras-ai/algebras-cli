@@ -12,6 +12,8 @@ import asyncio
 import concurrent.futures
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
+
+from algebras.config import Config as ConfigClass
 from functools import lru_cache
 import re
 import time
@@ -113,8 +115,18 @@ class TranslationCache:
 class Translator:
     """AI-powered translation service."""
     
-    def __init__(self):
-        self.config = Config()
+    def __init__(self, config: Optional[ConfigClass] = None):
+        """
+        Initialize Translator with optional Config instance.
+        
+        Args:
+            config: Optional Config instance. If None, creates a new Config with default path.
+        """
+        if config is None:
+            from algebras.config import Config
+            config = Config()
+        
+        self.config = config
         if not self.config.exists():
             raise FileNotFoundError("No Algebras configuration found. Run 'algebras init' first.")
         

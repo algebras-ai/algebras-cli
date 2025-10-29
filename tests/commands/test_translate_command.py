@@ -320,7 +320,7 @@ class TestTranslateCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments (updated with new parameters)
-            mock_execute.assert_called_once_with(None, False, False, ui_safe=False, verbose=False, batch_size=None, max_parallel_batches=None, glossary_id=None, prompt_file=None)
+            mock_execute.assert_called_once_with(None, False, False, ui_safe=False, verbose=False, batch_size=None, max_parallel_batches=None, glossary_id=None, prompt_file=None, config_file=None)
             
             # Test with language and force options
             result = runner.invoke(translate, ["--language", "fr", "--force"])
@@ -329,7 +329,7 @@ class TestTranslateCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments
-            mock_execute.assert_called_with("fr", True, False, ui_safe=False, verbose=False, batch_size=None, max_parallel_batches=None, glossary_id=None, prompt_file=None)
+            mock_execute.assert_called_with("fr", True, False, ui_safe=False, verbose=False, batch_size=None, max_parallel_batches=None, glossary_id=None, prompt_file=None, config_file=None)
             
             # Test with ui_safe option
             result = runner.invoke(translate, ["--ui-safe"])
@@ -338,4 +338,4 @@ class TestTranslateCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments
-            mock_execute.assert_called_with(None, False, False, ui_safe=True, verbose=False, batch_size=None, max_parallel_batches=None, glossary_id=None, prompt_file=None) 
+            mock_execute.assert_called_with(None, False, False, ui_safe=True, verbose=False, batch_size=None, max_parallel_batches=None, glossary_id=None, prompt_file=None, config_file=None) 

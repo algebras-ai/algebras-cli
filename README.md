@@ -174,6 +174,31 @@ algebras translate --prompt-file custom-prompt.txt
 algebras translate --batch-size 10 --max-parallel-batches 3
 ```
 
+### Use Custom Configuration Files
+
+You can specify a custom configuration file for different translation workflows:
+
+```bash
+# Use a custom config file for specific source language
+algebras -f .algebras-zh_Hans.config translate --language ja
+
+# Use a custom config file for different source language
+algebras -f .algebras-en.config translate --language es
+
+# Apply to all commands
+algebras -f .algebras-custom.config status
+algebras -f .algebras-custom.config update
+algebras -f .algebras-custom.config add de
+
+# Default behavior (uses .algebras.config)
+algebras translate
+```
+
+This feature enables you to maintain multiple source languages without recreating configuration files. For example:
+
+- `.algebras.config` - Default config for `en → es, de, ru`
+- `.algebras-zh_Hans.config` - Config for `zh_Hans → kr, ja`
+
 ### Update your translations
 
 ```bash

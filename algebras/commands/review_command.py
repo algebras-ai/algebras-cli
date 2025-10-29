@@ -16,14 +16,15 @@ from algebras.utils.ios_strings_handler import read_ios_strings_file
 from algebras.utils.po_handler import read_po_file
 
 
-def execute(language: Optional[str] = None) -> None:
+def execute(language: Optional[str] = None, config_file: str = None) -> None:
     """
     Review your translations.
     
     Args:
         language: Language to review (if None, prompt for language)
+        config_file: Path to custom config file (optional)
     """
-    config = Config()
+    config = Config(config_file)
     
     if not config.exists():
         click.echo(f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.{Fore.RESET}")
@@ -75,7 +76,7 @@ def execute(language: Optional[str] = None) -> None:
     
     # Scan for files
     try:
-        scanner = FileScanner()
+        scanner = FileScanner(config=config)
         files_by_language = scanner.group_files_by_language()
         
         # Get source files and target files

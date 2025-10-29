@@ -70,7 +70,7 @@ def _upload_terms_adaptive(glossary_service: GlossaryService, glossary_id: str, 
         }
 
 
-def execute(csv_file: str, name: str, batch_size: int = 100, debug: bool = False, rows_ids: str = None, max_length: int = None) -> None:
+def execute(csv_file: str, name: str, batch_size: int = 100, debug: bool = False, rows_ids: str = None, max_length: int = None, config_file: str = None) -> None:
     """
     Execute the glossary push command.
     
@@ -79,10 +79,11 @@ def execute(csv_file: str, name: str, batch_size: int = 100, debug: bool = False
         name: Name of the glossary to create
         batch_size: Number of terms to upload per batch (default: 100)
         debug: Enable debug mode to log all requests before sending (default: False)
+        config_file: Path to custom config file (optional)
     """
     try:
         # Load configuration
-        config = Config()
+        config = Config(config_file)
         if not config.exists():
             click.echo(f"{Fore.RED}Error: No configuration found. Run 'algebras init' first.{Fore.RESET}")
             return

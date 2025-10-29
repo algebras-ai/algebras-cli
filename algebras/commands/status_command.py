@@ -14,12 +14,13 @@ from algebras.utils.lang_validator import read_language_file, extract_all_keys, 
 from algebras.utils.html_handler import read_html_file
 
 
-def validate_languages_with_api(languages: List[str]) -> Tuple[List[str], List[str]]:
+def validate_languages_with_api(languages: List[str], config_file: str = None) -> Tuple[List[str], List[str]]:
     """
     Validate language codes using the Algebras AI API.
     
     Args:
         languages: List of language codes to validate
+        config_file: Path to custom config file (optional)
         
     Returns:
         Tuple of (valid_languages, invalid_languages)
@@ -31,7 +32,7 @@ def validate_languages_with_api(languages: List[str]) -> Tuple[List[str], List[s
     
     try:
         # Get base URL from config
-        config = Config()
+        config = Config(config_file)
         base_url = config.get_base_url()
         url = f"{base_url}/api/v1/translation/languages"
         headers = {
@@ -218,14 +219,15 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
 
 
 
-def execute(language: Optional[str] = None) -> None:
+def execute(language: Optional[str] = None, config_file: str = None) -> None:
     """
     Check the status of your translations.
     
     Args:
         language: Language to check (if None, check all languages)
+        config_file: Path to custom config file (optional)
     """
-    config = Config()
+    config = Config(config_file)
     
     if not config.exists():
         click.echo(click.style("No Algebras configuration found. Run 'algebras init' first.", fg='red'))
@@ -244,7 +246,7 @@ def execute(language: Optional[str] = None) -> None:
     all_languages = config.get_languages()
     
     # Validate languages with API
-    valid_languages, invalid_languages = validate_languages_with_api(all_languages)
+    valid_languages, invalid_languages = validate_languages_with_api(all_languages, config_file)
     
     # Show warnings for invalid language codes
     if invalid_languages:
@@ -266,7 +268,7 @@ def execute(language: Optional[str] = None) -> None:
     # Scan for files
     try:
         from algebras.utils.path_utils import resolve_destination_path
-        scanner = FileScanner()
+        scanner = FileScanner(config=config)
         files_by_language = scanner.group_files_by_language()
         
         # Get source files
