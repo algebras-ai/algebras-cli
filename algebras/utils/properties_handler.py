@@ -254,16 +254,20 @@ def get_properties_language_code(file_path: str) -> Optional[str]:
     filename = os.path.basename(file_path)
     if '_' in filename:
         parts = filename.split('_')
-        if len(parts) >= 3:
-            # Check if the last two parts form a valid locale (e.g., en_US)
-            last_two = '_'.join(parts[-2:]).split('.')[0]
-            if len(last_two) == 5 and '_' in last_two:  # en_US format
-                return last_two
         if len(parts) >= 2:
-            # Get the part before .properties
+            # Get the part before .properties (last part)
             name_part = parts[-1].split('.')[0]
-            # Only return if it looks like a valid language code (2-3 letters)
+            # Check if it looks like a valid language code (2-3 letters)
             if len(name_part) in [2, 3] and name_part.isalpha():
+                # Check if the previous part forms a valid locale (e.g., en_US)
+                # Locale format: lowercase 2-letter language code + underscore + 2 uppercase letters (country code)
+                if len(parts) >= 3:
+                    second_last = parts[-2]
+                    # Validate locale: language code should be lowercase 2 letters, country code should be uppercase 2 letters
+                    if (len(second_last) == 2 and second_last.islower() and second_last.isalpha() and 
+                        len(name_part) == 2 and name_part.isupper() and name_part.isalpha()):
+                        return f"{second_last}_{name_part}"
+                # Return just the language code (can be any case, but typically lowercase)
                 return name_part
     
     return None
