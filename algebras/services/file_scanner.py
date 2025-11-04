@@ -193,11 +193,19 @@ class FileScanner:
                             assigned_files.add(file_path)
                             break
                         elif part.startswith("values-") and len(part) > 7:  # "values-" is 7 chars
-                            # Extract language code from values-{lang}
-                            lang_code = part[7:]  # Remove "values-" prefix
+                            # Extract destination locale code from values-{lang}
+                            destination_value = part[7:]  # Remove "values-" prefix
                             
-                            # Check if this language is in our config
-                            if lang_code in languages:
+                            # Try to find the original language code using reverse lookup
+                            # This handles mapped locale codes (e.g., "b+uz+Cyrl" -> "uz_Cyrl")
+                            lang_code = self.config.get_language_code_from_destination(destination_value)
+                            
+                            # If reverse lookup found a match, use it
+                            # Otherwise, check if the extracted value is itself a language code
+                            if lang_code is None:
+                                lang_code = destination_value if destination_value in languages else None
+                            
+                            if lang_code and lang_code in languages:
                                 result[lang_code].append(file_path)
                                 assigned_files.add(file_path)
                                 break
@@ -221,9 +229,17 @@ class FileScanner:
                     if locale_idx >= 0 and locale_idx + 1 < len(parts):
                         lang_folder = parts[locale_idx + 1]
                         
-                        # Check if this language is in our config
-                        if lang_folder in languages:
-                            result[lang_folder].append(file_path)
+                        # Try to find the original language code using reverse lookup
+                        # This handles mapped locale codes (e.g., "b+uz+Cyrl" -> "uz_Cyrl")
+                        lang_code = self.config.get_language_code_from_destination(lang_folder)
+                        
+                        # If reverse lookup found a match, use it
+                        # Otherwise, check if the folder name is itself a language code
+                        if lang_code is None:
+                            lang_code = lang_folder if lang_folder in languages else None
+                        
+                        if lang_code and lang_code in languages:
+                            result[lang_code].append(file_path)
                             assigned_files.add(file_path)
                             continue  # Skip other language checks
                 

@@ -315,6 +315,22 @@ class Config:
         mapping = self.get_locale_mapping()
         return mapping.get(lang_code, lang_code)
     
+    def get_language_code_from_destination(self, destination_value: str) -> Optional[str]:
+        """
+        Reverse lookup: given a destination locale code value, find the original language code.
+        This is useful when scanning files that have mapped values in their paths.
+        
+        Args:
+            destination_value: The destination locale code value (e.g., "b+uz+Cyrl")
+            
+        Returns:
+            The original language code (e.g., "uz_Cyrl") if found, None otherwise
+        """
+        mapping = self.get_locale_mapping()
+        # Create reverse mapping: destination_value -> lang_code
+        reverse_mapping = {v: k for k, v in mapping.items()}
+        return reverse_mapping.get(destination_value, None)
+    
     def get_source_language(self) -> str:
         """Get the source language. Defaults to the first language in the list if not specified."""
         if not self.data:

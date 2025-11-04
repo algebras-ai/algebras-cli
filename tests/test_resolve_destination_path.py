@@ -136,5 +136,37 @@ def test_config_locale_mapping():
         assert config.get_destination_locale_code('es') == 'es%sda'
         assert config.get_destination_locale_code('de') == 'de-DE'
         assert config.get_destination_locale_code('nonexistent') == 'nonexistent'  # Defaults to input
+        
+        # Test get_language_code_from_destination() - reverse lookup
+        assert config.get_language_code_from_destination('en') == 'en'  # Unmapped maps to itself
+        assert config.get_language_code_from_destination('fr') == 'fr'  # Unmapped maps to itself
+        assert config.get_language_code_from_destination('es%sda') == 'es'  # Mapped value -> original code
+        assert config.get_language_code_from_destination('de-DE') == 'de'  # Mapped value -> original code
+        assert config.get_language_code_from_destination('nonexistent') is None  # Not found
+    finally:
+        os.unlink(config_path)
+
+
+def test_config_reverse_lookup_with_special_chars():
+    """Test reverse lookup with special characters in mapped values"""
+    # Create a temporary config file with special characters in mappings
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        config_data = {
+            'languages': [
+                {'uz_Cyrl': 'b+uz+Cyrl'},
+                {'pt_BR': 'pt-rBR'}
+            ],
+            'source_files': {}
+        }
+        yaml.dump(config_data, f)
+        config_path = f.name
+    
+    try:
+        config = Config(config_path)
+        config.load()
+        
+        # Test reverse lookup with special characters
+        assert config.get_language_code_from_destination('b+uz+Cyrl') == 'uz_Cyrl'
+        assert config.get_language_code_from_destination('pt-rBR') == 'pt_BR'
     finally:
         os.unlink(config_path)
