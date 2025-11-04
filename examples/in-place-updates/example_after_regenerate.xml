@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="Auth.eula">termini di utilizzo</string>
+    <string name="Auth.privacy_policy">informativa sulla privacy</string>
+    <string name="Auth.sign_in_with">Accedi con %1$s</string>
+</resources>
+
