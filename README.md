@@ -444,6 +444,50 @@ source_files:
 
 - `%algebras_locale_code%`: Replaced with the actual locale code (e.g., `en`, `fr`, `es`, `pt_BR`)
 
+#### Locale Code Mapping
+
+You can map language codes to custom destination path values. This is useful when you need to use different locale codes for file paths than what you use for API translation calls.
+
+**Example:**
+```yaml
+languages:
+  - en
+  - es
+  - {uz_Cyrl: "b+uz+Cyrl"}
+  - {pt_BR: "pt-rBR"}
+source_files:
+  "strings/values/generic_strings.xml":
+    destination_path: "strings/values-%algebras_locale_code%/generic_strings.xml"
+```
+
+In this example:
+- When translating to `uz_Cyrl`, the API uses `uz_Cyrl` for translation, but files are saved to `strings/values-b+uz+Cyrl/generic_strings.xml`
+- When translating to `pt_BR`, the API uses `pt_BR` for translation, but files are saved to `strings/values-pt-rBR/generic_strings.xml`
+- Languages without mappings (like `en` and `es`) use their own code as the destination value
+
+**Supported YAML formats:**
+
+1. **Dictionary format (recommended):**
+   ```yaml
+   languages:
+     - en
+     - {es: "es%sda"}
+     - {uz_Cyrl: "b+uz+Cyrl"}
+   ```
+
+2. **Inline format:**
+   ```yaml
+   languages:
+     - en
+     - es: "es%sda"
+     - uz_Cyrl: "b+uz+Cyrl"
+   ```
+
+**Important notes:**
+- Original language codes (e.g., `uz_Cyrl`) are used for API translation calls
+- Mapped codes (e.g., `b+uz+Cyrl`) are used for destination file paths (both reading and writing)
+- Unmapped languages default to using their own code as the destination value
+
 #### Examples by Project Type
 
 **Next.js/React (next-i18next)**
