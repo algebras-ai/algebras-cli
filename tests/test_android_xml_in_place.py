@@ -183,3 +183,40 @@ def test_android_xml_in_place_update_all_keys():
     finally:
         os.unlink(temp_file)
 
+
+def test_android_xml_in_place_preserves_namespace_prefix():
+    """Test that in-place updates preserve original namespace prefixes (xmlns:tools)"""
+    # Create file with xmlns:tools namespace
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False) as f:
+        temp_file = f.name
+    
+    try:
+        # Write initial file with xmlns:tools
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            f.write('<?xml version="1.0" encoding="utf-8"?>\n')
+            f.write('<resources xmlns:tools="http://schemas.android.com/tools">\n')
+            f.write('    <string name="key1">value1</string>\n')
+            f.write('</resources>\n')
+        
+        # Update only key1
+        updated_content = {
+            "key1": "updated_value1"
+        }
+        
+        write_android_xml_file_in_place(temp_file, updated_content, keys_to_update={"key1"})
+        
+        # Read file content directly to verify namespace prefix
+        with open(temp_file, 'r', encoding='utf-8') as f:
+            file_content = f.read()
+        
+        # Verify namespace prefix is preserved (not changed to xmlns:ns0)
+        assert 'xmlns:tools="http://schemas.android.com/tools"' in file_content
+        assert 'xmlns:ns0=' not in file_content
+        
+        # Verify value was updated
+        result = read_android_xml_file(temp_file)
+        assert result["key1"] == "updated_value1"
+        
+    finally:
+        os.unlink(temp_file)
+

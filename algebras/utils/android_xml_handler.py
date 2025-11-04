@@ -206,6 +206,13 @@ def write_android_xml_file_in_place(file_path: str, content: Dict[str, Any], key
     with open(file_path, 'r', encoding='utf-8') as f:
         original_content = f.read()
     
+    # Extract original namespace declaration from <resources> tag to preserve it
+    # Match: <resources xmlns:tools="..."> or <resources xmlns:ns0="..."> etc.
+    namespace_match = re.search(r'<resources\s+([^>]*)>', original_content)
+    original_resources_tag = None
+    if namespace_match:
+        original_resources_tag = namespace_match.group(1)
+    
     # Track which keys originally had &#160; entities (for preservation)
     keys_with_entities = set()
     # Find all string elements with &#160; entities
@@ -323,12 +330,25 @@ def write_android_xml_file_in_place(file_path: str, content: Dict[str, Any], key
     # For now, let's ensure that if the original content had &#160;, we check if we should preserve it
     # But since we're updating in-place, we should preserve the entity format when possible
     
-    # Write back with proper entity handling
+    # Write back with proper entity handling and namespace prefix preservation
     # Replace non-breaking space character (U+00A0) with &#160; entity
     # This preserves the entity format for keys that originally had it
+    # Also restore original namespace prefix (xmlns:tools instead of xmlns:ns0)
     with open(file_path, 'w', encoding='utf-8') as f:
         lines = file_content.split('\n')
         for i, line in enumerate(lines):
+            # Restore original namespace prefix in <resources> tag
+            if '<resources' in line and original_resources_tag:
+                # Replace the namespace declaration with the original one
+                # Handle both cases: <resources> (no attributes) and <resources xmlns:ns0="..."> (renamed)
+                if re.search(r'<resources\s+[^>]*>', line):
+                    # Has attributes - replace them
+                    line = re.sub(r'<resources\s+[^>]*>', f'<resources {original_resources_tag}>', line)
+                else:
+                    # No attributes - add the original namespace
+                    line = re.sub(r'<resources>', f'<resources {original_resources_tag}>', line)
+                lines[i] = line
+            
             # Check if this line contains a string element we updated
             if '<string name=' in line and '>' in line:
                 # Extract key name to check if it should preserve entities
