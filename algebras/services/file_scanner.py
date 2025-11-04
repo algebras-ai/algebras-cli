@@ -151,21 +151,25 @@ class FileScanner:
         if self.source_files:
             # Group source files by language
             for source_file, config in self.source_files.items():
-                if os.path.isfile(source_file):
+                # Normalize the source file path for consistent path separators
+                normalized_source_file = os.path.normpath(source_file)
+                if os.path.isfile(normalized_source_file):
                     # Try to determine which language this source file represents
                     # by checking if it matches any destination pattern
                     for lang in languages:
                         if lang == source_language:
                             # Source language files go directly to source language
-                            result[lang].append(source_file)
+                            result[lang].append(normalized_source_file)
                             break
                         else:
                             # Check if this source file would generate a destination for this language
                             destination_pattern = config.get("destination_path", "")
                             if destination_pattern:
                                 resolved_path = resolve_destination_path(destination_pattern, lang)
-                                if os.path.isfile(resolved_path):
-                                    result[lang].append(resolved_path)
+                                # Normalize the resolved path for consistent path separators
+                                normalized_resolved_path = os.path.normpath(resolved_path)
+                                if os.path.isfile(normalized_resolved_path):
+                                    result[lang].append(normalized_resolved_path)
         else:
             # Fallback to old system for backward compatibility
             files = self.find_localization_files()

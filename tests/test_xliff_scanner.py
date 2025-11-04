@@ -33,7 +33,10 @@ source_files:
     scanner = FileScanner(config=config)
     files_by_language = scanner.group_files_by_language()
 
-    assert src_file in files_by_language.get("en", [])
+    # Normalize paths for comparison to handle path separator differences across platforms
+    normalized_src_file = os.path.normpath(src_file)
+    normalized_files = [os.path.normpath(f) for f in files_by_language.get("en", [])]
+    assert normalized_src_file in normalized_files
 
 
 def test_scanner_glob_patterns_pick_up_xlf(tmp_path, monkeypatch):
