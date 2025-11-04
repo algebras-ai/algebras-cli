@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file original="ng2.template" datatype="html" source-language="en" target-language="en">
+    <body>
+      <trans-unit id="app.title" datatype="html">
+        <source>My Angular App</source>
+        <target>My Angular App</target>
+      </trans-unit>
+      <trans-unit id="welcome.message" datatype="html">
+        <source>Welcome to our application!</source>
+        <target>Welcome to our application!</target>
+      </trans-unit>
+      <trans-unit id="login.button" datatype="html">
+        <source>Log In</source>
+        <target>Log In</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>
+
+
