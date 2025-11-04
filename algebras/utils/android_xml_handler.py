@@ -210,8 +210,28 @@ def write_android_xml_file_in_place(file_path: str, content: Dict[str, Any], key
     # Match: <resources xmlns:tools="..."> or <resources xmlns:ns0="..."> etc.
     namespace_match = re.search(r'<resources\s+([^>]*)>', original_content)
     original_resources_tag = None
+    namespace_prefix_map = {}  # Map from ElementTree's prefix (ns0, ns1, etc.) to original prefix (tools, etc.)
+    
     if namespace_match:
         original_resources_tag = namespace_match.group(1)
+        # Extract namespace prefix from original declaration (e.g., xmlns:tools="http://...")
+        # Find all namespace declarations in the original tag
+        ns_decl_pattern = r'xmlns:([a-zA-Z_][a-zA-Z0-9_]*)=["\']([^"\']+)["\']'
+        for ns_match in re.finditer(ns_decl_pattern, original_resources_tag):
+            original_prefix = ns_match.group(1)  # e.g., "tools"
+            namespace_uri = ns_match.group(2)     # e.g., "http://schemas.android.com/tools"
+            # ElementTree will rename this to ns0, ns1, etc. based on order
+            # We'll need to map it back after writing
+            namespace_prefix_map[namespace_uri] = original_prefix
+    
+    # Find all namespace prefixes used in attributes (e.g., tools:ignore in <plurals tools:ignore="...">)
+    # We need to map these to the original prefix after ElementTree writes
+    used_namespace_prefixes = set()
+    # Pattern: matches any attribute with namespace prefix (e.g., tools:ignore="...")
+    attr_ns_pattern = r'\b([a-zA-Z_][a-zA-Z0-9_]*):([a-zA-Z_][a-zA-Z0-9_]*)='
+    for match in re.finditer(attr_ns_pattern, original_content):
+        prefix = match.group(1)  # e.g., "tools"
+        used_namespace_prefixes.add(prefix)
     
     # Track which keys originally had &#160; entities (for preservation)
     keys_with_entities = set()
@@ -334,6 +354,20 @@ def write_android_xml_file_in_place(file_path: str, content: Dict[str, Any], key
     # Replace non-breaking space character (U+00A0) with &#160; entity
     # This preserves the entity format for keys that originally had it
     # Also restore original namespace prefix (xmlns:tools instead of xmlns:ns0)
+    # And restore namespace prefixes in attributes (tools:ignore instead of ns0:ignore)
+    
+    # First, build the mapping from ElementTree's prefixes (ns0, ns1) to original prefixes
+    et_to_original = {}  # Map from ElementTree prefix (ns0) to original prefix (tools)
+    if namespace_prefix_map:
+        # Find what ElementTree wrote in the file to see the mapping
+        et_ns_pattern = r'xmlns:(ns\d+)=["\']([^"\']+)["\']'
+        for et_match in re.finditer(et_ns_pattern, file_content):
+            et_prefix = et_match.group(1)  # e.g., "ns0"
+            ns_uri = et_match.group(2)       # e.g., "http://schemas.android.com/tools"
+            if ns_uri in namespace_prefix_map:
+                original_prefix = namespace_prefix_map[ns_uri]
+                et_to_original[et_prefix] = original_prefix
+    
     with open(file_path, 'w', encoding='utf-8') as f:
         lines = file_content.split('\n')
         for i, line in enumerate(lines):
@@ -347,6 +381,15 @@ def write_android_xml_file_in_place(file_path: str, content: Dict[str, Any], key
                 else:
                     # No attributes - add the original namespace
                     line = re.sub(r'<resources>', f'<resources {original_resources_tag}>', line)
+                lines[i] = line
+            
+            # Restore namespace prefixes in attributes (e.g., ns0:ignore -> tools:ignore)
+            # Replace all occurrences of ns0:, ns1:, etc. with original prefixes
+            if et_to_original:
+                for et_prefix, original_prefix in et_to_original.items():
+                    # Replace in attributes (e.g., ns0:ignore -> tools:ignore)
+                    pattern = rf'\b{re.escape(et_prefix)}:([a-zA-Z_][a-zA-Z0-9_]*)'
+                    line = re.sub(pattern, rf'{original_prefix}:\1', line)
                 lines[i] = line
             
             # Check if this line contains a string element we updated

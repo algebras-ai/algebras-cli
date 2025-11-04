@@ -220,3 +220,48 @@ def test_android_xml_in_place_preserves_namespace_prefix():
     finally:
         os.unlink(temp_file)
 
+
+def test_android_xml_in_place_preserves_namespace_prefix_in_attributes():
+    """Test that in-place updates preserve namespace prefixes in attributes (tools:ignore)"""
+    # Create file with xmlns:tools namespace and tools:ignore attribute
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False) as f:
+        temp_file = f.name
+    
+    try:
+        # Write initial file with xmlns:tools and tools:ignore in plurals
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            f.write('<?xml version="1.0" encoding="utf-8"?>\n')
+            f.write('<resources xmlns:tools="http://schemas.android.com/tools">\n')
+            f.write('    <string name="key1">value1</string>\n')
+            f.write('    <plurals name="Plural.participants" tools:ignore="MissingQuantity">\n')
+            f.write('        <item quantity="one">%1$d participant</item>\n')
+            f.write('        <item quantity="other">%1$d participants</item>\n')
+            f.write('    </plurals>\n')
+            f.write('</resources>\n')
+        
+        # Update only key1
+        updated_content = {
+            "key1": "updated_value1"
+        }
+        
+        write_android_xml_file_in_place(temp_file, updated_content, keys_to_update={"key1"})
+        
+        # Read file content directly to verify namespace prefix
+        with open(temp_file, 'r', encoding='utf-8') as f:
+            file_content = f.read()
+        
+        # Verify namespace prefix is preserved in <resources> tag
+        assert 'xmlns:tools="http://schemas.android.com/tools"' in file_content
+        assert 'xmlns:ns0=' not in file_content
+        
+        # Verify namespace prefix is preserved in attributes (tools:ignore, not ns0:ignore)
+        assert 'tools:ignore="MissingQuantity"' in file_content
+        assert 'ns0:ignore=' not in file_content
+        
+        # Verify value was updated
+        result = read_android_xml_file(temp_file)
+        assert result["key1"] == "updated_value1"
+        
+    finally:
+        os.unlink(temp_file)
+
