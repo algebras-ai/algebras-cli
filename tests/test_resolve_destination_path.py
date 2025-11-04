@@ -3,7 +3,10 @@ Tests for the resolve_destination_path function
 """
 
 import os
+import tempfile
+import yaml
 from algebras.utils.path_utils import resolve_destination_path
+from algebras.config import Config
 
 
 def test_resolve_destination_path():
@@ -43,3 +46,127 @@ def test_resolve_destination_path():
     result = resolve_destination_path(pattern, "ru")
     expected = "locales/ru/ru.json"
     assert result == expected
+
+
+def test_resolve_destination_path_with_mapping():
+    """Test that destination paths use mapped locale codes when Config is provided"""
+    # Create a temporary config file with mappings
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        config_data = {
+            'languages': [
+                'en',
+                {'es': 'es%sda'}
+            ],
+            'source_files': {}
+        }
+        yaml.dump(config_data, f)
+        config_path = f.name
+    
+    try:
+        config = Config(config_path)
+        config.load()
+        
+        # Test with mapped locale code
+        pattern = "locale/messages.%algebras_locale_code%.xlf"
+        result = resolve_destination_path(pattern, "es", config)
+        expected = "locale/messages.es%sda.xlf"
+        assert result == expected
+        
+        # Test with unmapped locale code (should use original)
+        pattern = "locale/messages.%algebras_locale_code%.xlf"
+        result = resolve_destination_path(pattern, "en", config)
+        expected = "locale/messages.en.xlf"
+        assert result == expected
+        
+        # Test with multiple placeholders using mapped code
+        pattern = "locales/%algebras_locale_code%/%algebras_locale_code%.json"
+        result = resolve_destination_path(pattern, "es", config)
+        expected = "locales/es%sda/es%sda.json"
+        assert result == expected
+    finally:
+        os.unlink(config_path)
+
+
+def test_resolve_destination_path_backward_compatibility():
+    """Test that resolve_destination_path works without Config (backward compatibility)"""
+    # Should work exactly as before when no Config is provided
+    pattern = "src/locales/%algebras_locale_code%/common.json"
+    result = resolve_destination_path(pattern, "fr")
+    expected = "src/locales/fr/common.json"
+    assert result == expected
+
+
+def test_config_locale_mapping():
+    """Test Config locale mapping methods"""
+    # Create a temporary config file with mixed format
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        config_data = {
+            'languages': [
+                'en',
+                'fr',
+                {'es': 'es%sda'},
+                {'de': 'de-DE'}
+            ],
+            'source_files': {}
+        }
+        yaml.dump(config_data, f)
+        config_path = f.name
+    
+    try:
+        config = Config(config_path)
+        config.load()
+        
+        # Test get_languages() returns language codes
+        languages = config.get_languages()
+        assert 'en' in languages
+        assert 'fr' in languages
+        assert 'es' in languages
+        assert 'de' in languages
+        
+        # Test get_locale_mapping() returns full mapping
+        mapping = config.get_locale_mapping()
+        assert mapping['en'] == 'en'  # Unmapped defaults to itself
+        assert mapping['fr'] == 'fr'  # Unmapped defaults to itself
+        assert mapping['es'] == 'es%sda'  # Mapped value
+        assert mapping['de'] == 'de-DE'  # Mapped value
+        
+        # Test get_destination_locale_code()
+        assert config.get_destination_locale_code('en') == 'en'
+        assert config.get_destination_locale_code('fr') == 'fr'
+        assert config.get_destination_locale_code('es') == 'es%sda'
+        assert config.get_destination_locale_code('de') == 'de-DE'
+        assert config.get_destination_locale_code('nonexistent') == 'nonexistent'  # Defaults to input
+        
+        # Test get_language_code_from_destination() - reverse lookup
+        assert config.get_language_code_from_destination('en') == 'en'  # Unmapped maps to itself
+        assert config.get_language_code_from_destination('fr') == 'fr'  # Unmapped maps to itself
+        assert config.get_language_code_from_destination('es%sda') == 'es'  # Mapped value -> original code
+        assert config.get_language_code_from_destination('de-DE') == 'de'  # Mapped value -> original code
+        assert config.get_language_code_from_destination('nonexistent') is None  # Not found
+    finally:
+        os.unlink(config_path)
+
+
+def test_config_reverse_lookup_with_special_chars():
+    """Test reverse lookup with special characters in mapped values"""
+    # Create a temporary config file with special characters in mappings
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        config_data = {
+            'languages': [
+                {'uz_Cyrl': 'b+uz+Cyrl'},
+                {'pt_BR': 'pt-rBR'}
+            ],
+            'source_files': {}
+        }
+        yaml.dump(config_data, f)
+        config_path = f.name
+    
+    try:
+        config = Config(config_path)
+        config.load()
+        
+        # Test reverse lookup with special characters
+        assert config.get_language_code_from_destination('b+uz+Cyrl') == 'uz_Cyrl'
+        assert config.get_language_code_from_destination('pt-rBR') == 'pt_BR'
+    finally:
+        os.unlink(config_path)

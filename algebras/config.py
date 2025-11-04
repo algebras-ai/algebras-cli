@@ -252,7 +252,84 @@ class Config:
                 return []
             self.load()
         
-        return self.data.get("languages", [])
+        languages_raw = self.data.get("languages", [])
+        if not languages_raw:
+            return []
+        
+        # Parse languages - support both simple strings and mappings
+        languages = []
+        for item in languages_raw:
+            if isinstance(item, str):
+                # Simple string format: "en"
+                languages.append(item)
+            elif isinstance(item, dict):
+                # Mapping format: {"es": "es%sda"}
+                # Extract the key as the language code
+                languages.extend(item.keys())
+            else:
+                # Skip invalid entries
+                continue
+        
+        return languages
+    
+    def get_locale_mapping(self) -> Dict[str, str]:
+        """
+        Get the mapping of language codes to destination path values.
+        
+        Returns:
+            Dictionary mapping language codes to their destination path values.
+            If a language has no mapping, it maps to itself.
+        """
+        if not self.data:
+            if not self.exists():
+                return {}
+            self.load()
+        
+        languages_raw = self.data.get("languages", [])
+        if not languages_raw:
+            return {}
+        
+        mapping = {}
+        for item in languages_raw:
+            if isinstance(item, str):
+                # Simple string format: "en" -> maps to itself
+                mapping[item] = item
+            elif isinstance(item, dict):
+                # Mapping format: {"es": "es%sda"}
+                for lang_code, mapped_value in item.items():
+                    mapping[lang_code] = mapped_value
+        
+        return mapping
+    
+    def get_destination_locale_code(self, lang_code: str) -> str:
+        """
+        Get the destination locale code for a given language code.
+        If a mapping exists, returns the mapped value; otherwise returns the original code.
+        
+        Args:
+            lang_code: The language code (e.g., "es")
+            
+        Returns:
+            The mapped destination locale code (e.g., "es%sda") or the original code if no mapping exists
+        """
+        mapping = self.get_locale_mapping()
+        return mapping.get(lang_code, lang_code)
+    
+    def get_language_code_from_destination(self, destination_value: str) -> Optional[str]:
+        """
+        Reverse lookup: given a destination locale code value, find the original language code.
+        This is useful when scanning files that have mapped values in their paths.
+        
+        Args:
+            destination_value: The destination locale code value (e.g., "b+uz+Cyrl")
+            
+        Returns:
+            The original language code (e.g., "uz_Cyrl") if found, None otherwise
+        """
+        mapping = self.get_locale_mapping()
+        # Create reverse mapping: destination_value -> lang_code
+        reverse_mapping = {v: k for k, v in mapping.items()}
+        return reverse_mapping.get(destination_value, None)
     
     def get_source_language(self) -> str:
         """Get the source language. Defaults to the first language in the list if not specified."""
@@ -274,12 +351,17 @@ class Config:
         if not self.data:
             self.load()
         
-        languages = self.get_languages()
-        if language in languages:
+        # Check if language already exists
+        existing_languages = self.get_languages()
+        if language in existing_languages:
             return
         
-        languages.append(language)
-        self.data["languages"] = languages
+        # Get the raw languages list to preserve format (simple strings vs mappings)
+        languages_raw = self.data.get("languages", [])
+        
+        # Add as a simple string (no mapping)
+        languages_raw.append(language)
+        self.data["languages"] = languages_raw
         self.save()
     
     def get_source_files(self) -> Dict[str, Dict[str, str]]:

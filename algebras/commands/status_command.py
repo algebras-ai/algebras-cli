@@ -313,7 +313,7 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                     if os.path.isfile(source_file):
                         destination_pattern = source_config.get("destination_path", "")
                         if destination_pattern:
-                            resolved_path = resolve_destination_path(destination_pattern, lang)
+                            resolved_path = resolve_destination_path(destination_pattern, lang, config)
                             if os.path.isfile(resolved_path):
                                 file_count += 1
             else:
@@ -338,7 +338,7 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                         # Check if this source file has a corresponding translated file for this language
                         destination_pattern = source_config.get("destination_path", "")
                         if destination_pattern:
-                            resolved_path = resolve_destination_path(destination_pattern, lang)
+                            resolved_path = resolve_destination_path(destination_pattern, lang, config)
                             if os.path.isfile(resolved_path):
                                 expected_keys = source_key_counts.get(source_file, 0)
                                 total_expected_keys += expected_keys

@@ -1,16 +1,27 @@
 import os
+from typing import Optional, TYPE_CHECKING
 
-def resolve_destination_path(destination_pattern: str, locale_code: str) -> str:
+if TYPE_CHECKING:
+    from algebras.config import Config
+
+def resolve_destination_path(destination_pattern: str, locale_code: str, config: Optional['Config'] = None) -> str:
     """
     Resolve a destination path pattern by replacing placeholders with actual locale code.
     
     Args:
         destination_pattern: Path pattern with %algebras_locale_code% placeholder
-        locale_code: The actual locale code to substitute
+        locale_code: The actual locale code to substitute (used for API calls)
+        config: Optional Config instance to get mapped locale code for destination paths
         
     Returns:
         Resolved destination path
     """
+    # If config is provided, use the mapped locale code for destination paths
+    if config is not None:
+        destination_locale_code = config.get_destination_locale_code(locale_code)
+        return destination_pattern.replace("%algebras_locale_code%", destination_locale_code)
+    
+    # Fallback to original behavior for backward compatibility
     return destination_pattern.replace("%algebras_locale_code%", locale_code)
 
 def determine_target_path(source_path: str, source_lang: str, target_lang: str) -> str:
