@@ -595,7 +595,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     # Use the new destination pattern system
                     destination_pattern = source_files_config[source_file].get("destination_path", "")
                     if destination_pattern:
-                        target_file = resolve_destination_path(destination_pattern, target_lang)
+                        target_file = resolve_destination_path(destination_pattern, target_lang, config)
                         target_basename = os.path.basename(target_file)
                         target_dirname = os.path.dirname(target_file)
                     else:

@@ -165,7 +165,7 @@ class FileScanner:
                             # Check if this source file would generate a destination for this language
                             destination_pattern = config.get("destination_path", "")
                             if destination_pattern:
-                                resolved_path = resolve_destination_path(destination_pattern, lang)
+                                resolved_path = resolve_destination_path(destination_pattern, lang, self.config)
                                 # Normalize the resolved path for consistent path separators
                                 normalized_resolved_path = os.path.normpath(resolved_path)
                                 if os.path.isfile(normalized_resolved_path):
