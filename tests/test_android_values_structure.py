@@ -5,7 +5,7 @@ Test Android values directory structure handling
 import tempfile
 import os
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, call
 
 from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
@@ -64,6 +64,8 @@ def test_android_values_file_detection():
             mock_config.get_source_language.return_value = "en"
             mock_config.get_path_rules.return_value = ["**/*.xml"]
             mock_config.get_source_files.return_value = {}
+            # Mock get_language_code_from_destination to return None (no mappings in this test)
+            mock_config.get_language_code_from_destination.return_value = None
             
             with patch("algebras.services.file_scanner.Config", return_value=mock_config):
                 scanner = FileScanner()
@@ -149,6 +151,8 @@ def test_android_values_file_scanning_patterns():
     mock_config.get_source_language.return_value = "en"
     mock_config.get_path_rules.return_value = ["**/*.xml"]
     mock_config.get_source_files.return_value = {}
+    # Mock get_language_code_from_destination to return None (no mappings in this test)
+    mock_config.get_language_code_from_destination.return_value = None
     
     with patch("algebras.services.file_scanner.Config", return_value=mock_config):
         scanner = FileScanner()
