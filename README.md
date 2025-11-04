@@ -531,6 +531,7 @@ We provide comprehensive examples for different frameworks and file formats:
 - **[Next.js/React](examples/nextjs-app/)** - JSON-based localization with i18next
 - **[Flutter](examples/flutter-app/)** - ARB files for Flutter internationalization
 - **[Angular](examples/angular-app/)** - XLIFF files for Angular i18n
+- **[XLIFF](examples/xliff-app/)** - Minimal XLIFF example with `.xlf`
 - **[Java](examples/java-app/)** - Properties files for Java ResourceBundle
 - **[Django](examples/django-app/)** - Gettext PO files for Django
 
