@@ -16,7 +16,7 @@ from algebras.utils.path_utils import determine_target_path, resolve_destination
 from algebras.utils.lang_validator import validate_language_files, find_outdated_keys, extract_all_keys
 from algebras.utils.git_utils import is_git_available, is_git_repository
 from algebras.utils.ts_handler import read_ts_translation_file, write_ts_translation_file
-from algebras.utils.android_xml_handler import read_android_xml_file, write_android_xml_file
+from algebras.utils.android_xml_handler import read_android_xml_file, write_android_xml_file, write_android_xml_file_in_place
 from algebras.utils.ios_strings_handler import read_ios_strings_file, write_ios_strings_file
 from algebras.utils.ios_stringsdict_handler import (
     read_ios_stringsdict_file, 
@@ -26,6 +26,7 @@ from algebras.utils.ios_stringsdict_handler import (
 )
 from algebras.utils.po_handler import read_po_file, write_po_file
 from algebras.utils.html_handler import read_html_file, write_html_file
+from algebras.utils.xliff_handler import write_xliff_file
 
 
 def execute(language: Optional[str] = None, force: bool = False, only_missing: bool = False,
@@ -34,7 +35,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
            outdated_keys_files: List[Tuple[str, Set[str], str]] = None,
            ui_safe: bool = False, verbose: bool = False, batch_size: Optional[int] = None, 
            max_parallel_batches: Optional[int] = None, glossary_id: Optional[str] = None, prompt_file: Optional[str] = None, 
-           config_file: Optional[str] = None) -> None:
+           regenerate_from_scratch: bool = False, config_file: Optional[str] = None) -> None:
     """
     Translate your application.
     
@@ -51,6 +52,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         max_parallel_batches: Override the maximum number of parallel batches for translation processing
         glossary_id: ID of the glossary to use for translation
         prompt_file: Path to a file containing a custom prompt for translation
+        regenerate_from_scratch: If True, regenerate files from scratch instead of updating in-place
         config_file: Path to custom config file (optional)
     """
     config = Config(config_file)
@@ -277,24 +279,48 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     
                     # Save updated content if there were changes
                     if missing_keys or modified_keys:
+                        use_in_place = _should_use_in_place(target_file, regenerate_from_scratch)
+                        keys_to_update = set(missing_keys) | set(modified_keys)
+                        
                         if target_file.endswith(".json"):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}JSON format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             with open(target_file, "w", encoding="utf-8") as f:
                                 json.dump(target_content, f, ensure_ascii=False, indent=2)
                         elif target_file.endswith((".yaml", ".yml")):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}YAML format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             with open(target_file, "w", encoding="utf-8") as f:
                                 yaml.dump(target_content, f, default_flow_style=False, allow_unicode=True)
                         elif target_file.endswith(".ts"):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}TypeScript format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             write_ts_translation_file(target_file, target_content)
                         elif target_file.endswith(".xml"):
-                            write_android_xml_file(target_file, target_content)
+                            if use_in_place:
+                                write_android_xml_file_in_place(target_file, target_content, keys_to_update)
+                            else:
+                                write_android_xml_file(target_file, target_content)
                         elif target_file.endswith(".strings"):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}iOS Strings format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             write_ios_strings_file(target_file, target_content)
                         elif target_file.endswith(".stringsdict"):
                             # For .stringsdict files, update the original structure with translations
                             updated_content = update_translatable_strings(target_content_raw, target_content)
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}iOS StringsDict format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             write_ios_stringsdict_file(target_file, updated_content)
                         elif target_file.endswith(".html"):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}HTML format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             write_html_file(target_file, source_file, target_content)
+                        elif target_file.endswith((".xlf", ".xliff")):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
+                            # Persist updated XLIFF using writer, preserving structure
+                            # Use source/target languages inferred from config/loop
+                            write_xliff_file(target_file, target_content, source_language, target_lang)
                         
                         updated_count = len(missing_keys) + len(modified_keys)
                         click.echo(f"  {Fore.GREEN}✓ Updated {updated_count} keys in {target_file}\x1b[0m")
@@ -357,26 +383,52 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         )
                         
                         # Save updated content
+                        use_in_place = _should_use_in_place(target_file, regenerate_from_scratch)
+                        keys_to_update = set(missing_keys)
+                        
                         if target_file.endswith(".json"):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}JSON format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             with open(target_file, "w", encoding="utf-8") as f:
                                 json.dump(target_content, f, ensure_ascii=False, indent=2)
                         elif target_file.endswith((".yaml", ".yml")):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}YAML format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             with open(target_file, "w", encoding="utf-8") as f:
                                 yaml.dump(target_content, f, default_flow_style=False, allow_unicode=True)
                         elif target_file.endswith(".ts"):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}TypeScript format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             write_ts_translation_file(target_file, target_content)
                         elif target_file.endswith(".xml"):
-                            write_android_xml_file(target_file, target_content)
+                            if use_in_place:
+                                write_android_xml_file_in_place(target_file, target_content, keys_to_update)
+                            else:
+                                write_android_xml_file(target_file, target_content)
                         elif target_file.endswith(".strings"):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}iOS Strings format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             write_ios_strings_file(target_file, target_content)
                         elif target_file.endswith(".stringsdict"):
                             # For .stringsdict files, update the original structure with translations
                             updated_content = update_translatable_strings(target_content_raw, target_content)
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}iOS StringsDict format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             write_ios_stringsdict_file(target_file, updated_content)
                         elif target_file.endswith(".po"):
-                            write_po_file(target_file, target_content)
+                            if use_in_place:
+                                # PO files already support in-place updates via write_po_file
+                                write_po_file(target_file, target_content)
+                            else:
+                                write_po_file(target_file, target_content)
                         elif target_file.endswith(".html"):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}HTML format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             write_html_file(target_file, source_file, target_content)
+                        elif target_file.endswith((".xlf", ".xliff")):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
+                            write_xliff_file(target_file, target_content, source_language, target_lang)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                 except Exception as e:
@@ -435,25 +487,48 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             )
                             
                             # Save updated content
+                            use_in_place = _should_use_in_place(target_file, regenerate_from_scratch)
+                            keys_to_update = set(outdated_keys)
+                            
                             if target_file.endswith(".json"):
+                                if use_in_place:
+                                    click.echo(f"  {Fore.YELLOW}JSON format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                                 with open(target_file, "w", encoding="utf-8") as f:
                                     json.dump(target_content, f, ensure_ascii=False, indent=2)
                             elif target_file.endswith((".yaml", ".yml")):
+                                if use_in_place:
+                                    click.echo(f"  {Fore.YELLOW}YAML format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                                 with open(target_file, "w", encoding="utf-8") as f:
                                     yaml.dump(target_content, f, default_flow_style=False, allow_unicode=True)
                             elif target_file.endswith(".ts"):
+                                if use_in_place:
+                                    click.echo(f"  {Fore.YELLOW}TypeScript format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                                 write_ts_translation_file(target_file, target_content)
                             elif target_file.endswith(".xml"):
-                                write_android_xml_file(target_file, target_content)
+                                if use_in_place:
+                                    write_android_xml_file_in_place(target_file, target_content, keys_to_update)
+                                else:
+                                    write_android_xml_file(target_file, target_content)
                             elif target_file.endswith(".strings"):
+                                if use_in_place:
+                                    click.echo(f"  {Fore.YELLOW}iOS Strings format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                                 write_ios_strings_file(target_file, target_content)
                             elif target_file.endswith(".stringsdict"):
                                 updated_content = update_translatable_strings(target_content_raw, target_content)
+                                if use_in_place:
+                                    click.echo(f"  {Fore.YELLOW}iOS StringsDict format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                                 write_ios_stringsdict_file(target_file, updated_content)
                             elif target_file.endswith(".po"):
+                                # PO files already support in-place updates via write_po_file
                                 write_po_file(target_file, target_content)
                             elif target_file.endswith(".html"):
+                                if use_in_place:
+                                    click.echo(f"  {Fore.YELLOW}HTML format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                                 write_html_file(target_file, source_file, target_content)
+                            elif target_file.endswith((".xlf", ".xliff")):
+                                if use_in_place:
+                                    click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
+                                write_xliff_file(target_file, target_content, source_language, target_lang)
                             
                             click.echo(f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -668,25 +743,48 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         )
                         
                         # Save updated content
+                        use_in_place = _should_use_in_place(target_file, regenerate_from_scratch)
+                        keys_to_update = set(missing_keys)
+                        
                         if source_file.endswith(".json"):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}JSON format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             with open(target_file, "w", encoding="utf-8") as f:
                                 json.dump(translated_content, f, ensure_ascii=False, indent=2)
                         elif source_file.endswith((".yaml", ".yml")):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}YAML format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             with open(target_file, "w", encoding="utf-8") as f:
                                 yaml.dump(translated_content, f, default_flow_style=False, allow_unicode=True)
                         elif source_file.endswith(".ts"):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}TypeScript format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             write_ts_translation_file(target_file, translated_content)
                         elif source_file.endswith(".xml"):
-                            write_android_xml_file(target_file, translated_content)
+                            if use_in_place:
+                                write_android_xml_file_in_place(target_file, translated_content, keys_to_update)
+                            else:
+                                write_android_xml_file(target_file, translated_content)
                         elif source_file.endswith(".strings"):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}iOS Strings format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             write_ios_strings_file(target_file, translated_content)
                         elif source_file.endswith(".stringsdict"):
                             updated_content = update_translatable_strings(target_content_raw, translated_content)
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}iOS StringsDict format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             write_ios_stringsdict_file(target_file, updated_content)
                         elif source_file.endswith(".po"):
+                            # PO files already support in-place updates via write_po_file
                             write_po_file(target_file, translated_content)
                         elif source_file.endswith(".html"):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}HTML format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             write_html_file(target_file, source_file, translated_content)
+                        elif source_file.endswith((".xlf", ".xliff")):
+                            if use_in_place:
+                                click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
+                            write_xliff_file(target_file, translated_content, source_language, target_lang)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -714,6 +812,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         translated_content = translator.translate_file(source_file, target_lang, ui_safe, glossary_id)
                         
                         # Save translated content
+                        # For full file translation, we always regenerate from scratch
+                        # (since we're translating the entire file, not just updating keys)
                         if source_file.endswith(".json"):
                             with open(target_file, "w", encoding="utf-8") as f:
                                 json.dump(translated_content, f, ensure_ascii=False, indent=2)
@@ -730,7 +830,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             write_po_file(target_file, translated_content)
                         elif source_file.endswith(".html"):
                             write_html_file(target_file, source_file, translated_content)
-                    
+                        elif source_file.endswith((".xlf", ".xliff")):
+                            write_xliff_file(target_file, translated_content, source_language, target_lang)
+                        
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
         
         click.echo(f"\n{Fore.GREEN}Translation completed.\x1b[0m")
@@ -740,6 +842,22 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         import traceback
         click.echo(f"{Fore.RED}Error: {str(e)}\x1b[0m")
         traceback.print_exc()
+
+
+def _should_use_in_place(target_file: str, regenerate_from_scratch: bool) -> bool:
+    """
+    Determine if we should use in-place updates or regenerate from scratch.
+    
+    Args:
+        target_file: Path to the target file
+        regenerate_from_scratch: Flag indicating to regenerate from scratch
+        
+    Returns:
+        True if in-place updates should be used, False otherwise
+    """
+    if regenerate_from_scratch:
+        return False
+    return os.path.exists(target_file)
 
 
 def get_nested_value(data: Dict[str, Any], key_parts: List[str]) -> Any:

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Authentication strings -->
+    <string name="Auth.sign_in_with">Accedi con %1$s</string>
+    <!-- Note: Auth.eula and Auth.privacy_policy are missing and need translation -->
+</resources>
+

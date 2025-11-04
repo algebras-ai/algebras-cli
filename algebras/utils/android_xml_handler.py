@@ -3,7 +3,7 @@ Android XML localization file handler
 """
 
 import xml.etree.ElementTree as ET
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Set
 import html
 import re
 
@@ -183,4 +183,224 @@ def _escape_xml_text(text: str) -> str:
     text = text.replace('\n', '\\n')
     text = text.replace('\t', '\\t')
     
-    return text 
+    return text
+
+
+def write_android_xml_file_in_place(file_path: str, content: Dict[str, Any], keys_to_update: Optional[Set[str]] = None) -> None:
+    """
+    Update an existing Android XML file in-place, preserving structure, comments, formatting, and order.
+    
+    Args:
+        file_path: Path to the Android XML file
+        content: Dictionary containing translations to update
+        keys_to_update: Optional set of keys to update. If None, all keys in content will be updated.
+    """
+    import os
+    
+    if not os.path.exists(file_path):
+        # If file doesn't exist, fall back to regular write
+        write_android_xml_file(file_path, content)
+        return
+    
+    # Read the existing file content as text to preserve comments and formatting
+    with open(file_path, 'r', encoding='utf-8') as f:
+        original_content = f.read()
+    
+    # Extract original namespace declaration from <resources> tag to preserve it
+    # Match: <resources xmlns:tools="..."> or <resources xmlns:ns0="..."> etc.
+    namespace_match = re.search(r'<resources\s+([^>]*)>', original_content)
+    original_resources_tag = None
+    namespace_prefix_map = {}  # Map from ElementTree's prefix (ns0, ns1, etc.) to original prefix (tools, etc.)
+    
+    if namespace_match:
+        original_resources_tag = namespace_match.group(1)
+        # Extract namespace prefix from original declaration (e.g., xmlns:tools="http://...")
+        # Find all namespace declarations in the original tag
+        ns_decl_pattern = r'xmlns:([a-zA-Z_][a-zA-Z0-9_]*)=["\']([^"\']+)["\']'
+        for ns_match in re.finditer(ns_decl_pattern, original_resources_tag):
+            original_prefix = ns_match.group(1)  # e.g., "tools"
+            namespace_uri = ns_match.group(2)     # e.g., "http://schemas.android.com/tools"
+            # ElementTree will rename this to ns0, ns1, etc. based on order
+            # We'll need to map it back after writing
+            namespace_prefix_map[namespace_uri] = original_prefix
+    
+    # Find all namespace prefixes used in attributes (e.g., tools:ignore in <plurals tools:ignore="...">)
+    # We need to map these to the original prefix after ElementTree writes
+    used_namespace_prefixes = set()
+    # Pattern: matches any attribute with namespace prefix (e.g., tools:ignore="...")
+    attr_ns_pattern = r'\b([a-zA-Z_][a-zA-Z0-9_]*):([a-zA-Z_][a-zA-Z0-9_]*)='
+    for match in re.finditer(attr_ns_pattern, original_content):
+        prefix = match.group(1)  # e.g., "tools"
+        used_namespace_prefixes.add(prefix)
+    
+    # Track which keys originally had &#160; entities (for preservation)
+    keys_with_entities = set()
+    # Find all string elements with &#160; entities
+    for match in re.finditer(r'<string\s+name="([^"]+)"[^>]*>([^<]*)&#160;([^<]*)</string>', original_content):
+        key_name = match.group(1)
+        keys_with_entities.add(key_name)
+    
+    # Parse XML to get structure
+    try:
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+    except ET.ParseError as e:
+        # If parsing fails, fall back to regular write
+        write_android_xml_file(file_path, content)
+        return
+    
+    if root.tag != 'resources':
+        # If not a resources file, fall back to regular write
+        write_android_xml_file(file_path, content)
+        return
+    
+    # Track which keys we've updated
+    updated_keys = set()
+    
+    # Update existing string elements
+    for string_elem in root.findall('string'):
+        name = string_elem.get('name')
+        if name is None:
+            continue
+        
+        # Check if we should update this key
+        if keys_to_update is not None and name not in keys_to_update:
+            continue
+        
+        if name in content:
+            # Update the text content
+            new_value = str(content[name])
+            string_elem.text = _escape_xml_text(new_value)
+            updated_keys.add(name)
+    
+    # Update existing plurals elements
+    for plurals_elem in root.findall('plurals'):
+        name = plurals_elem.get('name')
+        if name is None:
+            continue
+        
+        plural_key = f"{name}.__plurals__"
+        
+        # Check if we should update this key
+        if keys_to_update is not None and plural_key not in keys_to_update:
+            continue
+        
+        if plural_key in content and isinstance(content[plural_key], dict):
+            # Update plural items
+            plural_dict = content[plural_key]
+            for item_elem in plurals_elem.findall('item'):
+                quantity = item_elem.get('quantity')
+                if quantity and quantity in plural_dict:
+                    item_elem.text = _escape_xml_text(str(plural_dict[quantity]))
+            updated_keys.add(plural_key)
+    
+    # Add new keys that don't exist in the file
+    new_keys = set()
+    if keys_to_update is None:
+        # Add all keys from content that weren't updated
+        new_keys = set(content.keys()) - updated_keys
+    else:
+        # Add only keys from keys_to_update that weren't updated
+        new_keys = keys_to_update - updated_keys
+    
+    # Add new string elements at the end
+    for key in sorted(new_keys):
+        if key.endswith('.__plurals__'):
+            # Handle new plurals
+            base_name = key[:-12]
+            if key in content and isinstance(content[key], dict):
+                plurals_elem = ET.SubElement(root, 'plurals')
+                plurals_elem.set('name', base_name)
+                
+                quantity_order = ['zero', 'one', 'two', 'few', 'many', 'other']
+                sorted_quantities = sorted(content[key].keys(), key=lambda x: quantity_order.index(x) if x in quantity_order else len(quantity_order))
+                
+                for quantity in sorted_quantities:
+                    if quantity in content[key]:
+                        item_elem = ET.SubElement(plurals_elem, 'item')
+                        item_elem.set('quantity', quantity)
+                        item_elem.text = _escape_xml_text(str(content[key][quantity]))
+        else:
+            # Handle new strings
+            if key in content:
+                string_elem = ET.SubElement(root, 'string')
+                string_elem.set('name', key)
+                string_elem.text = _escape_xml_text(str(content[key]))
+    
+    # Write the updated tree back
+    tree = ET.ElementTree(root)
+    ET.indent(tree, space="    ")  # Pretty print with 4 spaces
+    
+    # Write with XML declaration and UTF-8 encoding
+    with open(file_path, 'wb') as f:
+        f.write('<?xml version="1.0" encoding="utf-8"?>\n'.encode('utf-8'))
+        tree.write(f, encoding='utf-8', xml_declaration=False)
+    
+    # Now we need to preserve HTML entities like &#160; by post-processing
+    # Read the file back and replace escaped non-breaking spaces with entities
+    with open(file_path, 'r', encoding='utf-8') as f:
+        file_content = f.read()
+    
+    # Replace non-breaking space character (U+00A0) with &#160; entity
+    # This preserves the entity format if it was in the original
+    # We need to be careful - only replace if the value actually contains a non-breaking space
+    # But since we're writing, we should preserve entities properly
+    # Actually, the issue is that html.escape converts entities, so we need to handle this differently
+    
+    # For now, let's ensure that if the original content had &#160;, we check if we should preserve it
+    # But since we're updating in-place, we should preserve the entity format when possible
+    
+    # Write back with proper entity handling and namespace prefix preservation
+    # Replace non-breaking space character (U+00A0) with &#160; entity
+    # This preserves the entity format for keys that originally had it
+    # Also restore original namespace prefix (xmlns:tools instead of xmlns:ns0)
+    # And restore namespace prefixes in attributes (tools:ignore instead of ns0:ignore)
+    
+    # First, build the mapping from ElementTree's prefixes (ns0, ns1) to original prefixes
+    et_to_original = {}  # Map from ElementTree prefix (ns0) to original prefix (tools)
+    if namespace_prefix_map:
+        # Find what ElementTree wrote in the file to see the mapping
+        et_ns_pattern = r'xmlns:(ns\d+)=["\']([^"\']+)["\']'
+        for et_match in re.finditer(et_ns_pattern, file_content):
+            et_prefix = et_match.group(1)  # e.g., "ns0"
+            ns_uri = et_match.group(2)       # e.g., "http://schemas.android.com/tools"
+            if ns_uri in namespace_prefix_map:
+                original_prefix = namespace_prefix_map[ns_uri]
+                et_to_original[et_prefix] = original_prefix
+    
+    with open(file_path, 'w', encoding='utf-8') as f:
+        lines = file_content.split('\n')
+        for i, line in enumerate(lines):
+            # Restore original namespace prefix in <resources> tag
+            if '<resources' in line and original_resources_tag:
+                # Replace the namespace declaration with the original one
+                # Handle both cases: <resources> (no attributes) and <resources xmlns:ns0="..."> (renamed)
+                if re.search(r'<resources\s+[^>]*>', line):
+                    # Has attributes - replace them
+                    line = re.sub(r'<resources\s+[^>]*>', f'<resources {original_resources_tag}>', line)
+                else:
+                    # No attributes - add the original namespace
+                    line = re.sub(r'<resources>', f'<resources {original_resources_tag}>', line)
+                lines[i] = line
+            
+            # Restore namespace prefixes in attributes (e.g., ns0:ignore -> tools:ignore)
+            # Replace all occurrences of ns0:, ns1:, etc. with original prefixes
+            if et_to_original:
+                for et_prefix, original_prefix in et_to_original.items():
+                    # Replace in attributes (e.g., ns0:ignore -> tools:ignore)
+                    pattern = rf'\b{re.escape(et_prefix)}:([a-zA-Z_][a-zA-Z0-9_]*)'
+                    line = re.sub(pattern, rf'{original_prefix}:\1', line)
+                lines[i] = line
+            
+            # Check if this line contains a string element we updated
+            if '<string name=' in line and '>' in line:
+                # Extract key name to check if it should preserve entities
+                key_match = re.search(r'<string\s+name="([^"]+)"', line)
+                if key_match:
+                    key_name = key_match.group(1)
+                    # Replace non-breaking space with entity if:
+                    # 1. The key originally had &#160; entities, OR
+                    # 2. The line currently contains a non-breaking space
+                    if key_name in keys_with_entities or '\u00A0' in line:
+                        lines[i] = line.replace('\u00A0', '&#160;')
+        f.write('\n'.join(lines)) 

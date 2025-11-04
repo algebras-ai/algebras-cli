@@ -170,6 +170,9 @@ algebras translate --glossary-id your-glossary-id
 # Use custom prompt from file
 algebras translate --prompt-file custom-prompt.txt
 
+# Regenerate files from scratch instead of updating in-place
+algebras translate --regenerate-from-scratch
+
 # Performance tuning
 algebras translate --batch-size 10 --max-parallel-batches 3
 ```
@@ -375,6 +378,35 @@ algebras configure --normalize-strings true
 algebras configure --normalize-strings false
 ```
 
+### In-Place Updates vs. Regenerate from Scratch
+
+By default, when a target file exists, Algebras CLI updates keys in-place, preserving:
+- File structure and formatting
+- Comments and metadata
+- Element order
+- HTML entities (like `&#160;`)
+
+When a target file doesn't exist, it's created from scratch.
+
+Use `--regenerate-from-scratch` to force regeneration even when target files exist:
+
+```bash
+# Update in-place (default behavior when target file exists)
+algebras translate --only-missing
+
+# Force regenerate from scratch
+algebras translate --only-missing --regenerate-from-scratch
+```
+
+**Supported formats for in-place updates:**
+- ✅ Android XML (`.xml`)
+- ✅ Gettext PO (`.po`)
+- ⚠️ Other formats: Show warning and fall back to regeneration
+
+**When to use each mode:**
+- **In-place updates** (default): Preserves your file structure, comments, and formatting. Best for maintaining existing translation files.
+- **Regenerate from scratch**: Useful when you want to normalize file structure or when you've made manual changes that need to be reset.
+
 ## Configuration
 
 [![YAML](https://img.shields.io/badge/YAML-CB171E?style=flat&logo=yaml&logoColor=white)](https://yaml.org/) [![JSON](https://img.shields.io/badge/JSON-000000?style=flat&logo=json&logoColor=white)](https://www.json.org/) [![Environment](https://img.shields.io/badge/Environment-4CAF50?style=flat&logo=environment&logoColor=white)](https://en.wikipedia.org/wiki/Environment_variable)
@@ -531,6 +563,7 @@ We provide comprehensive examples for different frameworks and file formats:
 - **[Next.js/React](examples/nextjs-app/)** - JSON-based localization with i18next
 - **[Flutter](examples/flutter-app/)** - ARB files for Flutter internationalization
 - **[Angular](examples/angular-app/)** - XLIFF files for Angular i18n
+- **[XLIFF](examples/xliff-app/)** - Minimal XLIFF example with `.xlf`
 - **[Java](examples/java-app/)** - Properties files for Java ResourceBundle
 - **[Django](examples/django-app/)** - Gettext PO files for Django
 
