@@ -154,22 +154,7 @@ def get_arb_language_code(file_path: str) -> Optional[str]:
     Returns:
         Language code if found, None otherwise
     """
-    # Try to extract from filename (e.g., app_en.arb -> en, app_en_US.arb -> en_US)
-    filename = os.path.basename(file_path)
-    if '_' in filename:
-        parts = filename.split('_')
-        if len(parts) >= 3:
-            # Check if the last two parts form a valid locale (e.g., en_US)
-            last_two = '_'.join(parts[-2:]).split('.')[0]
-            if len(last_two) == 5 and '_' in last_two:  # en_US format
-                return last_two
-        elif len(parts) >= 2:
-            # Get the part before .arb
-            name_part = parts[-1].split('.')[0]
-            if len(name_part) == 2:  # en, de, etc.
-                return name_part
-    
-    # Try to extract from @locale metadata
+    # Try to extract from @locale metadata first (content has higher priority)
     try:
         content = read_arb_file(file_path)
         # Check for @locale metadata object first (higher priority)
@@ -182,5 +167,25 @@ def get_arb_language_code(file_path: str) -> Optional[str]:
             return locale_value
     except (ValueError, json.JSONDecodeError, FileNotFoundError):
         pass
+    
+    # Try to extract from filename (e.g., app_en.arb -> en, app_en_US.arb -> en_US)
+    # Only extract if the pattern looks like a valid locale code
+    filename = os.path.basename(file_path)
+    if '_' in filename:
+        parts = filename.split('_')
+        if len(parts) >= 3:
+            # Check if the last two parts form a valid locale (e.g., en_US)
+            last_two = '_'.join(parts[-2:]).split('.')[0]
+            # Validate it's a locale format: exactly 5 chars with underscore, both parts are letters
+            if len(last_two) == 5 and '_' in last_two:
+                lang, region = last_two.split('_')
+                if lang.isalpha() and len(lang) == 2 and region.isalpha() and len(region) == 2:
+                    return last_two
+        elif len(parts) >= 2:
+            # Get the part before .arb
+            name_part = parts[-1].split('.')[0]
+            # Validate it's a 2-letter language code
+            if len(name_part) == 2 and name_part.isalpha():
+                return name_part
     
     return None
