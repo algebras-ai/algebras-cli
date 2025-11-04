@@ -36,7 +36,7 @@ source_files:
     assert src_file in files_by_language.get("en", [])
 
 
-def test_scanner_glob_patterns_pick_up_xlf(tmp_path):
+def test_scanner_glob_patterns_pick_up_xlf(tmp_path, monkeypatch):
     root = tmp_path
     translations_dir = os.path.join(root, "translations")
     src_file = os.path.join(translations_dir, "messages.en.xlf")
@@ -53,11 +53,17 @@ path_rules:
 """
         )
 
+    # Change to the test directory so glob searches from there
+    monkeypatch.chdir(root)
+    
     config = Config(cfg_path)
     scanner = FileScanner(config=config)
     found = scanner.find_localization_files()
 
-    assert os.path.normpath(src_file) in [os.path.normpath(p) for p in found]
+    # After chdir, paths are relative to root, so normalize both
+    expected_rel = os.path.relpath(src_file, root)
+    found_normalized = [os.path.normpath(p) for p in found]
+    assert os.path.normpath(expected_rel) in found_normalized
 
 
 
