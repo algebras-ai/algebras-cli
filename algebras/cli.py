@@ -12,6 +12,7 @@ from algebras.commands import init_command, add_command
 from algebras.commands import translate_command, update_command
 from algebras.commands import review_command, status_command
 from algebras.commands import configure_command, glossary_push_command
+from algebras.commands import parse_command
 
 # Initialize colorama
 init()
@@ -111,6 +112,19 @@ def status(ctx, language):
     """Check the status of your translations."""
     config_file = ctx.obj.get('config_file') if ctx.obj else None
     status_command.execute(language, config_file)
+
+
+@cli.command("parse")
+@click.option("--input", "-i", multiple=True, help="Glob patterns for source files to analyze (e.g., 'src/**/*.{js,jsx,ts,tsx}'). Can be specified multiple times.")
+@click.option("--ignore", multiple=True, help="Glob patterns for files/directories to ignore (e.g., 'node_modules/**'). Can be specified multiple times.")
+@click.option("--verbose", is_flag=True, help="Show detailed output.")
+@click.pass_context
+def parse(ctx, input, ignore, verbose):
+    """Parse codebase for hardcoded strings in JS/TS projects."""
+    config_file = ctx.obj.get('config_file') if ctx.obj else None
+    input_patterns = list(input) if input else None
+    ignore_patterns = list(ignore) if ignore else None
+    parse_command.execute(input_patterns, ignore_patterns, verbose, config_file)
 
 
 @cli.command("configure")

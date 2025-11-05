@@ -1,0 +1,12 @@
+{
+  "name": "algebras-js-parser",
+  "version": "1.0.0",
+  "description": "Node.js parser for detecting hardcoded strings in JS/TS files",
+  "type": "module",
+  "main": "js_parser.js",
+  "dependencies": {
+    "@swc/core": "^1.7.0",
+    "glob": "^10.3.0"
+  }
+}
+
