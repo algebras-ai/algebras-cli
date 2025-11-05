@@ -118,13 +118,19 @@ def status(ctx, language):
 @click.option("--input", "-i", multiple=True, help="Glob patterns for source files to analyze (e.g., 'src/**/*.{js,jsx,ts,tsx}'). Can be specified multiple times.")
 @click.option("--ignore", multiple=True, help="Glob patterns for files/directories to ignore (e.g., 'node_modules/**'). Can be specified multiple times.")
 @click.option("--verbose", is_flag=True, help="Show detailed output.")
+@click.option("--extract", is_flag=True, help="Extract hardcoded strings to translation file and replace in source code.")
+@click.option("--output", "-o", help="Path to translation file (e.g., 'messages/en.json' or 'locales/en.ts').")
+@click.option("--key-prefix", help="Prefix for generated translation keys (e.g., 'app' -> 'app_page_42').")
+@click.option("--framework", help="i18n framework to use (next-intl, i18next, react-i18next, react-intl). Auto-detected if not specified.")
+@click.option("--dry-run", is_flag=True, help="Preview changes without modifying files.")
+@click.option("--key-strategy", type=click.Choice(['file-based', 'content-based', 'semantic']), default='file-based', help="Key generation strategy (default: file-based).")
 @click.pass_context
-def parse(ctx, input, ignore, verbose):
+def parse(ctx, input, ignore, verbose, extract, output, key_prefix, framework, dry_run, key_strategy):
     """Parse codebase for hardcoded strings in JS/TS projects."""
     config_file = ctx.obj.get('config_file') if ctx.obj else None
     input_patterns = list(input) if input else None
     ignore_patterns = list(ignore) if ignore else None
-    parse_command.execute(input_patterns, ignore_patterns, verbose, config_file)
+    parse_command.execute(input_patterns, ignore_patterns, verbose, config_file, extract, output, key_prefix, framework, dry_run, key_strategy)
 
 
 @cli.command("configure")

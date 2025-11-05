@@ -10,10 +10,15 @@ from typing import Optional, List
 
 from algebras.config import Config
 from algebras.utils.js_ts_parser import parse_files, check_nodejs_available, check_dependencies_installed
+from algebras.utils.i18n_detector import detect_framework
+from algebras.utils.string_extractor import extract_strings_to_file
+from algebras.utils.source_replacer import replace_strings_in_file
 
 
 def execute(input_patterns: Optional[List[str]] = None, ignore_patterns: Optional[List[str]] = None,
-            verbose: bool = False, config_file: Optional[str] = None) -> None:
+            verbose: bool = False, config_file: Optional[str] = None, extract: bool = False,
+            output: Optional[str] = None, key_prefix: Optional[str] = None, framework: Optional[str] = None,
+            dry_run: bool = False, key_strategy: str = 'file-based') -> None:
     """
     Parse codebase for hardcoded strings in JS/TS projects.
     
@@ -134,6 +139,100 @@ def execute(input_patterns: Optional[List[str]] = None, ignore_patterns: Optiona
                 click.echo(f"  {i}. \"{text}\"")
         
         click.echo("")  # Empty line for spacing
+        
+        # Extract and replace if requested
+        if extract:
+            if verbose:
+                click.echo(f"\n{Fore.BLUE}Extracting strings to translation file...{Fore.RESET}")
+            
+            # Get source language from config
+            source_language = config.get_source_language() if config.exists() else 'en'
+            
+            # Get configuration
+            extract_output = output or (config.get_setting('parse.extract.output') if config.exists() else None)
+            extract_key_prefix = key_prefix or (config.get_setting('parse.extract.keyPrefix', '') if config.exists() else '')
+            extract_key_strategy = key_strategy or (config.get_setting('parse.extract.keyStrategy', 'file-based') if config.exists() else 'file-based')
+            
+            # Detect or use specified framework
+            from algebras.utils.i18n_detector import get_framework_config
+            
+            if framework:
+                detected_framework = framework
+                framework_config = get_framework_config(framework)
+            else:
+                detected_framework, framework_config = detect_framework(os.getcwd())
+                if not detected_framework:
+                    # Try config
+                    detected_framework = config.get_setting('parse.extract.i18nFramework') if config.exists() else None
+                    if detected_framework:
+                        framework_config = get_framework_config(detected_framework)
+                    else:
+                        click.echo(f"{Fore.YELLOW}Warning: Could not auto-detect i18n framework. Using generic 't' function.{Fore.RESET}")
+                        detected_framework = 'generic'
+                        framework_config = get_framework_config('generic')
+            
+            if verbose:
+                click.echo(f"{Fore.BLUE}Using framework: {detected_framework}{Fore.RESET}")
+            
+            # Extract strings to translation file
+            try:
+                key_mapping, translation_file = extract_strings_to_file(
+                    files,
+                    extract_output,
+                    source_language,
+                    extract_key_prefix,
+                    extract_key_strategy,
+                    os.getcwd(),
+                    dry_run
+                )
+                
+                if dry_run:
+                    click.echo(f"{Fore.YELLOW}DRY RUN: Would create/update translation file: {translation_file}{Fore.RESET}")
+                    click.echo(f"{Fore.YELLOW}DRY RUN: Would generate {len(key_mapping)} translation keys{Fore.RESET}")
+                else:
+                    click.echo(f"{Fore.GREEN}✓ Extracted {len(key_mapping)} strings to {translation_file}{Fore.RESET}")
+                
+                # Replace strings in source files
+                if not dry_run:
+                    if verbose:
+                        click.echo(f"{Fore.BLUE}Replacing strings in source files...{Fore.RESET}")
+                    
+                    # Group replacements by file
+                    replacements_by_file = {}
+                    for (file_path, line_num, text), key in key_mapping.items():
+                        if file_path not in replacements_by_file:
+                            replacements_by_file[file_path] = []
+                        replacements_by_file[file_path].append((line_num, text, key))
+                    
+                    # Replace in each file
+                    files_modified = 0
+                    for file_path, replacements in replacements_by_file.items():
+                        try:
+                            modified_content, has_changes = replace_strings_in_file(
+                                file_path,
+                                replacements,
+                                detected_framework,
+                                framework_config,
+                                dry_run
+                            )
+                            if has_changes:
+                                files_modified += 1
+                                if verbose:
+                                    click.echo(f"  {Fore.GREEN}✓ Modified {file_path}{Fore.RESET}")
+                        except Exception as e:
+                            click.echo(f"  {Fore.RED}Error replacing strings in {file_path}: {str(e)}{Fore.RESET}")
+                    
+                    if files_modified > 0:
+                        click.echo(f"\n{Fore.GREEN}✓ Modified {files_modified} source files{Fore.RESET}")
+                    else:
+                        click.echo(f"\n{Fore.YELLOW}No files were modified{Fore.RESET}")
+                
+            except Exception as e:
+                click.echo(f"{Fore.RED}Error during extraction: {str(e)}{Fore.RESET}")
+                if verbose:
+                    import traceback
+                    traceback.print_exc()
+        
         sys.exit(1)
     else:
         click.echo(f"{Fore.GREEN}{message}{Fore.RESET}")
