@@ -8,6 +8,36 @@ import { extname } from 'node:path';
  */
 const isUrlOrPath = (text) => /^(https|http|\/\/|^\/)/.test(text);
 
+// Check if string is a Next.js directive
+const isNextJsDirective = (text) => {
+  const trimmed = text.trim();
+  return trimmed === 'use client' || trimmed === 'use server' || trimmed === 'use strict';
+};
+
+// Check if string is a CSS class name (typically kebab-case or utility classes)
+const isCssClassName = (text) => {
+  // Matches common CSS utility patterns like "opacity-100", "text-center", etc.
+  return /^[a-z][a-z0-9_-]*$/.test(text) && (
+    text.includes('-') || // Contains hyphens (kebab-case)
+    /^(opacity|text|bg|border|p|m|w|h|flex|grid|absolute|relative|transition|duration|object|cover|inset|full|absolute|transition|duration)/.test(text) // Common utility prefixes
+  );
+};
+
+// Check if string is a CSS variable (starts with --)
+const isCssVariable = (text) => {
+  return text.trim().startsWith('--');
+};
+
+// Check if string is a font subset or technical config value
+const isTechnicalConfig = (text) => {
+  const trimmed = text.trim().toLowerCase();
+  // Font subsets, language codes that are technical
+  return trimmed === 'latin' || trimmed === 'cyrillic' || trimmed === 'greek' || 
+         trimmed === 'arabic' || trimmed === 'hebrew' || trimmed === 'chinese' ||
+         trimmed === 'japanese' || trimmed === 'korean' || trimmed === 'thai' ||
+         trimmed === 'vietnamese' || trimmed === 'devanagari';
+};
+
 /**
  * Analyzes an AST to find potentially hardcoded strings that should be translated.
  */
@@ -75,8 +105,10 @@ function findHardcodedStrings(ast, code, config) {
 
       if (!isIgnored) {
         const text = node.value.trim();
-        // Filter out: empty strings, single chars, URLs, numbers, interpolations, and ellipsis
-        if (text && text.length > 1 && text !== '...' && !isUrlOrPath(text) && isNaN(Number(text)) && !text.startsWith('{{')) {
+        // Filter out: empty strings, single chars, URLs, numbers, interpolations, ellipsis, Next.js directives, CSS classes, CSS variables, technical config
+        if (text && text.length > 1 && text !== '...' && !isUrlOrPath(text) && isNaN(Number(text)) && 
+            !text.startsWith('{{') && !isNextJsDirective(text) && !isCssClassName(text) && 
+            !isCssVariable(text) && !isTechnicalConfig(text)) {
           nodesToLint.push(node);
         }
       }
@@ -85,12 +117,41 @@ function findHardcodedStrings(ast, code, config) {
     if (node.type === 'StringLiteral') {
       const parent = currentAncestors.length >= 2 ? currentAncestors[currentAncestors.length - 2] : null;
       const insideIgnored = isWithinIgnoredElement(currentAncestors);
+      
+      // Check if this string is a Next.js directive (e.g., "use client" at top of file)
+      const text = node.value.trim();
+      if (isNextJsDirective(text)) {
+        return; // Skip Next.js directives
+      }
+      
+      // Check if this is in a configuration object (like font config)
+      const isInConfigObject = currentAncestors.some(ancestor => {
+        if (ancestor?.type === 'ObjectExpression' || ancestor?.type === 'ObjectProperty') {
+          // Check if parent property is a config key like 'variable', 'subsets', etc.
+          const parentProp = parent?.type === 'ObjectProperty' ? parent.key?.value || parent.key?.name : null;
+          if (parentProp && ['variable', 'subsets', 'display', 'weight', 'style', 'fallback'].includes(parentProp)) {
+            return true;
+          }
+        }
+        return false;
+      });
+      
+      if (isInConfigObject) {
+        return; // Skip configuration values
+      }
 
       // Check if it's a JSX attribute
       if (parent?.type === 'JSXAttribute' && !ignoredAttributes.has(parent.name.value) && !insideIgnored) {
         const text = node.value.trim();
-        // Filter out: empty strings, URLs, numbers, and ellipsis
-        if (text && text !== '...' && !isUrlOrPath(text) && isNaN(Number(text))) {
+        // Filter out: empty strings, URLs, numbers, ellipsis, CSS classes, CSS variables
+        // className and style attributes are already in ignoredAttributes, but check anyway
+        const attrName = parent.name?.value || '';
+        if (attrName === 'className' || attrName === 'class') {
+          // Skip className values entirely - they're CSS classes
+          return;
+        }
+        if (text && text !== '...' && !isUrlOrPath(text) && isNaN(Number(text)) && 
+            !isCssClassName(text) && !isCssVariable(text) && !isTechnicalConfig(text)) {
           nodesToLint.push(node);
         }
       }
@@ -98,15 +159,24 @@ function findHardcodedStrings(ast, code, config) {
       // This will catch hardcoded strings in regular JS/TS code
       else if (!insideIgnored && parent?.type !== 'JSXAttribute') {
         const text = node.value.trim();
-        // Filter out: empty strings, single chars, URLs, numbers, interpolation, ellipsis
+        // Filter out: empty strings, single chars, URLs, numbers, interpolation, ellipsis, Next.js directives, CSS classes, CSS variables, technical config
         // Also filter out common patterns like imports, requires, etc.
-        if (text && text.length > 1 && text !== '...' && !isUrlOrPath(text) && isNaN(Number(text)) && !text.startsWith('{{')) {
+        if (text && text.length > 1 && text !== '...' && !isUrlOrPath(text) && isNaN(Number(text)) && 
+            !text.startsWith('{{') && !isNextJsDirective(text) && !isCssClassName(text) && 
+            !isCssVariable(text) && !isTechnicalConfig(text)) {
           // Check if parent is import/require statement (these are usually not user-facing strings)
           const isImportLike = parent?.type === 'ImportDeclaration' || 
                                parent?.type === 'CallExpression' && parent.callee?.type === 'Identifier' && 
                                (parent.callee.name === 'require' || parent.callee.name === 'import');
           
-          if (!isImportLike) {
+          // Check if it's in a template literal used for className (common pattern)
+          const isInClassNameTemplate = parent?.type === 'TemplateLiteral' && 
+                                        currentAncestors.some(ancestor => 
+                                          ancestor?.type === 'JSXAttribute' && 
+                                          (ancestor.name?.value === 'className' || ancestor.name?.value === 'class')
+                                        );
+          
+          if (!isImportLike && !isInClassNameTemplate) {
             nodesToLint.push(node);
           }
         }
