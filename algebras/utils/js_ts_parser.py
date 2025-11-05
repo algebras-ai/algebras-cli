@@ -66,9 +66,15 @@ def parse_files(input_patterns: List[str], ignore_patterns: Optional[List[str]] 
     try:
         # Call Node.js script from project root so glob patterns work correctly
         # Use absolute path to the script so it can be found from any directory
+        # Set VERBOSE environment variable if verbose mode is enabled
+        env = os.environ.copy()
+        if verbose:
+            env['VERBOSE'] = 'true'
+        
         result = subprocess.run(
             ['node', parser_script, input_patterns_json, ignore_patterns_json, config_json],
             cwd=project_root,
+            env=env,
             capture_output=True,
             text=True,
             timeout=300  # 5 minute timeout
@@ -88,21 +94,24 @@ def parse_files(input_patterns: List[str], ignore_patterns: Optional[List[str]] 
                     except:
                         pass  # Not JSON, ignore
         
-        if result.returncode != 0:
-            # Try to parse error output
-            try:
-                error_data = json.loads(result.stderr.strip() or result.stdout.strip())
-                error_msg = error_data.get('error', result.stderr or result.stdout)
-            except:
-                error_msg = result.stderr or result.stdout or "Unknown error"
-            return False, f"Parser error: {error_msg}", {}
-        
-        # Parse JSON output
+        # Parse JSON output from stdout (result should be only on stdout)
         output = result.stdout.strip()
+        
+        # Debug: Show what we got
+        if verbose:
+            import sys
+            print(f"DEBUG: stdout length: {len(output)}, returncode: {result.returncode}", file=sys.stderr)
+            if output:
+                print(f"DEBUG: stdout first 200 chars: {output[:200]}", file=sys.stderr)
+        
         if not output:
+            # If stdout is empty but stderr has debug messages, try to parse stderr
+            if result.stderr:
+                return False, f"Parser returned no output on stdout. stderr: {result.stderr[:500]}", {}
             return False, "Parser returned no output", {}
         
-        # Handle multiple JSON objects (if errors were printed before the result)
+        # Parse the result (should be a single JSON object on stdout)
+        # Try to find the last JSON object in case there are multiple lines
         lines = output.split('\n')
         result_line = None
         for line in reversed(lines):
@@ -115,14 +124,26 @@ def parse_files(input_patterns: List[str], ignore_patterns: Optional[List[str]] 
                     continue
         
         if result_line is None:
-            return False, f"Failed to parse parser output: {output}", {}
+            return False, f"Failed to parse parser output as JSON. Output: {output[:500]}", {}
         
+        # Check if there's an error in the result
         if 'error' in result_line:
             return False, f"Parser error: {result_line['error']}", {}
         
         success = result_line.get('success', False)
         message = result_line.get('message', '')
         files = result_line.get('files', {})
+        
+        # IMPORTANT: Always return files if they exist, regardless of success status
+        # success=false just means issues were found, which is what we want to report
+        
+        # Debug: Verify we're getting all files
+        if verbose:
+            import sys
+            total_issues = sum(len(issues) for issues in files.values())
+            print(f"DEBUG: Parsed {len(files)} files with {total_issues} total issues", file=sys.stderr)
+            for file_path, issues in files.items():
+                print(f"DEBUG: File {file_path}: {len(issues)} issues", file=sys.stderr)
         
         return success, message, files
         

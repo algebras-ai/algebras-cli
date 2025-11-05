@@ -86,19 +86,23 @@ def execute(input_patterns: Optional[List[str]] = None, ignore_patterns: Optiona
     
     if verbose:
         click.echo(f"{Fore.BLUE}Parser returned: success={success}, message={message}, files_count={len(files)}{Fore.RESET}")
+        # Debug: Show all files found
+        for file_path, issues in files.items():
+            click.echo(f"{Fore.BLUE}  File: {file_path}, Issues: {len(issues)}{Fore.RESET}")
     
     if not success and "error" in message.lower():
         # This is an error, not just issues found
         click.echo(f"{Fore.RED}{message}{Fore.RESET}")
         sys.exit(1)
     
-    # Display results
+    # Display results - ALWAYS show files if they exist, regardless of success status
     if files:
         total_issues = sum(len(issues) for issues in files.values())
         click.echo(f"\n{Fore.RED}{message}{Fore.RESET}")
         click.echo(f"{Fore.YELLOW}Found {total_issues} hardcoded strings in {len(files)} files{Fore.RESET}\n")
         
-        # Print detailed report
+        # Print detailed report - show EVERY string found (no deduplication, no filtering)
+        issue_count = 0
         for file_path, issues in files.items():
             # Get relative path for cleaner display
             try:
@@ -106,11 +110,28 @@ def execute(input_patterns: Optional[List[str]] = None, ignore_patterns: Optiona
             except ValueError:
                 rel_path = file_path
             
-            click.echo(f"{Fore.YELLOW}{rel_path}{Fore.RESET}")
+            click.echo(f"{Fore.YELLOW}{rel_path} ({len(issues)} issues){Fore.RESET}")
+            # Show EVERY SINGLE ISSUE - no filtering, no skipping
             for issue in issues:
+                issue_count += 1
                 text = issue.get('text', '')
                 line = issue.get('line', 0)
-                click.echo(f"  {line}: {Fore.RED}Error:{Fore.RESET} Found hardcoded string: \"{text}\"")
+                # Show EVERY string individually (including duplicates, empty strings, everything)
+                if not text:
+                    text = "(empty string)"
+                click.echo(f"  {issue_count}. Line {line}: {Fore.RED}Error:{Fore.RESET} Found hardcoded string: \"{text}\"")
+        
+        # Also print a summary list of all unique strings found (in verbose mode)
+        if verbose:
+            click.echo(f"\n{Fore.BLUE}Summary of all unique hardcoded strings found:{Fore.RESET}")
+            all_strings = []
+            for file_path, issues in files.items():
+                for issue in issues:
+                    text = issue.get('text', '')
+                    if text and text not in all_strings:
+                        all_strings.append(text)
+            for i, text in enumerate(all_strings, 1):
+                click.echo(f"  {i}. \"{text}\"")
         
         click.echo("")  # Empty line for spacing
         sys.exit(1)

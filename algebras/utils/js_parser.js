@@ -168,22 +168,26 @@ async function parseFiles(inputPatterns, ignorePatterns, config) {
   
   // Log files found for debugging
   if (sourceFiles.length === 0) {
-    console.error(JSON.stringify({ error: `No files found matching patterns: ${inputPatternsArray.join(', ')}` }));
-    return {
+    // Output error to stderr, result to stdout
+    const result = {
       success: true,
       message: `No files found matching patterns: ${inputPatternsArray.join(', ')}`,
       files: {},
       totalIssues: 0
     };
+    console.log(JSON.stringify(result));
+    return result;
   }
 
   const issuesByFile = {};
   let totalIssues = 0;
   
-  // Debug: log files found
-  console.error(JSON.stringify({ debug: `Found ${sourceFiles.length} files to process` }));
-  if (sourceFiles.length > 0) {
-    console.error(JSON.stringify({ debug: `Files: ${sourceFiles.slice(0, 5).join(', ')}${sourceFiles.length > 5 ? '...' : ''}` }));
+  // Debug: log files found (to stderr so it doesn't interfere with stdout)
+  if (process.env.VERBOSE === 'true') {
+    console.error(JSON.stringify({ debug: `Found ${sourceFiles.length} files to process` }));
+    if (sourceFiles.length > 0) {
+      console.error(JSON.stringify({ debug: `Files: ${sourceFiles.slice(0, 5).join(', ')}${sourceFiles.length > 5 ? '...' : ''}` }));
+    }
   }
 
   for (const file of sourceFiles) {
@@ -212,13 +216,19 @@ async function parseFiles(inputPatterns, ignorePatterns, config) {
               decorators: true
             });
           } catch (err2) {
-            console.error(JSON.stringify({ error: `Failed to parse ${file}: ${err2.message}` }));
-            continue;
+          // Log parse errors to stderr, but continue processing
+          if (process.env.VERBOSE === 'true') {
+            console.error(JSON.stringify({ debug: `Failed to parse ${file}: ${err2.message}` }));
           }
-        } else {
-          console.error(JSON.stringify({ error: `Failed to parse ${file}: ${err.message}` }));
           continue;
         }
+      } else {
+        // Log parse errors to stderr, but continue processing
+        if (process.env.VERBOSE === 'true') {
+          console.error(JSON.stringify({ debug: `Failed to parse ${file}: ${err.message}` }));
+        }
+        continue;
+      }
       }
 
       const hardcodedStrings = findHardcodedStrings(ast, code, config);
@@ -226,20 +236,35 @@ async function parseFiles(inputPatterns, ignorePatterns, config) {
       if (hardcodedStrings.length > 0) {
         totalIssues += hardcodedStrings.length;
         issuesByFile[file] = hardcodedStrings;
-        // Debug: log issues found
-        console.error(JSON.stringify({ debug: `Found ${hardcodedStrings.length} issues in ${file}` }));
+        // Debug: log issues found (to stderr so it doesn't interfere with stdout)
+        if (process.env.VERBOSE === 'true') {
+          console.error(JSON.stringify({ debug: `Found ${hardcodedStrings.length} issues in ${file}` }));
+        }
       }
     } catch (error) {
-      console.error(JSON.stringify({ error: `Error processing ${file}: ${error.message}` }));
+      // Log errors to stderr, but continue processing
+      if (process.env.VERBOSE === 'true') {
+        console.error(JSON.stringify({ debug: `Error processing ${file}: ${error.message}` }));
+      }
     }
   }
 
-  return {
+  const result = {
     success: totalIssues === 0,
     message: totalIssues > 0 ? `Linter found ${totalIssues} potential issues.` : 'No issues found.',
     files: issuesByFile,
     totalIssues
   };
+  
+  // Debug: Print result to verify it's correct
+  if (process.env.VERBOSE === 'true') {
+    console.error(JSON.stringify({ debug: `Result: ${totalIssues} total issues in ${Object.keys(issuesByFile).length} files` }));
+    for (const [file, issues] of Object.entries(issuesByFile)) {
+      console.error(JSON.stringify({ debug: `File ${file}: ${issues.length} issues` }));
+    }
+  }
+  
+  return result;
 }
 
 // CLI entry point
@@ -255,11 +280,18 @@ const config = args[2] ? JSON.parse(args[2]) : { extract: {} };
 
 parseFiles(inputPatterns, ignorePatterns, config)
   .then(result => {
-    console.log(JSON.stringify(result));
-    process.exit(result.success ? 0 : 1);
+    // Output result to stdout ONLY - this is the only thing that should be on stdout
+    // Make sure it's on a single line and properly formatted
+    const output = JSON.stringify(result);
+    console.log(output);
+    // Exit with code 0 if no issues found, 1 if issues found
+    // (success=false means issues were found, which is good - we want to report them)
+    process.exit(0);
   })
   .catch(error => {
-    console.error(JSON.stringify({ error: error.message }));
+    // Errors go to stdout as JSON result (not stderr, so Python can parse it)
+    const errorResult = { error: error.message, success: false, files: {}, totalIssues: 0, message: `Error: ${error.message}` };
+    console.log(JSON.stringify(errorResult));
     process.exit(1);
   });
 
