@@ -16,6 +16,10 @@ const isNextJsDirective = (text) => {
 
 // Check if string is a CSS class name (typically kebab-case or utility classes)
 const isCssClassName = (text) => {
+  // Only match ASCII characters for CSS classes (Cyrillic, Chinese, etc. are not CSS classes)
+  if (!/^[a-zA-Z0-9_-]+$/.test(text)) {
+    return false; // Contains non-ASCII characters, not a CSS class
+  }
   // Matches common CSS utility patterns like "opacity-100", "text-center", etc.
   return /^[a-z][a-z0-9_-]*$/.test(text) && (
     text.includes('-') || // Contains hyphens (kebab-case)

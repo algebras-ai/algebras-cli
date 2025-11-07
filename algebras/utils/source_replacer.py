@@ -71,46 +71,103 @@ def replace_strings_in_file(
         ]
         hook_call_exists = any(pattern in content for pattern in hook_patterns)
     
-    # Process replacements from bottom to top to preserve line numbers
+    # Group replacements by line number to handle multiple replacements per line properly
+    replacements_by_line = {}
     for line_num, original_text, translation_key in replacements_sorted:
+        if line_num not in replacements_by_line:
+            replacements_by_line[line_num] = []
+        replacements_by_line[line_num].append((original_text, translation_key))
+    
+    # Process replacements line by line (from bottom to top)
+    for line_num in sorted(replacements_by_line.keys(), reverse=True):
         if line_num > len(lines):
             continue
         
         line_index = line_num - 1  # Convert to 0-based index
         line = lines[line_index]
+        original_line = line
         
-        # Create replacement string
-        replacement = get_translation_function_call(framework, framework_config, translation_key, use_var=True)
+        # Get all replacements for this line
+        line_replacements = replacements_by_line[line_num]
         
-        # Handle different contexts
-        if original_text in line:
-            # Simple string replacement
-            # Handle JSX text: <h1>Text</h1> -> <h1>{t('key')}</h1>
-            if f">{original_text}<" in line or f">{original_text}</" in line:
-                # JSX text content
-                new_line = line.replace(original_text, f"{{{replacement}}}")
-            # Handle string literals in JSX attributes: title="Text" -> title={t('key')}
-            elif f'="{original_text}"' in line or f"='{original_text}'" in line:
-                # JSX attribute
-                new_line = re.sub(
-                    rf'(["\']){re.escape(original_text)}\1',
-                    f"{{{replacement}}}",
-                    line
-                )
-            # Handle string literals: "Text" -> t('key')
-            elif f'"{original_text}"' in line or f"'{original_text}'" in line:
-                # Regular string literal
-                new_line = re.sub(
-                    rf'["\']{re.escape(original_text)}["\']',
-                    replacement,
-                    line
-                )
-            else:
-                # Try to find and replace the text
-                new_line = line.replace(original_text, replacement)
+        # Process each replacement, finding exact positions
+        # Sort by position (right to left) to avoid offset issues when replacing
+        replacements_with_pos = []
+        for original_text, translation_key in line_replacements:
+            # Find all occurrences of the text in the line
+            pos = 0
+            while True:
+                pos = line.find(original_text, pos)
+                if pos == -1:
+                    break
+                # Check if it's not already replaced (not in a function call or JSX expression)
+                if (pos + len(original_text) <= len(line) and
+                    not (pos > 0 and line[pos-1:pos+len(original_text)+1] in ['{t(', '{i18n.', 't(\'', 't("', 't(']) and
+                    not (pos + len(original_text) < len(line) and line[pos+len(original_text):pos+len(original_text)+1] in ['}', ')'])):
+                    replacements_with_pos.append((pos, original_text, translation_key))
+                pos += len(original_text)
+        
+        # Sort by position (descending) to replace from right to left
+        replacements_with_pos.sort(key=lambda x: x[0], reverse=True)
+        
+        # Process each replacement on this line
+        for pos, original_text, translation_key in replacements_with_pos:
+            # Create replacement string
+            replacement = get_translation_function_call(framework, framework_config, translation_key, use_var=True)
             
-            lines[line_index] = new_line
+            # Strategy 1: Handle string literals in JSX attributes: title="Text" -> title={t('key')}
+            if pos > 0 and (line[pos-1] == '"' or line[pos-1] == "'"):
+                # Find the quote before and after
+                quote_start = pos - 1
+                quote_end = pos + len(original_text)
+                if quote_end < len(line) and line[quote_end] == line[quote_start]:
+                    # Replace the entire quoted string with translation call
+                    line = line[:quote_start] + f"{{{replacement}}}" + line[quote_end+1:]
+                    needs_import = True
+                    continue
+            
+            # Strategy 2: Handle string literals: "Text" -> t('key') (check for quotes)
+            if pos > 0 and pos + len(original_text) < len(line):
+                if (line[pos-1] == '"' and line[pos+len(original_text)] == '"') or \
+                   (line[pos-1] == "'" and line[pos+len(original_text)] == "'"):
+                    # Replace quoted string
+                    line = line[:pos-1] + replacement + line[pos+len(original_text)+1:]
+                    needs_import = True
+                    continue
+            
+            # Strategy 3: Handle JSX text content (text between tags, not in quotes)
+            # This handles cases where text is directly in JSX like <h1>Text</h1> or </span> Text <span>
+            # Find the exact match avoiding partial matches and already-replaced text
+            text_start = pos
+            text_end = pos + len(original_text)
+            
+            # Check if it's not already inside JSX expression
+            before_text = line[:text_start]
+            after_text = line[text_end:]
+            
+            # Don't replace if already in JSX expression or function call
+            if (before_text.rstrip().endswith('{') or 
+                after_text.lstrip().startswith('}') or
+                before_text.rstrip().endswith('t(') or
+                before_text.rstrip().endswith('i18n.')):
+                continue
+            
+            # Check what's before and after to determine spacing
+            needs_space_before = text_start > 0 and line[text_start-1] not in ['>', '{', ' ', '\t', '\n']
+            needs_space_after = text_end < len(line) and line[text_end] not in ['<', '}', ' ', '\t', '\n', ',']
+            
+            replacement_str = f"{{{replacement}}}"
+            if needs_space_before:
+                replacement_str = ' ' + replacement_str
+            if needs_space_after:
+                replacement_str = replacement_str + ' '
+            
+            line = line[:text_start] + replacement_str + line[text_end:]
             needs_import = True
+        
+        # Update the line if it changed
+        if line != original_line:
+            lines[line_index] = line
             
             # Check if we need hook call in component
             if needs_hook(framework) and not hook_call_exists:
@@ -165,7 +222,7 @@ def replace_strings_in_file(
         else:
             # No imports found, add at the top
             lines.insert(0, import_stmt)
-            if needs_hook(framework) and has_hook_call:
+            if needs_hook(framework) and needs_hook_in_component and not hook_call_exists:
                 hook_name = framework_config.get('hook', 'useTranslations')
                 if framework == 'next-intl':
                     hook_call = f"const t = {hook_name}();"
@@ -185,4 +242,3 @@ def replace_strings_in_file(
             f.write(modified_content)
     
     return modified_content, has_changes
-
