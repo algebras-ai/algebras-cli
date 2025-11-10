@@ -351,6 +351,25 @@ Algebras CLI automatically tracks translation changes using Git:
 - **Skips git validation** when using `--only-missing` flag
 - **CI-friendly** with the `algebras ci` command
 
+### Translation Caching
+
+Algebras CLI automatically caches translations to avoid duplicate API calls:
+
+- **Cache location**: `~/.algebras.cache` (user's home directory)
+- **Automatic caching**: All successful translations are cached automatically
+- **Cache hits**: Previously translated strings are retrieved from cache instantly
+- **Cache persistence**: Cache persists between CLI runs
+- **Cache size**: Limited to approximately 10MB to manage memory usage
+
+The cache key includes:
+- Source text
+- Source language
+- Target language
+- UI-safe flag
+- Custom prompt (if provided)
+
+This means the same translation request will use the cache, saving API calls and improving performance.
+
 ### Batch Processing
 
 Optimize translation performance with batch processing:
@@ -589,6 +608,8 @@ The following environment variables can be used to configure the Algebras CLI:
 - Adjust batch size: `--batch-size 10`
 - Control parallel batches: `--max-parallel-batches 3`
 - Use `--only-missing` to skip unnecessary translations
+- Translation cache is automatically used to avoid duplicate API calls
+- Check cache location: `~/.algebras.cache` (cache persists between runs)
 
 ### Getting Help
 
