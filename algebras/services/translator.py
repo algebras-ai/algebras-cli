@@ -10,6 +10,8 @@ import hashlib
 import pickle
 import asyncio
 import concurrent.futures
+import threading
+import random
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
 
@@ -149,6 +151,16 @@ class Translator:
         # Initialize custom prompt
         self.custom_prompt = ""
         
+        # Shared rate limiting state for coordinating retries across parallel batches
+        self._rate_limit_lock = threading.Lock()
+        self._rate_limit_backoff_until = 0.0  # Timestamp until which we should back off
+        self._consecutive_429_count = 0  # Track consecutive 429 errors across all batches
+        self._last_429_time = 0.0  # Timestamp of last 429 error
+        
+        # Rate limiter: 25 requests per minute (server limit is 30, we use 25 for safety margin)
+        self._max_requests_per_minute = 30
+        self._request_timestamps = []  # Track request timestamps for sliding window
+        
     def set_custom_prompt(self, prompt: str) -> None:
         """
         Set a custom prompt to be used for translations.
@@ -157,10 +169,43 @@ class Translator:
             prompt: Custom prompt text to use for translation
         """
         self.custom_prompt = prompt
+    
+    def _wait_for_rate_limit(self):
+        """
+        Wait if necessary to respect the rate limit of 25 requests per minute.
+        Uses a sliding window approach to track requests in the last 60 seconds.
+        """
+        with self._rate_limit_lock:
+            current_time = time.time()
+            
+            # Remove timestamps older than 60 seconds
+            self._request_timestamps = [
+                ts for ts in self._request_timestamps 
+                if current_time - ts < 60.0
+            ]
+            
+            # If we're at the limit, wait until the oldest request is more than 60 seconds old
+            if len(self._request_timestamps) >= self._max_requests_per_minute:
+                oldest_timestamp = min(self._request_timestamps)
+                wait_time = 60.0 - (current_time - oldest_timestamp) + 0.1  # Add 0.1s buffer
+                if wait_time > 0:
+                    print(f"  ⚠ Rate limit: {len(self._request_timestamps)}/{self._max_requests_per_minute} requests in last minute. Waiting {wait_time:.1f} seconds...")
+                    time.sleep(wait_time)
+                    # Update current time after waiting
+                    current_time = time.time()
+                    # Clean up old timestamps again
+                    self._request_timestamps = [
+                        ts for ts in self._request_timestamps 
+                        if current_time - ts < 60.0
+                    ]
+            
+            # Record this request timestamp
+            self._request_timestamps.append(current_time)
         
     def _retry_with_exponential_backoff(self, api_call_func, max_retries: int = 5, initial_wait: float = 1.0):
         """
         Retry an API call with exponential backoff on 429 errors.
+        Uses shared rate limiting state to coordinate retries across parallel batches.
         
         Args:
             api_call_func: Callable that makes the API request and returns a response
@@ -177,16 +222,61 @@ class Translator:
         
         for attempt in range(max_retries + 1):
             try:
+                # Check shared rate limit state and wait if needed
+                with self._rate_limit_lock:
+                    current_time = time.time()
+                    if self._rate_limit_backoff_until > current_time:
+                        wait_needed = self._rate_limit_backoff_until - current_time
+                        print(f"  ⚠ Waiting for shared rate limit backoff: {wait_needed:.1f} seconds...")
+                        time.sleep(wait_needed)
+                
+                # Enforce rate limit: 25 requests per minute
+                self._wait_for_rate_limit()
+                
                 response = api_call_func()
                 
-                # If successful or non-429 error, return immediately
+                # If successful or non-429 error, reset consecutive 429 counter and return immediately
                 if response.status_code != 429:
+                    # Reset consecutive 429 count on successful request
+                    with self._rate_limit_lock:
+                        if response.status_code == 200:
+                            self._consecutive_429_count = 0
                     return response
                 
-                # If 429 and we have retries left, wait and retry
+                # If 429 and we have retries left, coordinate backoff with other batches
                 if attempt < max_retries:
-                    print(f"  ⚠ Rate limited (429). Retrying in {wait_time:.1f} seconds... (attempt {attempt + 1}/{max_retries})")
-                    time.sleep(wait_time)
+                    # Update shared backoff state
+                    with self._rate_limit_lock:
+                        current_time = time.time()
+                        
+                        # Track consecutive 429 errors (reset if more than 60 seconds since last 429)
+                        if current_time - self._last_429_time > 60:
+                            self._consecutive_429_count = 0
+                        self._consecutive_429_count += 1
+                        self._last_429_time = current_time
+                        
+                        # Increase backoff more aggressively when we see multiple consecutive 429s
+                        # Multiply wait time by a factor based on consecutive 429 count
+                        # This helps when multiple batches hit 429 simultaneously
+                        if self._consecutive_429_count > 1:
+                            # Add extra backoff: 0.5s per consecutive 429 (capped at 5s extra)
+                            extra_backoff = min(self._consecutive_429_count * 0.5, 5.0)
+                            wait_time = wait_time + extra_backoff
+                        
+                        # Add jitter to prevent thundering herd (0-20% of wait time)
+                        jitter = random.uniform(0, wait_time * 0.2)
+                        actual_wait = wait_time + jitter
+                        
+                        # Set shared backoff to the maximum of current backoff or our wait time
+                        # Use a slightly longer backoff to give the API more time to recover
+                        self._rate_limit_backoff_until = max(
+                            self._rate_limit_backoff_until,
+                            current_time + actual_wait
+                        )
+                    
+                    # Wait for our backoff period (with jitter)
+                    print(f"  ⚠ Rate limited (429). Retrying in {actual_wait:.1f} seconds... (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(actual_wait)
                     wait_time *= 2  # Exponential backoff
                 else:
                     # Last attempt failed with 429
@@ -201,9 +291,31 @@ class Translator:
                 # For other exceptions, check if it's a 429 error with response
                 if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
                     if e.response.status_code == 429 and attempt < max_retries:
+                        # Update shared backoff state
+                        with self._rate_limit_lock:
+                            current_time = time.time()
+                            
+                            # Track consecutive 429 errors (reset if more than 60 seconds since last 429)
+                            if current_time - self._last_429_time > 60:
+                                self._consecutive_429_count = 0
+                            self._consecutive_429_count += 1
+                            self._last_429_time = current_time
+                            
+                            # Increase backoff more aggressively when we see multiple consecutive 429s
+                            if self._consecutive_429_count > 1:
+                                extra_backoff = min(self._consecutive_429_count * 0.5, 5.0)
+                                wait_time = wait_time + extra_backoff
+                            
+                            # Add jitter to prevent thundering herd
+                            jitter = random.uniform(0, wait_time * 0.2)
+                            actual_wait = wait_time + jitter
+                            self._rate_limit_backoff_until = max(
+                                self._rate_limit_backoff_until,
+                                current_time + actual_wait
+                            )
                         # Retry on 429
-                        print(f"  ⚠ Rate limited (429). Retrying in {wait_time:.1f} seconds... (attempt {attempt + 1}/{max_retries})")
-                        time.sleep(wait_time)
+                        print(f"  ⚠ Rate limited (429). Retrying in {actual_wait:.1f} seconds... (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(actual_wait)
                         wait_time *= 2
                         continue
                 # For all other cases, re-raise

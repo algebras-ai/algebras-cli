@@ -1072,4 +1072,430 @@ class TestTranslator:
             result = translator._translate_with_algebras_ai_batch(["Hello"], "en", "fr")
 
         assert result == ["Bonjour"]
-        assert call_count[0] == 2  # Should have retried once 
+        assert call_count[0] == 2  # Should have retried once
+
+    def test_wait_for_rate_limit_below_limit(self, monkeypatch):
+        """Test rate limiter when below the limit"""
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+
+        # Patch Config class
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+
+        # Mock environment variable
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        # Initialize Translator
+        translator = Translator()
+
+        # Make a few requests (below limit)
+        for i in range(5):
+            translator._wait_for_rate_limit()
+
+        # Should have 5 timestamps
+        assert len(translator._request_timestamps) == 5
+
+    def test_wait_for_rate_limit_at_limit(self, monkeypatch):
+        """Test rate limiter when at the limit - should wait"""
+        import time
+        from unittest.mock import patch
+
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+
+        # Patch Config class
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+
+        # Mock environment variable
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        # Initialize Translator
+        translator = Translator()
+
+        # Fill up the rate limit (30 requests)
+        current_time = time.time()
+        translator._request_timestamps = [current_time - i * 0.1 for i in range(30)]
+
+        # Mock time.sleep to verify it's called
+        with patch('time.sleep') as mock_sleep:
+            translator._wait_for_rate_limit()
+            # Should have waited
+            assert mock_sleep.called
+            # Should have 31 timestamps now (30 old + 1 new)
+            assert len(translator._request_timestamps) == 31
+
+    def test_wait_for_rate_limit_old_timestamps_removed(self, monkeypatch):
+        """Test that old timestamps (>60 seconds) are removed"""
+        import time
+
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+
+        # Patch Config class
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+
+        # Mock environment variable
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        # Initialize Translator
+        translator = Translator()
+
+        # Add old timestamps (>60 seconds old)
+        current_time = time.time()
+        translator._request_timestamps = [
+            current_time - 70,  # 70 seconds ago
+            current_time - 65,  # 65 seconds ago
+            current_time - 5,   # 5 seconds ago
+            current_time - 2,   # 2 seconds ago
+        ]
+
+        # Call rate limiter
+        translator._wait_for_rate_limit()
+
+        # Should only have timestamps from last 60 seconds
+        assert len(translator._request_timestamps) == 3  # 2 old + 1 new
+        for ts in translator._request_timestamps:
+            assert current_time - ts < 60.0
+
+    def test_retry_with_rate_limit_enforcement(self, monkeypatch):
+        """Test that rate limiter is called before API calls"""
+        import time
+        from unittest.mock import patch
+
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+
+        # Patch Config class
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+
+        # Mock environment variable
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        # Initialize Translator
+        translator = Translator()
+
+        # Mock successful response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        # Track if rate limiter was called
+        rate_limit_called = [False]
+
+        def original_wait_for_rate_limit():
+            rate_limit_called[0] = True
+            translator._request_timestamps.append(time.time())
+
+        # Replace the method temporarily
+        original_method = translator._wait_for_rate_limit
+        translator._wait_for_rate_limit = original_wait_for_rate_limit
+
+        def api_call():
+            return mock_response
+
+        # Mock time.sleep to avoid actual delays
+        with patch('time.sleep'):
+            result = translator._retry_with_exponential_backoff(api_call)
+
+        # Verify rate limiter was called
+        assert rate_limit_called[0]
+        assert result.status_code == 200
+
+    def test_consecutive_429_tracking(self, monkeypatch):
+        """Test that consecutive 429 errors are tracked and increase backoff"""
+        import time
+        from unittest.mock import patch
+
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+
+        # Patch Config class
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+
+        # Mock environment variable
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        # Initialize Translator
+        translator = Translator()
+
+        # Mock 429 responses
+        mock_response_429 = MagicMock()
+        mock_response_429.status_code = 429
+        mock_response_429.text = "Too Many Requests"
+
+        mock_response_200 = MagicMock()
+        mock_response_200.status_code = 200
+
+        call_count = [0]
+        consecutive_counts = []
+
+        def api_call():
+            call_count[0] += 1
+            # Track consecutive count before each retry
+            consecutive_counts.append(translator._consecutive_429_count)
+            if call_count[0] <= 3:
+                return mock_response_429
+            return mock_response_200
+
+        # Mock time.sleep to track wait times
+        wait_times = []
+
+        def mock_sleep(duration):
+            wait_times.append(duration)
+
+        with patch('time.sleep', side_effect=mock_sleep):
+            with patch('time.time', return_value=time.time()):
+                result = translator._retry_with_exponential_backoff(api_call, max_retries=5, initial_wait=1.0)
+
+        # Should have succeeded after retries
+        assert result.status_code == 200
+        # Should have tracked consecutive 429s during retries (count increases)
+        # Note: count is reset to 0 on success, so check during retries
+        assert any(count > 0 for count in consecutive_counts), "Consecutive 429 count should have increased during retries"
+        # Wait times should increase (with extra backoff for consecutive 429s)
+        assert len(wait_times) >= 2
+
+    def test_consecutive_429_reset_on_success(self, monkeypatch):
+        """Test that consecutive 429 counter resets on successful request"""
+        import time
+        from unittest.mock import patch
+
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+
+        # Patch Config class
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+
+        # Mock environment variable
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        # Initialize Translator
+        translator = Translator()
+
+        # Set consecutive 429 count
+        translator._consecutive_429_count = 5
+
+        # Mock successful response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        def api_call():
+            return mock_response
+
+        with patch('time.sleep'):
+            result = translator._retry_with_exponential_backoff(api_call)
+
+        # Consecutive 429 count should be reset
+        assert translator._consecutive_429_count == 0
+        assert result.status_code == 200
+
+    def test_consecutive_429_reset_after_60_seconds(self, monkeypatch):
+        """Test that consecutive 429 counter resets after 60 seconds"""
+        import time
+        from unittest.mock import patch
+
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+
+        # Patch Config class
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+
+        # Mock environment variable
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        # Initialize Translator
+        translator = Translator()
+
+        # Set consecutive 429 count and last 429 time to 70 seconds ago
+        translator._consecutive_429_count = 5
+        translator._last_429_time = time.time() - 70
+
+        # Mock 429 response
+        mock_response_429 = MagicMock()
+        mock_response_429.status_code = 429
+        mock_response_429.text = "Too Many Requests"
+
+        def api_call():
+            return mock_response_429
+
+        # Mock time.time to return current time
+        with patch('time.sleep'):
+            with patch('time.time', return_value=time.time()):
+                try:
+                    translator._retry_with_exponential_backoff(api_call, max_retries=1, initial_wait=0.1)
+                except Exception:
+                    pass  # Expected to fail after retries
+
+        # Consecutive 429 count should be reset to 1 (not 6) because it was reset
+        assert translator._consecutive_429_count == 1
+
+    def test_aggressive_backoff_with_multiple_429s(self, monkeypatch):
+        """Test that backoff increases more aggressively with multiple consecutive 429s"""
+        import time
+        from unittest.mock import patch
+
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+
+        # Patch Config class
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+
+        # Mock environment variable
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        # Initialize Translator
+        translator = Translator()
+
+        # Set consecutive 429 count to simulate multiple batches hitting 429
+        translator._consecutive_429_count = 5
+        translator._last_429_time = time.time()
+
+        # Mock 429 response
+        mock_response_429 = MagicMock()
+        mock_response_429.status_code = 429
+        mock_response_429.text = "Too Many Requests"
+
+        mock_response_200 = MagicMock()
+        mock_response_200.status_code = 200
+
+        call_count = [0]
+
+        def api_call():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return mock_response_429
+            return mock_response_200
+
+        wait_times = []
+
+        def mock_sleep(duration):
+            wait_times.append(duration)
+
+        with patch('time.sleep', side_effect=mock_sleep):
+            with patch('time.time', return_value=time.time()):
+                result = translator._retry_with_exponential_backoff(api_call, max_retries=3, initial_wait=1.0)
+
+        # Should have succeeded
+        assert result.status_code == 200
+        # Should have waited with extra backoff (1.0 + 2.5 = 3.5s minimum for 5 consecutive 429s)
+        assert len(wait_times) > 0
+        # Wait time should include extra backoff for consecutive 429s
+        assert wait_times[0] >= 3.5  # 1.0 base + 2.5 extra (5 * 0.5, capped at 5.0) + jitter
+
+    def test_shared_rate_limit_coordination(self, monkeypatch):
+        """Test that shared rate limit backoff coordinates across batches"""
+        import time
+        from unittest.mock import patch
+        import threading
+
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+
+        # Patch Config class
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+
+        # Mock environment variable
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        # Initialize Translator
+        translator = Translator()
+
+        # Set shared backoff to 5 seconds in the future
+        translator._rate_limit_backoff_until = time.time() + 5.0
+
+        # Mock successful response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        wait_times = []
+
+        def mock_sleep(duration):
+            wait_times.append(duration)
+
+        def api_call():
+            return mock_response
+
+        with patch('time.sleep', side_effect=mock_sleep):
+            with patch('time.time', return_value=time.time()):
+                result = translator._retry_with_exponential_backoff(api_call)
+
+        # Should have waited for shared backoff
+        assert len(wait_times) > 0
+        # Should have waited approximately 5 seconds
+        assert 4.9 <= wait_times[0] <= 5.1
+        assert result.status_code == 200
+
+    def test_rate_limit_with_parallel_batches(self, monkeypatch):
+        """Test rate limiting works correctly with parallel batches"""
+        import time
+        from unittest.mock import patch
+        import concurrent.futures
+
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+
+        # Patch Config class
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+
+        # Mock environment variable
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        # Initialize Translator
+        translator = Translator()
+
+        # Mock successful response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        def api_call():
+            return mock_response
+
+        request_count = [0]
+        original_wait_for_rate_limit = translator._wait_for_rate_limit
+
+        def wait_for_rate_limit():
+            original_wait_for_rate_limit()
+            request_count[0] += 1
+
+        # Replace method to track calls
+        translator._wait_for_rate_limit = wait_for_rate_limit
+
+        # Simulate multiple parallel batches making requests
+        with patch('time.sleep'):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                futures = [executor.submit(translator._retry_with_exponential_backoff, api_call) for _ in range(10)]
+                results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+        # All requests should have succeeded
+        assert all(r.status_code == 200 for r in results)
+        # Rate limiter should have been called for each request
+        assert request_count[0] == 10 
