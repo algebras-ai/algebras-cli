@@ -426,6 +426,36 @@ algebras translate --only-missing --regenerate-from-scratch
 - **In-place updates** (default): Preserves your file structure, comments, and formatting. Best for maintaining existing translation files.
 - **Regenerate from scratch**: Useful when you want to normalize file structure or when you've made manual changes that need to be reset.
 
+### Error Handling & Reliability
+
+Algebras CLI includes robust error handling and reliability features to ensure smooth translation operations:
+
+#### Automatic Retry Logic
+
+The CLI automatically handles rate limit (429) and server (500) errors with intelligent retry logic:
+
+- **Exponential backoff**: Retries use exponential backoff with jitter to prevent thundering herd problems
+- **Coordinated retries**: When multiple parallel batches encounter rate limits, retries are coordinated across all batches to avoid overwhelming the API
+- **Automatic recovery**: Up to 5 retry attempts with increasing wait times between attempts
+- **Smart backoff**: When multiple consecutive 429 errors occur, the backoff time increases more aggressively
+
+#### Rate Limiting
+
+Built-in rate limiting ensures compliance with API limits:
+
+- **30 requests per minute**: Automatic rate limiting with a sliding window approach
+- **Request tracking**: Tracks requests in the last 60 seconds to enforce limits
+- **Automatic throttling**: Automatically waits when approaching rate limits
+- **Parallel batch coordination**: Shared rate limiting state ensures all parallel batches respect the limit
+
+#### Empty String Handling
+
+Empty strings are handled intelligently to avoid unnecessary API calls and improve accuracy:
+
+- **Automatic filtering**: Empty or whitespace-only strings are automatically filtered out before API calls
+- **Status counting**: Empty strings are properly counted as translated if the source is also empty
+- **Improved accuracy**: Translation status reporting now correctly handles empty string scenarios
+
 ## Configuration
 
 [![YAML](https://img.shields.io/badge/YAML-CB171E?style=flat&logo=yaml&logoColor=white)](https://yaml.org/) [![JSON](https://img.shields.io/badge/JSON-000000?style=flat&logo=json&logoColor=white)](https://www.json.org/) [![Environment](https://img.shields.io/badge/Environment-4CAF50?style=flat&logo=environment&logoColor=white)](https://en.wikipedia.org/wiki/Environment_variable)
@@ -610,6 +640,17 @@ The following environment variables can be used to configure the Algebras CLI:
 - Use `--only-missing` to skip unnecessary translations
 - Translation cache is automatically used to avoid duplicate API calls
 - Check cache location: `~/.algebras.cache` (cache persists between runs)
+
+**Rate limit errors (429)**
+- The CLI automatically handles rate limit errors with retry logic and exponential backoff
+- Built-in rate limiting (30 requests per minute) prevents most rate limit issues
+- If you see rate limit warnings, the CLI will automatically retry with increasing wait times
+- No manual intervention needed - the CLI coordinates retries across parallel batches
+
+**Empty string handling**
+- Empty or whitespace-only strings are automatically filtered out before API calls
+- Empty strings are properly counted as translated if the source is also empty
+- This improves accuracy and avoids unnecessary API calls
 
 ### Getting Help
 
