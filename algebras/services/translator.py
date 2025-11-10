@@ -158,6 +158,60 @@ class Translator:
         """
         self.custom_prompt = prompt
         
+    def _retry_with_exponential_backoff(self, api_call_func, max_retries: int = 5, initial_wait: float = 1.0):
+        """
+        Retry an API call with exponential backoff on 429 errors.
+        
+        Args:
+            api_call_func: Callable that makes the API request and returns a response
+            max_retries: Maximum number of retry attempts (default: 5)
+            initial_wait: Initial wait time in seconds (default: 1.0)
+            
+        Returns:
+            Response object from the API call
+            
+        Raises:
+            Exception: If all retries are exhausted or non-429 error occurs
+        """
+        wait_time = initial_wait
+        
+        for attempt in range(max_retries + 1):
+            try:
+                response = api_call_func()
+                
+                # If successful or non-429 error, return immediately
+                if response.status_code != 429:
+                    return response
+                
+                # If 429 and we have retries left, wait and retry
+                if attempt < max_retries:
+                    print(f"  ⚠ Rate limited (429). Retrying in {wait_time:.1f} seconds... (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    wait_time *= 2  # Exponential backoff
+                else:
+                    # Last attempt failed with 429
+                    error_msg = f"Error from Algebras AI API: 429 Too Many Requests - {response.text}"
+                    raise Exception(error_msg)
+                    
+            except requests.exceptions.RequestException as e:
+                # Network errors or other request exceptions - re-raise immediately
+                # These are not retryable 429 errors
+                raise Exception(f"Request failed: {str(e)}")
+            except Exception as e:
+                # For other exceptions, check if it's a 429 error with response
+                if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+                    if e.response.status_code == 429 and attempt < max_retries:
+                        # Retry on 429
+                        print(f"  ⚠ Rate limited (429). Retrying in {wait_time:.1f} seconds... (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                        wait_time *= 2
+                        continue
+                # For all other cases, re-raise
+                raise
+        
+        # Should not reach here, but just in case
+        raise Exception("Failed to get response after all retries")
+    
     def normalize_translation_string(self, source_text: str, translated_text: str) -> str:
         """
         Normalize a translated string by removing escaped characters if they weren't
@@ -279,15 +333,19 @@ class Translator:
         }
         
         try:
-            response = requests.post(url, headers=headers, files={
-                "sourceLanguage": (None, data["sourceLanguage"]),
-                "targetLanguage": (None, data["targetLanguage"]),
-                "textContent": (None, data["textContent"]),
-                "fileContent": (None, data["fileContent"]),
-                "glossaryId": (None, data["glossaryId"]),
-                "prompt": (None, data["prompt"]),
-                "flag": (None, data["flag"])
-            })
+            # Use retry helper for 429 errors
+            def make_api_call():
+                return requests.post(url, headers=headers, files={
+                    "sourceLanguage": (None, data["sourceLanguage"]),
+                    "targetLanguage": (None, data["targetLanguage"]),
+                    "textContent": (None, data["textContent"]),
+                    "fileContent": (None, data["fileContent"]),
+                    "glossaryId": (None, data["glossaryId"]),
+                    "prompt": (None, data["prompt"]),
+                    "flag": (None, data["flag"])
+                })
+            
+            response = self._retry_with_exponential_backoff(make_api_call)
             
             if response.status_code == 200:
                 result = response.json()
@@ -403,18 +461,36 @@ class Translator:
         if glossary_id is None:
             glossary_id = self.config.get_setting("api.glossary_id", "")
         
-        # Get string items and keys
+        # Get string items and keys, filter out empty strings
         string_items = list(data.values())
         keys = list(data.keys())
         
+        # Filter empty strings and maintain mapping
+        non_empty_items = []
+        non_empty_keys = []
+        empty_key_mapping = {}  # Map empty keys to empty string
+        
+        for key, value in zip(keys, string_items):
+            if isinstance(value, str) and value.strip() == "":
+                empty_key_mapping[key] = ""  # Preserve empty string
+            else:
+                non_empty_items.append(value)
+                non_empty_keys.append(key)
+        
+        # Initialize result with empty strings
+        translated_values = empty_key_mapping.copy()
+        
+        # If all strings are empty, return early
+        if not non_empty_items:
+            return translated_values
+        
         # Split into batches
-        total_strings = len(string_items)
+        total_strings = len(non_empty_items)
         num_batches = (total_strings + self.batch_size - 1) // self.batch_size
         
         print(f"Processing {total_strings} text items in {num_batches} batches (batch size: {self.batch_size})")
         
         # Translate in batches
-        translated_values = {}
         provider = self.api_config.get("provider", "algebras-ai")
         
         if provider == "algebras-ai":
@@ -425,8 +501,8 @@ class Translator:
             batches = []
             batch_keys = []
             for i in range(0, total_strings, self.batch_size):
-                batch_strings = string_items[i:i + self.batch_size]
-                batch_key_list = keys[i:i + self.batch_size]
+                batch_strings = non_empty_items[i:i + self.batch_size]
+                batch_key_list = non_empty_keys[i:i + self.batch_size]
                 batches.append(batch_strings)
                 batch_keys.append(batch_key_list)
             
@@ -464,19 +540,19 @@ class Translator:
                     batch_result = future.result()
                     all_results.update(batch_result)
             
-            translated_values = all_results
+            translated_values.update(all_results)
         else:
             # Single threaded processing for other providers
             for i in range(0, total_strings, self.batch_size):
-                batch_strings = string_items[i:i + self.batch_size]
-                batch_key_list = keys[i:i + self.batch_size]
+                batch_strings = non_empty_items[i:i + self.batch_size]
+                batch_key_list = non_empty_keys[i:i + self.batch_size]
                 
                 print(f"Processing batch {i // self.batch_size + 1}/{num_batches} ({len(batch_strings)} items)")
                 
                 # Translate each string individually for non-Algebras AI providers
                 for j, text in enumerate(batch_strings):
                     key = batch_key_list[j]
-                    translated_text = self._translate_text(text, source_lang, target_lang, ui_safe, glossary_id)
+                    translated_text = self.translate_text(text, source_lang, target_lang, ui_safe, glossary_id)
                     translated_values[key] = translated_text
         
         return translated_values
@@ -648,8 +724,25 @@ class Translator:
         # Use 'auto' if source_lang is not specified or is 'auto'
         source_lang_value = source_lang if source_lang and source_lang != "auto" else "auto"
         
+        # Filter out empty strings (after strip) - maintain mapping to preserve order
+        non_empty_texts = []
+        empty_indices = []  # Track which indices were empty
+        index_mapping = []  # Maps original index to non-empty index
+        
+        for i, text in enumerate(texts):
+            if isinstance(text, str) and text.strip() == "":
+                empty_indices.append(i)
+                index_mapping.append(None)  # Mark as empty
+            else:
+                index_mapping.append(len(non_empty_texts))
+                non_empty_texts.append(text)
+        
+        # If all texts are empty, return empty strings
+        if not non_empty_texts:
+            return [""] * len(texts)
+        
         data = {
-            "texts": texts,
+            "texts": non_empty_texts,
             "sourceLanguage": source_lang_value,
             "targetLanguage": target_lang,
             "prompt": self.custom_prompt,
@@ -657,7 +750,12 @@ class Translator:
         }
         
         try:
-            response = requests.post(url, headers=headers, json=data)
+            # Use retry helper for 429 errors
+            def make_api_call():
+                return requests.post(url, headers=headers, json=data)
+            
+            response = self._retry_with_exponential_backoff(make_api_call)
+            
             if response.status_code == 200:
                 result = response.json()
                 
@@ -672,17 +770,28 @@ class Translator:
                     # Fallback to old format if structure is different
                     translations = result.get("data", [])
                 
-                # Ensure we have the same number of translations as input texts
-                if len(translations) != len(texts):
-                    raise Exception(f"Expected {len(texts)} translations, but got {len(translations)}")
+                # Ensure we have the same number of translations as non-empty input texts
+                if len(translations) != len(non_empty_texts):
+                    raise Exception(f"Expected {len(non_empty_texts)} translations, but got {len(translations)}")
                 
                 # Apply normalization to each translation
                 normalized_translations = []
                 for i, translation in enumerate(translations):
-                    normalized_translation = self.normalize_translation_string(texts[i], translation)
+                    normalized_translation = self.normalize_translation_string(non_empty_texts[i], translation)
                     normalized_translations.append(normalized_translation)
                 
-                return normalized_translations
+                # Reconstruct full result list with empty strings in correct positions
+                full_translations = []
+                for i in range(len(texts)):
+                    if i in empty_indices:
+                        # Preserve empty string
+                        full_translations.append("")
+                    else:
+                        # Get translation from non-empty list
+                        non_empty_idx = index_mapping[i]
+                        full_translations.append(normalized_translations[non_empty_idx])
+                
+                return full_translations
             else:
                 error_msg = f"Error from Algebras AI batch API: {response.status_code} - {response.text}"
                 raise Exception(error_msg)
@@ -707,9 +816,10 @@ class Translator:
         if glossary_id is None:
             glossary_id = self.config.get_setting("api.glossary_id", "")
         
-        # Collect all string values that need translation
+        # Collect all string values that need translation, filter empty strings
         string_items = []
         paths = []
+        empty_paths = []  # Track paths with empty strings
         
         def collect_strings(current_data, current_path=None):
             if current_path is None:
@@ -720,11 +830,45 @@ class Translator:
                 if isinstance(value, dict):
                     collect_strings(value, path)
                 elif isinstance(value, str):
-                    string_items.append(value)
-                    paths.append(path)
+                    # Filter empty strings - preserve them but don't send to API
+                    if value.strip() == "":
+                        empty_paths.append(path)
+                    else:
+                        string_items.append(value)
+                        paths.append(path)
         
         # Collect all strings that need translation
         collect_strings(data)
+        
+        # Initialize translated_values with empty strings
+        translated_values = {}
+        for empty_path in empty_paths:
+            path_key = tuple(empty_path)
+            translated_values[path_key] = ""  # Preserve empty string
+        
+        # If all strings are empty, return early
+        if not string_items:
+            # Build result with empty strings only
+            result = {}
+            def build_result(src_data, dest_data, current_path=None):
+                if current_path is None:
+                    current_path = []
+                for key, value in src_data.items():
+                    path = current_path + [key]
+                    if isinstance(value, dict):
+                        if key not in dest_data:
+                            dest_data[key] = {}
+                        build_result(value, dest_data[key], path)
+                    elif isinstance(value, str):
+                        path_key = tuple(path)
+                        if path_key in translated_values:
+                            dest_data[key] = translated_values[path_key]
+                        else:
+                            dest_data[key] = value
+                    else:
+                        dest_data[key] = value
+            build_result(data, result)
+            return result
         
         # Split into batches
         total_strings = len(string_items)
@@ -733,7 +877,6 @@ class Translator:
         print(f"Processing {total_strings} text items in {num_batches} batches (batch size: {self.batch_size})")
         
         # Translate in batches
-        translated_values = {}
         provider = self.api_config.get("provider", "algebras-ai")
         
         if provider == "algebras-ai":
@@ -936,19 +1079,24 @@ class Translator:
         # Get source language
         source_lang = self.config.get_source_language()
         
-        # Collect texts and their corresponding key paths
+        # Collect texts and their corresponding key paths, filter empty strings
         texts_to_translate = []
         key_paths_list = []
         key_parts_list = []
+        empty_key_paths = []  # Track keys with empty strings
         
         for key_path in missing_keys:            
             # First, check if this is a direct key in source_content (flat format)
             if isinstance(source_content, dict) and key_path in source_content:
                 source_value = source_content[key_path]
                 if isinstance(source_value, str):
-                    texts_to_translate.append(source_value)
-                    key_paths_list.append(key_path)
-                    key_parts_list.append([key_path])  # Treat as single-level key
+                    # Filter empty strings - preserve them but don't send to API
+                    if source_value.strip() == "":
+                        empty_key_paths.append((key_path, [key_path]))
+                    else:
+                        texts_to_translate.append(source_value)
+                        key_paths_list.append(key_path)
+                        key_parts_list.append([key_path])  # Treat as single-level key
             else:
                 # Try to treat it as a dot-notation path (nested format)
                 key_parts = key_path.split('.')
@@ -958,19 +1106,34 @@ class Translator:
                 print(f"DEBUG: Source value for nested '{key_path}': {repr(source_value)} (type: {type(source_value)})")
                 
                 if isinstance(source_value, str):
-                    # This is a nested format, use the source value as text to translate
-                    texts_to_translate.append(source_value)
-                    key_paths_list.append(key_path)
-                    key_parts_list.append(key_parts)
-                    print(f"DEBUG: ✓ Added '{key_path}' to translation queue (nested format)")
+                    # Filter empty strings - preserve them but don't send to API
+                    if source_value.strip() == "":
+                        empty_key_paths.append((key_path, key_parts))
+                    else:
+                        # This is a nested format, use the source value as text to translate
+                        texts_to_translate.append(source_value)
+                        key_paths_list.append(key_path)
+                        key_parts_list.append(key_parts)
+                        print(f"DEBUG: ✓ Added '{key_path}' to translation queue (nested format)")
                 else:
                     print(f"DEBUG: Source value for '{key_path}': {repr(source_value)} (type: {type(source_value)})")
                     # For flat formats like .po, the key itself might BE the text to translate
                     # This is common when msgid is used as the key
-                    texts_to_translate.append(key_path)
-                    key_paths_list.append(key_path)
-                    key_parts_list.append([key_path])
-                    print(f"DEBUG: ✓ Added '{key_path}' to translation queue (flat format - key as text)")
+                    # Filter empty strings
+                    if key_path.strip() == "":
+                        empty_key_paths.append((key_path, [key_path]))
+                    else:
+                        texts_to_translate.append(key_path)
+                        key_paths_list.append(key_path)
+                        key_parts_list.append([key_path])
+                        print(f"DEBUG: ✓ Added '{key_path}' to translation queue (flat format - key as text)")
+        
+        # Set empty strings in the result
+        for key_path, key_parts in empty_key_paths:
+            if len(key_parts) == 1:
+                updated_content[key_parts[0]] = ""
+            else:
+                self._set_nested_value(updated_content, key_parts, "")
         
         print(f"DEBUG: Final translation queue size: {len(texts_to_translate)}")
         
@@ -1113,19 +1276,31 @@ class Translator:
         # Get source language
         source_lang = self.config.get_source_language()
         
-        # Collect texts and their corresponding key paths
+        # Collect texts and their corresponding key paths, filter empty strings
         texts_to_translate = []
         key_paths_list = []
         key_parts_list = []
+        empty_key_paths = []  # Track keys with empty strings
         
         for key_path in outdated_keys:
             key_parts = key_path.split('.')
             source_value = self._get_nested_value(source_content, key_parts)
             
             if isinstance(source_value, str):
-                texts_to_translate.append(source_value)
-                key_paths_list.append(key_path)
-                key_parts_list.append(key_parts)
+                # Filter empty strings - preserve them but don't send to API
+                if source_value.strip() == "":
+                    empty_key_paths.append((key_path, key_parts))
+                else:
+                    texts_to_translate.append(source_value)
+                    key_paths_list.append(key_path)
+                    key_parts_list.append(key_parts)
+        
+        # Set empty strings in the result
+        for key_path, key_parts in empty_key_paths:
+            if len(key_parts) == 1:
+                updated_content[key_parts[0]] = ""
+            else:
+                self._set_nested_value(updated_content, key_parts, "")
         
         if not texts_to_translate:
             return updated_content
