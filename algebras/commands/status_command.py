@@ -148,12 +148,20 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
             source_keys = set(source_data.keys())
             target_keys = set(target_data.keys())
             
-            # Count current translated keys (keys that exist in both source and target, and have non-empty values)
+            # Count current translated keys (keys that exist in both source and target)
+            # If source value is empty/whitespace, count target as translated if it's also empty/whitespace
+            # If source value is non-empty, count target as translated only if target value is non-empty
             current_translated = 0
             for key in source_keys:
                 if key in target_data:
-                    value = target_data[key]
-                    if value is not None and str(value).strip():
+                    source_value = source_data[key]
+                    target_value = target_data[key]
+                    # Check if source value is empty/whitespace
+                    source_is_empty = source_value is None or not str(source_value).strip()
+                    # Check if target value is empty/whitespace
+                    target_is_empty = target_value is None or not str(target_value).strip()
+                    # Count as translated if: (source is empty and target is empty) OR (source is non-empty and target is non-empty)
+                    if (source_is_empty and target_is_empty) or (not source_is_empty and not target_is_empty):
                         current_translated += 1
         else:
             source_data = read_language_file(source_file_path)
@@ -164,12 +172,20 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
                 source_keys = set(source_data.keys())
                 target_keys = set(target_data.keys())
                 
-                # Count current translated keys (keys that exist in both source and target, and have non-empty values)
+                # Count current translated keys (keys that exist in both source and target)
+                # If source value is empty/whitespace, count target as translated if it's also empty/whitespace
+                # If source value is non-empty, count target as translated only if target value is non-empty
                 current_translated = 0
                 for key in source_keys:
                     if key in target_data:
-                        value = target_data[key]
-                        if value is not None and str(value).strip():
+                        source_value = source_data[key]
+                        target_value = target_data[key]
+                        # Check if source value is empty/whitespace
+                        source_is_empty = source_value is None or not str(source_value).strip()
+                        # Check if target value is empty/whitespace
+                        target_is_empty = target_value is None or not str(target_value).strip()
+                        # Count as translated if: (source is empty and target is empty) OR (source is non-empty and target is non-empty)
+                        if (source_is_empty and target_is_empty) or (not source_is_empty and not target_is_empty):
                             current_translated += 1
             else:
                 # Handle nested formats (JSON, YAML, TS)
@@ -191,12 +207,20 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
                         target_leaf_keys.add(key)
                 
                 # Count current translated keys (leaf keys that exist in source and are translated in target)
+                # If source value is empty/whitespace, count target as translated if it's also empty/whitespace
+                # If source value is non-empty, count target as translated only if target value is non-empty
                 current_translated = 0
                 for key in source_leaf_keys:
                     # Check if this source leaf key exists in target and is translated
                     if key in target_leaf_keys:
-                        value = get_key_value(target_data, key)
-                        if value is not None and str(value).strip():
+                        source_value = get_key_value(source_data, key)
+                        target_value = get_key_value(target_data, key)
+                        # Check if source value is empty/whitespace
+                        source_is_empty = source_value is None or not str(source_value).strip()
+                        # Check if target value is empty/whitespace
+                        target_is_empty = target_value is None or not str(target_value).strip()
+                        # Count as translated if: (source is empty and target is empty) OR (source is non-empty and target is non-empty)
+                        if (source_is_empty and target_is_empty) or (not source_is_empty and not target_is_empty):
                             current_translated += 1
                 
                 # Update target_keys to only include leaf keys for outdated calculation

@@ -580,3 +580,141 @@ msgstr "Mensaje antiguo"  # outdated key
             assert total == 11
         finally:
             os.unlink(temp_file)
+
+    def test_count_current_and_outdated_keys_empty_strings(self):
+        """Test counting keys when both source and target have empty strings"""
+        # Create source file with empty strings
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as source_f:
+            source_data = {
+                'text_prefix_': '',
+                'text_prefix_A': 'title A',
+                'text_prefix_B': 'title B',
+                'text_suffix_': '',
+                'text_suffix_A': 'title suffix A',
+                'text_suffix_B': 'title suffix B',
+                'text_suffix_C': '',
+                'text_suffix_D': ''
+            }
+            json.dump(source_data, source_f)
+            source_file = source_f.name
+
+        # Create target file with matching empty strings
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as target_f:
+            target_data = {
+                'text_prefix_': '',
+                'text_prefix_A': 'titre A',
+                'text_prefix_B': 'titre B',
+                'text_suffix_': '',
+                'text_suffix_A': 'suffixe du titre A',
+                'text_suffix_B': 'suffixe du titre B',
+                'text_suffix_C': '',
+                'text_suffix_D': ''
+            }
+            json.dump(target_data, target_f)
+            target_file = target_f.name
+
+        try:
+            current, outdated = count_current_and_outdated_keys(source_file, target_file)
+            
+            # All 8 keys should be counted as translated:
+            # - 4 keys with empty strings in both source and target (text_prefix_, text_suffix_, text_suffix_C, text_suffix_D)
+            # - 4 keys with non-empty strings in both source and target (text_prefix_A, text_prefix_B, text_suffix_A, text_suffix_B)
+            assert current == 8
+            assert outdated == 0
+        finally:
+            os.unlink(source_file)
+            os.unlink(target_file)
+
+    def test_count_current_and_outdated_keys_empty_strings_po(self):
+        """Test counting keys in PO files when both source and target have empty strings"""
+        # Create source PO file with empty strings
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.po', delete=False) as source_f:
+            source_content = '''msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Hello"
+msgstr "Hello"
+
+msgid "EmptyKey"
+msgstr ""
+
+msgid "AnotherEmpty"
+msgstr ""
+
+msgid "Welcome"
+msgstr "Welcome"
+'''
+            source_f.write(source_content)
+            source_file = source_f.name
+
+        # Create target PO file with matching empty strings
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.po', delete=False) as target_f:
+            target_content = '''msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Hello"
+msgstr "Hola"
+
+msgid "EmptyKey"
+msgstr ""
+
+msgid "AnotherEmpty"
+msgstr ""
+
+msgid "Welcome"
+msgstr "Bienvenido"
+'''
+            target_f.write(target_content)
+            target_file = target_f.name
+
+        try:
+            current, outdated = count_current_and_outdated_keys(source_file, target_file)
+            
+            # All 4 keys should be counted as translated:
+            # - 2 keys with empty strings in both source and target (EmptyKey, AnotherEmpty)
+            # - 2 keys with non-empty strings in both source and target (Hello, Welcome)
+            assert current == 4
+            assert outdated == 0
+        finally:
+            os.unlink(source_file)
+            os.unlink(target_file)
+
+    def test_count_current_and_outdated_keys_empty_strings_xml(self):
+        """Test counting keys in XML files when both source and target have empty strings"""
+        # Create source XML file with empty strings
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.xml', delete=False) as source_f:
+            source_content = '''<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Test App</string>
+    <string name="empty_key"></string>
+    <string name="another_empty"></string>
+    <string name="welcome">Welcome</string>
+</resources>'''
+            source_f.write(source_content)
+            source_file = source_f.name
+
+        # Create target XML file with matching empty strings
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.xml', delete=False) as target_f:
+            target_content = '''<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Aplicación de Prueba</string>
+    <string name="empty_key"></string>
+    <string name="another_empty"></string>
+    <string name="welcome">Bienvenido</string>
+</resources>'''
+            target_f.write(target_content)
+            target_file = target_f.name
+
+        try:
+            current, outdated = count_current_and_outdated_keys(source_file, target_file)
+            
+            # All 4 keys should be counted as translated:
+            # - 2 keys with empty strings in both source and target (empty_key, another_empty)
+            # - 2 keys with non-empty strings in both source and target (app_name, welcome)
+            assert current == 4
+            assert outdated == 0
+        finally:
+            os.unlink(source_file)
+            os.unlink(target_file)
