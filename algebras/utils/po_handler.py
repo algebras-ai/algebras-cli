@@ -3,7 +3,7 @@
 """
 
 import re
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional, Set
 
 
 def read_po_file(file_path: str) -> Dict[str, Any]:
@@ -31,7 +31,11 @@ def read_po_file(file_path: str) -> Dict[str, Any]:
     return result
 
 
-def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
+def write_po_file(
+    file_path: str,
+    content: Dict[str, Any],
+    keys_to_update: Optional[Set[str]] = None,
+) -> None:
     """
     Write a dictionary to a .po localization file while preserving structure.
     
@@ -40,6 +44,16 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
         content: Dictionary to write
     """
     import os
+
+    keys_filter: Optional[Set[str]] = set(keys_to_update) if keys_to_update is not None else None
+    content_to_apply = (
+        {key: value for key, value in content.items() if key in keys_filter}
+        if keys_filter is not None
+        else content
+    )
+
+    if not content_to_apply:
+        return
     # Check if target file exists
     if os.path.exists(file_path):
         # Read the original file to preserve structure
@@ -54,12 +68,12 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
         
         # Update msgstr values with new translations
         for entry in entries:
-            if entry['msgid'] in content:
-                entry['msgstr'] = content[entry['msgid']]
+            if entry['msgid'] in content_to_apply:
+                entry['msgstr'] = content_to_apply[entry['msgid']]
                 updated_keys.add(entry['msgid'])
         
         # Find keys that need to be added (exist in content but not in original file)
-        new_keys = set(content.keys()) - updated_keys
+        new_keys = set(content_to_apply.keys()) - updated_keys
         
         # If we have new keys, try to find source file to get comment structure
         source_entries_map = {}
@@ -110,7 +124,7 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
                 
             new_entry = {
                 'msgid': msgid,
-                'msgstr': content[msgid],
+                'msgstr': content_to_apply[msgid],
                 'comments': comments,
                 'start_line': len(entries),
                 'end_line': len(entries)
@@ -158,12 +172,12 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
             
             # Update msgstr values with new translations
             for entry in entries:
-                if entry['msgid'] in content:
-                    entry['msgstr'] = content[entry['msgid']]
+                if entry['msgid'] in content_to_apply:
+                    entry['msgstr'] = content_to_apply[entry['msgid']]
                     updated_keys.add(entry['msgid'])
             
             # Find keys that need to be added (exist in content but not in template)
-            new_keys = set(content.keys()) - updated_keys
+            new_keys = set(content_to_apply.keys()) - updated_keys
             
             # Add new entries for missing keys
             for msgid in sorted(new_keys):
@@ -172,7 +186,7 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
                     
                 new_entry = {
                     'msgid': msgid,
-                    'msgstr': content[msgid],
+                'msgstr': content_to_apply[msgid],
                     'comments': [],
                     'start_line': len(entries),
                     'end_line': len(entries)
@@ -183,7 +197,7 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
             new_content = _reconstruct_po_content(entries, template_content)
         else:
             # No template found, create a simple .po file from scratch
-            new_content = _create_po_from_scratch(content)
+            new_content = _create_po_from_scratch(content_to_apply)
     
     # Ensure directory exists
     dir_path = os.path.dirname(file_path)

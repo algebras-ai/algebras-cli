@@ -13,6 +13,13 @@ from algebras.utils.android_xml_handler import (
     read_android_xml_file,
     write_android_xml_file
 )
+from algebras.utils.json_handler import write_json_file_in_place
+from algebras.utils.ios_strings_handler import (
+    write_ios_strings_file,
+    write_ios_strings_file_in_place,
+    read_ios_strings_file,
+)
+from algebras.utils.po_handler import write_po_file, read_po_file
 
 
 def test_should_use_in_place_with_flag():
@@ -138,6 +145,122 @@ def test_android_xml_in_place_handles_malformed_file():
             # If it fails, that's okay - it should fall back
             pass
         
+    finally:
+        os.unlink(temp_file)
+
+
+def test_json_in_place_updates_nested_key_preserves_indentation():
+    """Ensure JSON in-place updates change only targeted keys and keep indentation."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        temp_file = f.name
+
+    try:
+        original = (
+            '{\n'
+            '    "title": "Hello",\n'
+            '    "nested": {\n'
+            '        "description": "Original",\n'
+            '        "unchanged": "keep"\n'
+            '    }\n'
+            '}\n'
+        )
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            f.write(original)
+
+        updated_content = {
+            "title": "Hello",
+            "nested": {"description": "Updated", "unchanged": "keep"},
+        }
+
+        write_json_file_in_place(temp_file, updated_content, {"nested.description"})
+
+        with open(temp_file, 'r', encoding='utf-8') as f:
+            updated_text = f.read()
+
+        assert '"description": "Updated"' in updated_text
+        assert '    "nested": {' in updated_text  # indentation preserved
+
+        parsed = json.loads(updated_text)
+        assert parsed["nested"]["description"] == "Updated"
+        assert parsed["nested"]["unchanged"] == "keep"
+    finally:
+        os.unlink(temp_file)
+
+
+def test_ios_strings_in_place_updates_value_and_preserves_comments():
+    """Ensure iOS .strings in-place updates keep comments and formatting."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.strings', delete=False) as f:
+        temp_file = f.name
+
+    try:
+        original = '/* Greeting */\n"hello" = "Hello";\n"bye" = "Bye";\n'
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            f.write(original)
+
+        updated_content = {"hello": "Hola", "bye": "Bye"}
+
+        write_ios_strings_file_in_place(temp_file, updated_content, {"hello"})
+
+        with open(temp_file, 'r', encoding='utf-8') as f:
+            updated_text = f.read()
+
+        assert "/* Greeting */" in updated_text
+        assert '"hello" = "Hola";' in updated_text
+        assert '"bye" = "Bye";' in updated_text
+
+        parsed = read_ios_strings_file(temp_file)
+        assert parsed["hello"] == "Hola"
+        assert parsed["bye"] == "Bye"
+    finally:
+        os.unlink(temp_file)
+
+
+def test_ios_strings_in_place_adds_missing_key():
+    """Ensure new keys are appended when missing in the original file."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.strings', delete=False) as f:
+        temp_file = f.name
+
+    try:
+        write_ios_strings_file(temp_file, {"existing": "Value"})
+
+        updated_content = {"existing": "Value", "new_key": "New"}
+
+        write_ios_strings_file_in_place(temp_file, updated_content, {"new_key"})
+
+        parsed = read_ios_strings_file(temp_file)
+        assert parsed["existing"] == "Value"
+        assert parsed["new_key"] == "New"
+    finally:
+        os.unlink(temp_file)
+
+
+def test_po_in_place_updates_only_specified_keys():
+    """Ensure PO in-place updates limit changes to targeted keys."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.po', delete=False) as f:
+        temp_file = f.name
+
+    try:
+        initial_content = (
+            'msgid "hello"\n'
+            'msgstr "Hello"\n\n'
+            'msgid "bye"\n'
+            'msgstr "Bye"\n'
+        )
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            f.write(initial_content)
+
+        updated_content = {"hello": "Hola", "bye": "Ciao"}
+        write_po_file(temp_file, updated_content, {"hello"})
+
+        with open(temp_file, 'r', encoding='utf-8') as f:
+            updated_text = f.read()
+
+        assert 'msgid "hello"\nmsgstr "Hola"' in updated_text
+        assert 'msgid "bye"\nmsgstr "Bye"' in updated_text
+
+        parsed = read_po_file(temp_file)
+        assert parsed["hello"] == "Hola"
+        assert parsed["bye"] == "Bye"
     finally:
         os.unlink(temp_file)
 
