@@ -146,7 +146,6 @@ class TestTranslateCommand:
              patch("os.path.exists", return_value=False), \
              patch("os.path.getmtime", return_value=0), \
              patch("os.makedirs", return_value=None), \
-             patch("json.dump") as mock_json_dump, \
              patch("algebras.commands.translate_command.click.echo") as mock_echo, \
              patch("algebras.commands.translate_command.determine_target_path", return_value=target_file), \
              patch("os.path.dirname", return_value="public/locales/fr"), \
@@ -279,7 +278,6 @@ class TestTranslateCommand:
              patch("os.path.dirname", side_effect=mock_dirname), \
              patch("os.path.basename", side_effect=mock_basename), \
              patch("os.makedirs", return_value=None), \
-             patch("json.dump"), \
              patch("os.path.getsize", return_value=1024), \
              patch("os.path.relpath", return_value=source_file), \
              patch("algebras.commands.translate_command.determine_target_path", return_value=target_file), \
