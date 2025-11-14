@@ -250,24 +250,15 @@ def get_properties_language_code(file_path: str) -> Optional[str]:
     Returns:
         Language code if found, None otherwise
     """
-    # Try to extract from filename (e.g., messages_en.properties -> en, messages_en_US.properties -> en_US)
     filename = os.path.basename(file_path)
-    if '_' in filename:
-        parts = filename.split('_')
-        if len(parts) >= 2:
-            # Get the part before .properties (last part)
-            name_part = parts[-1].split('.')[0]
-            # Check if it looks like a valid language code (2-3 letters)
-            if len(name_part) in [2, 3] and name_part.isalpha():
-                # Check if the previous part forms a valid locale (e.g., en_US)
-                # Locale format: lowercase 2-letter language code + underscore + 2 uppercase letters (country code)
-                if len(parts) >= 3:
-                    second_last = parts[-2]
-                    # Validate locale: language code should be lowercase 2 letters, country code should be uppercase 2 letters
-                    if (len(second_last) == 2 and second_last.islower() and second_last.isalpha() and 
-                        len(name_part) == 2 and name_part.isupper() and name_part.isalpha()):
-                        return f"{second_last}_{name_part}"
-                # Return just the language code (can be any case, but typically lowercase)
-                return name_part
-    
+
+    # Match patterns like messages_en.properties or messages_en_US.properties
+    match = re.search(r'_(?P<lang>[a-z]{2})(?:_(?P<region>[A-Z]{2}))?\.properties$', filename)
+    if match:
+        lang = match.group("lang")
+        region = match.group("region")
+        if region:
+            return f"{lang}_{region}"
+        return lang
+
     return None
