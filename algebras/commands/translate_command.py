@@ -72,6 +72,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         click.echo(f"{Fore.RED}🔴 Please update to the new 'source_files' format.{Fore.RESET}")
         click.echo(f"{Fore.RED}📖 See documentation: https://github.com/algebras-ai/algebras-cli{Fore.RESET}")
     
+    # Get XLIFF target state from config (default: "translated")
+    xlf_target_state = config.get_setting("xlf.default_target_state", "translated")
+    
     # Get languages
     languages = config.get_languages()
     if verbose:
@@ -326,8 +329,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             # Update the original XLIFF structure with translations, preserving source text
                             # Also add new units from source that don't exist in target
-                            updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw)
-                            write_xliff_file(target_file, updated_content, source_language, target_lang)
+                            updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw, xlf_target_state)
+                            write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
                         
                         updated_count = len(missing_keys) + len(modified_keys)
                         click.echo(f"  {Fore.GREEN}✓ Updated {updated_count} keys in {target_file}\x1b[0m")
@@ -443,8 +446,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             # Update the original XLIFF structure with translations, preserving source text
                             # Also add new units from source that don't exist in target
-                            updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw)
-                            write_xliff_file(target_file, updated_content, source_language, target_lang)
+                            updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw, xlf_target_state)
+                            write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                 except Exception as e:
@@ -865,7 +868,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".html"):
                             write_html_file(target_file, source_file, translated_content)
                         elif source_file.endswith((".xlf", ".xliff")):
-                            write_xliff_file(target_file, translated_content, source_language, target_lang)
+                            write_xliff_file(target_file, translated_content, source_language, target_lang, xlf_target_state)
                         
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
         

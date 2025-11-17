@@ -600,3 +600,140 @@ class TestXLIFFHandler:
         assert key3_unit is not None
         assert key3_unit['source'] == 'Test'
         assert key3_unit['target'] == 'Prueba'
+
+    def test_write_xliff_file_adds_state_attribute(self):
+        """Test that write_xliff_file adds state attribute to target elements."""
+        xliff_content = {
+            'version': '2.0',
+            'files': [{
+                'original': 'messages',
+                'source-language': 'en',
+                'target-language': 'es',
+                'trans-units': [
+                    {
+                        'id': 'key1',
+                        'source': 'Hello',
+                        'target': 'Hola'
+                    }
+                ]
+            }]
+        }
+        
+        with tempfile.NamedTemporaryFile(suffix='.xlf', delete=False) as f:
+            temp_file = f.name
+        
+        try:
+            write_xliff_file(temp_file, xliff_content, "en", "es", "needs-review-translation")
+            
+            # Read it back and verify state attribute is present
+            with open(temp_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                assert 'state="needs-review-translation"' in content
+                assert '<target state="needs-review-translation">Hola</target>' in content
+        finally:
+            os.unlink(temp_file)
+
+    def test_write_xliff_file_preserves_existing_state(self):
+        """Test that write_xliff_file preserves existing state from unit data."""
+        xliff_content = {
+            'version': '1.2',
+            'files': [{
+                'trans-units': [
+                    {
+                        'id': 'key1',
+                        'source': 'Hello',
+                        'target': 'Hola',
+                        'state': 'final'  # Existing state
+                    }
+                ]
+            }]
+        }
+        
+        with tempfile.NamedTemporaryFile(suffix='.xlf', delete=False) as f:
+            temp_file = f.name
+        
+        try:
+            # Pass different state, but unit's state should take precedence
+            write_xliff_file(temp_file, xliff_content, "en", "es", "needs-review-translation")
+            
+            # Read it back and verify the unit's state is preserved
+            with open(temp_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                assert 'state="final"' in content
+                assert 'state="needs-review-translation"' not in content
+        finally:
+            os.unlink(temp_file)
+
+    def test_update_xliff_targets_adds_state_attribute(self):
+        """Test that update_xliff_targets adds state attribute when provided."""
+        xliff_content = {
+            'version': '1.2',
+            'files': [{
+                'trans-units': [
+                    {
+                        'id': 'key1',
+                        'source': 'Hello',
+                        'target': ''
+                    }
+                ]
+            }]
+        }
+        
+        translations = {
+            'key1': 'Hola'
+        }
+        
+        result = update_xliff_targets(xliff_content, translations, None, "needs-review-translation")
+        
+        assert result['files'][0]['trans-units'][0]['target'] == 'Hola'
+        assert result['files'][0]['trans-units'][0]['state'] == 'needs-review-translation'
+
+    def test_update_xliff_targets_preserves_existing_state(self):
+        """Test that update_xliff_targets preserves existing state attributes."""
+        xliff_content = {
+            'version': '1.2',
+            'files': [{
+                'trans-units': [
+                    {
+                        'id': 'key1',
+                        'source': 'Hello',
+                        'target': 'Hola',
+                        'state': 'final'  # Existing state
+                    }
+                ]
+            }]
+        }
+        
+        translations = {
+            'key1': 'Hola Updated'
+        }
+        
+        # Pass different state, but existing state should be preserved
+        result = update_xliff_targets(xliff_content, translations, None, "needs-review-translation")
+        
+        assert result['files'][0]['trans-units'][0]['target'] == 'Hola Updated'
+        assert result['files'][0]['trans-units'][0]['state'] == 'final'  # Preserved
+
+    def test_read_xliff_file_preserves_state_attribute(self):
+        """Test that read_xliff_file preserves state attribute when reading."""
+        xliff_content = '''<?xml version="1.0" encoding="UTF-8" ?>
+<xliff version="2.0" xmlns="urn:oasis:names:tc:xliff:document:2.0" srcLang="en-US">
+  <file id="ngi18n" original="ng.template">
+    <unit id="6439365426343089851">
+      <segment>
+        <source>General</source>
+        <target state="needs-review-translation">Général</target>
+      </segment>
+    </unit>
+  </file>
+</xliff>'''
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as f:
+            f.write(xliff_content)
+            temp_file = f.name
+        
+        try:
+            result = read_xliff_file(temp_file)
+            assert result['files'][0]['trans-units'][0]['state'] == 'needs-review-translation'
+        finally:
+            os.unlink(temp_file)

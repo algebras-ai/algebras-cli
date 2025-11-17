@@ -39,7 +39,8 @@ def read_xliff_file(file_path: str) -> Dict[str, Any]:
 
 
 def write_xliff_file(file_path: str, content: Dict[str, Any], 
-                    source_language: str = "en", target_language: str = "en") -> None:
+                    source_language: str = "en", target_language: str = "en",
+                    target_state: Optional[str] = None) -> None:
     """
     Write content to an XLIFF file.
     
@@ -48,6 +49,7 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
         content: Dictionary containing the XLIFF content
         source_language: Source language code
         target_language: Target language code
+        target_state: Optional state attribute to add to target elements (e.g., "translated", "needs-review-translation")
         
     Raises:
         ValueError: If content is not a valid dictionary
@@ -124,6 +126,10 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                         source_elem.text = unit['source']
                         target_elem = ET.SubElement(segment, 'target')
                         target_elem.text = unit.get('target', unit['source'])
+                        # Add state attribute if provided or if unit has a state
+                        unit_state = unit.get('state', target_state)
+                        if unit_state:
+                            target_elem.set('state', unit_state)
                     else:
                         # XLIFF 1.2: use <trans-unit>
                         trans_unit = ET.SubElement(container, 'trans-unit')
@@ -132,6 +138,10 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                         source_elem.text = unit['source']
                         target_elem = ET.SubElement(trans_unit, 'target')
                         target_elem.text = unit.get('target', unit['source'])
+                        # Add state attribute if provided or if unit has a state
+                        unit_state = unit.get('state', target_state)
+                        if unit_state:
+                            target_elem.set('state', unit_state)
     else:
         # Handle flat dictionary structure (always write as XLIFF 1.2)
         for key, value in content.items():
@@ -142,6 +152,9 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                 source_elem.text = value
                 target_elem = ET.SubElement(trans_unit, 'target')
                 target_elem.text = value
+                # Add state attribute if provided
+                if target_state:
+                    target_elem.set('state', target_state)
     
     # Write to file with proper formatting
     rough_string = ET.tostring(xliff_root, encoding='unicode')
@@ -213,7 +226,8 @@ def create_xliff_from_translations(translations: Dict[str, str],
 
 
 def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, str], 
-                         source_content: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                         source_content: Optional[Dict[str, Any]] = None,
+                         target_state: Optional[str] = None) -> Dict[str, Any]:
     """
     Update XLIFF target elements with translated strings while preserving source text.
     Also adds new units from source that don't exist in target.
@@ -222,6 +236,7 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
         xliff_content: Original XLIFF content structure (target file)
         translations: Dictionary of translated strings (key -> translated_value)
         source_content: Optional source XLIFF content to add missing units from
+        target_state: Optional state attribute to add to target elements (e.g., "translated", "needs-review-translation")
         
     Returns:
         Updated XLIFF content with target elements updated and new units added
@@ -245,6 +260,11 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
                         elif 'source' in unit and not unit.get('target'):
                             # If no translation provided but source exists, use source as target
                             unit['target'] = unit['source']
+                        
+                        # Set state if provided and unit doesn't already have one
+                        # This applies to all units, not just newly translated ones
+                        if target_state and 'state' not in unit:
+                            unit['state'] = target_state
     
     # Add new units from source that don't exist in target
     if source_content and 'files' in source_content:
@@ -267,6 +287,9 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
                                 'source': source_unit.get('source', ''),
                                 'target': translations.get(source_unit_id, source_unit.get('source', ''))
                             }
+                            # Add state attribute if provided
+                            if target_state:
+                                new_unit['state'] = target_state
                             target_file_data['trans-units'].append(new_unit)
     
     return updated_content
@@ -334,6 +357,10 @@ def _parse_xliff_root(root: ET.Element) -> Dict[str, Any]:
                     target_elem = segment.find('target') or segment.find(f'{{{namespace}}}target')
                     if target_elem is not None:
                         unit_data['target'] = target_elem.text or ''
+                        # Preserve state attribute if present (check for both None and empty string)
+                        state_attr = target_elem.get('state')
+                        if state_attr:
+                            unit_data['state'] = state_attr
                 else:
                     # Fallback: look for source/target directly in unit
                     source_elem = unit.find('source') or unit.find(f'{{{namespace}}}source')
@@ -343,6 +370,10 @@ def _parse_xliff_root(root: ET.Element) -> Dict[str, Any]:
                     target_elem = unit.find('target') or unit.find(f'{{{namespace}}}target')
                     if target_elem is not None:
                         unit_data['target'] = target_elem.text or ''
+                        # Preserve state attribute if present (check for both None and empty string)
+                        state_attr = target_elem.get('state')
+                        if state_attr:
+                            unit_data['state'] = state_attr
                 
                 file_data['trans-units'].append(unit_data)
         else:
@@ -364,6 +395,10 @@ def _parse_xliff_root(root: ET.Element) -> Dict[str, Any]:
                 target_elem = trans_unit.find('target') or trans_unit.find(f'{{{namespace}}}target')
                 if target_elem is not None:
                     unit_data['target'] = target_elem.text or ''
+                    # Preserve state attribute if present (check for both None and empty string)
+                    state_attr = target_elem.get('state')
+                    if state_attr:
+                        unit_data['state'] = state_attr
                 
                 file_data['trans-units'].append(unit_data)
         
