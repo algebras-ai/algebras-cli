@@ -41,6 +41,40 @@ source_files:
 api:
   provider: "algebras-ai"
   normalize_strings: true
+xlf:
+  default_target_state: "needs-review-translation"
+```
+
+### XLIFF Target State Configuration
+
+The `xlf.default_target_state` setting controls the `state` attribute that is added to `<target>` elements for newly translated keys. This is useful for tracking translation status in your XLIFF files.
+
+**Configuration:**
+```yaml
+xlf:
+  default_target_state: "needs-review-translation"
+```
+
+**Common state values:**
+- `"translated"` - Default value, indicates the translation is complete
+- `"needs-review-translation"` - Translation needs review
+- `"needs-review"` - Shorter form for review needed
+- `"final"` - Translation is final and approved
+- `"new"` - Newly added translation
+- `"signed-off"` - Translation has been signed off
+
+**Behavior:**
+- State is only added to **newly translated keys** (keys in the translations dictionary)
+- Existing units that are updated do **not** get the state attribute added
+- Existing state attributes are **preserved** when updating files
+- New units added from source get the configured state attribute
+
+**Example output:**
+```xml
+<trans-unit id="123456789">
+  <source>Hello, World!</source>
+  <target state="needs-review-translation">Hallo, Welt!</target>
+</trans-unit>
 ```
 
 ### Common Directory Structures

@@ -283,4 +283,50 @@ class TestStatusCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments
-            mock_execute.assert_called_with("fr", None) 
+            mock_execute.assert_called_with("fr", None)
+
+    def test_count_translated_keys_xlf(self):
+        """Test counting translated keys in XLIFF files."""
+        from algebras.commands.status_command import count_translated_keys
+        from unittest.mock import patch, MagicMock
+        
+        # Mock read_language_file to return XLIFF data
+        xliff_data = {
+            'key1': 'translated1',
+            'key2': 'translated2',
+            'key3': ''  # Empty translation
+        }
+        
+        with patch('algebras.commands.status_command.read_language_file', return_value=xliff_data), \
+             patch('os.path.exists', return_value=True):
+            
+            translated, total = count_translated_keys("messages.xlf")
+            
+            assert translated == 2  # Only non-empty values
+            assert total == 3  # All keys
+
+    def test_count_current_and_outdated_keys_xlf(self):
+        """Test counting current and outdated keys for XLIFF files."""
+        from algebras.commands.status_command import count_current_and_outdated_keys
+        from unittest.mock import patch
+        
+        source_data = {
+            'key1': 'value1',
+            'key2': 'value2'
+        }
+        
+        target_data = {
+            'key1': 'translated1',
+            'key2': '',  # Empty translation
+            'key3': 'old_value'  # Outdated key
+        }
+        
+        with patch('algebras.commands.status_command.read_language_file', side_effect=[source_data, target_data]), \
+             patch('os.path.exists', return_value=True):
+            
+            current, outdated = count_current_and_outdated_keys("source.xlf", "target.xlf")
+            
+            # key1 is translated, key2 is empty (not counted as translated)
+            assert current == 1
+            # key3 exists in target but not in source
+            assert outdated == 1 

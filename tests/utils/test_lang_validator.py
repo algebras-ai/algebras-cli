@@ -262,6 +262,60 @@ class TestLangValidator(unittest.TestCase):
         self.assertEqual(map_language_code("eng"), "en")
         self.assertEqual(map_language_code("port"), "po")
 
+    @patch('algebras.utils.lang_validator.read_xliff_file')
+    @patch('algebras.utils.lang_validator.extract_xliff_strings')
+    def test_read_language_file_xlf(self, mock_extract, mock_read):
+        """Test reading XLIFF files."""
+        mock_read.return_value = {'files': [{'trans-units': []}]}
+        mock_extract.return_value = {'key1': 'value1', 'key2': 'value2'}
+        
+        result = read_language_file("test.xlf")
+        
+        self.assertEqual(result, {'key1': 'value1', 'key2': 'value2'})
+        mock_read.assert_called_once_with("test.xlf")
+        mock_extract.assert_called_once()
+
+    @patch('algebras.utils.lang_validator.read_xliff_file')
+    @patch('algebras.utils.lang_validator.extract_xliff_strings')
+    def test_read_language_file_xliff(self, mock_extract, mock_read):
+        """Test reading XLIFF files with .xliff extension."""
+        mock_read.return_value = {'files': [{'trans-units': []}]}
+        mock_extract.return_value = {'key1': 'value1'}
+        
+        result = read_language_file("test.xliff")
+        
+        self.assertEqual(result, {'key1': 'value1'})
+        mock_read.assert_called_once_with("test.xliff")
+        mock_extract.assert_called_once()
+
+    @patch('algebras.utils.lang_validator.read_language_file')
+    def test_validate_language_files_xlf(self, mock_read_file):
+        """Test validating XLIFF language files."""
+        source_data = {'key1': 'value1', 'key2': 'value2'}
+        target_data = {'key1': 'translated1', 'key2': ''}  # key2 is empty
+        
+        mock_read_file.side_effect = [source_data, target_data]
+        
+        is_valid, missing_keys = validate_language_files("source.xlf", "target.xlf")
+        
+        self.assertFalse(is_valid)
+        self.assertEqual(missing_keys, {'key2'})
+        self.assertEqual(mock_read_file.call_count, 2)
+
+    @patch('algebras.utils.lang_validator.read_language_file')
+    def test_validate_language_files_xlf_complete(self, mock_read_file):
+        """Test validating XLIFF language files with all keys present."""
+        source_data = {'key1': 'value1', 'key2': 'value2'}
+        target_data = {'key1': 'translated1', 'key2': 'translated2'}
+        
+        mock_read_file.side_effect = [source_data, target_data]
+        
+        is_valid, missing_keys = validate_language_files("source.xlf", "target.xlf")
+        
+        self.assertTrue(is_valid)
+        self.assertEqual(missing_keys, set())
+        self.assertEqual(mock_read_file.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main() 

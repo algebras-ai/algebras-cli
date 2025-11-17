@@ -94,9 +94,9 @@ def count_translated_keys(file_path: str) -> Tuple[int, int]:
         
         data = read_language_file(file_path)
         
-        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict) 
+        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff) 
         # These formats return flat key-value dictionaries rather than nested structures
-        if file_path.endswith(('.po', '.xml', '.strings', '.stringsdict')):
+        if file_path.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff')):
             total_keys = len(data)
             translated_count = 0
             for key, value in data.items():
@@ -167,8 +167,8 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
             source_data = read_language_file(source_file_path)
             target_data = read_language_file(target_file_path)
             
-            # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict)
-            if target_file_path.endswith(('.po', '.xml', '.strings', '.stringsdict')):
+            # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff)
+            if target_file_path.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff')):
                 source_keys = set(source_data.keys())
                 target_keys = set(target_data.keys())
                 
@@ -229,7 +229,7 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
         # Find keys that exist in target but not in source (outdated keys)
         if target_file_path.endswith('.html'):
             outdated_keys = target_keys - source_keys
-        elif target_file_path.endswith(('.po', '.xml', '.strings', '.stringsdict')):
+        elif target_file_path.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff')):
             outdated_keys = target_keys - source_keys
         else:
             # For nested formats, use leaf keys

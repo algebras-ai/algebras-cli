@@ -26,7 +26,7 @@ from algebras.utils.ios_stringsdict_handler import (
 )
 from algebras.utils.po_handler import read_po_file, write_po_file
 from algebras.utils.html_handler import read_html_file, write_html_file
-from algebras.utils.xliff_handler import write_xliff_file
+from algebras.utils.xliff_handler import read_xliff_file, write_xliff_file, extract_translatable_strings as extract_xliff_strings, update_xliff_targets
 
 
 def execute(language: Optional[str] = None, force: bool = False, only_missing: bool = False,
@@ -71,6 +71,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
         click.echo(f"{Fore.RED}🚨 ⚠️  WARNING: Your configuration uses the deprecated 'path_rules' format! ⚠️ 🚨{Fore.RESET}")
         click.echo(f"{Fore.RED}🔴 Please update to the new 'source_files' format.{Fore.RESET}")
         click.echo(f"{Fore.RED}📖 See documentation: https://github.com/algebras-ai/algebras-cli{Fore.RESET}")
+    
+    # Get XLIFF target state from config (default: "translated")
+    xlf_target_state = config.get_setting("xlf.default_target_state", "translated")
     
     # Get languages
     languages = config.get_languages()
@@ -208,11 +211,17 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     elif source_file.endswith(".html"):
                         source_content = read_html_file(source_file)
                         target_content = read_html_file(target_file)
+                    elif source_file.endswith((".xlf", ".xliff")):
+                        # For XLIFF files, extract translatable strings to get a flat dictionary
+                        source_content_raw = read_xliff_file(source_file)
+                        target_content_raw = read_xliff_file(target_file)
+                        source_content = extract_xliff_strings(source_content_raw)
+                        target_content = extract_xliff_strings(target_content_raw)
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
                     # Extract all keys from both files
-                    if source_file.endswith(".html"):
+                    if source_file.endswith((".html", ".xlf", ".xliff")):
                         source_keys = set(source_content.keys())
                         target_keys = set(target_content.keys())
                     else:
@@ -225,8 +234,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     # Compare values to find potentially modified keys
                     modified_keys = []
                     for key in common_keys:
-                        if source_file.endswith(".html"):
-                            # For HTML files, keys are already hash-based, so compare values directly
+                        if source_file.endswith((".html", ".xlf", ".xliff")):
+                            # For HTML and XLIFF files, keys are flat, so compare values directly
                             source_value = source_content.get(key)
                             target_value = target_content.get(key)
                         else:
@@ -318,9 +327,10 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif target_file.endswith((".xlf", ".xliff")):
                             if use_in_place:
                                 click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
-                            # Persist updated XLIFF using writer, preserving structure
-                            # Use source/target languages inferred from config/loop
-                            write_xliff_file(target_file, target_content, source_language, target_lang)
+                            # Update the original XLIFF structure with translations, preserving source text
+                            # Also add new units from source that don't exist in target
+                            updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw, xlf_target_state)
+                            write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
                         
                         updated_count = len(missing_keys) + len(modified_keys)
                         click.echo(f"  {Fore.GREEN}✓ Updated {updated_count} keys in {target_file}\x1b[0m")
@@ -367,6 +377,12 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     elif source_file.endswith(".html"):
                         source_content = read_html_file(source_file)
                         target_content = read_html_file(target_file)
+                    elif source_file.endswith((".xlf", ".xliff")):
+                        # For XLIFF files, extract translatable strings to get a flat dictionary
+                        source_content_raw = read_xliff_file(source_file)
+                        target_content_raw = read_xliff_file(target_file)
+                        source_content = extract_xliff_strings(source_content_raw)
+                        target_content = extract_xliff_strings(target_content_raw)
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
@@ -428,7 +444,10 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif target_file.endswith((".xlf", ".xliff")):
                             if use_in_place:
                                 click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
-                            write_xliff_file(target_file, target_content, source_language, target_lang)
+                            # Update the original XLIFF structure with translations, preserving source text
+                            # Also add new units from source that don't exist in target
+                            updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw, xlf_target_state)
+                            write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                 except Exception as e:
@@ -471,6 +490,12 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".html"):
                             source_content = read_html_file(source_file)
                             target_content = read_html_file(target_file)
+                        elif source_file.endswith((".xlf", ".xliff")):
+                            # For XLIFF files, extract translatable strings to get a flat dictionary
+                            source_content_raw = read_xliff_file(source_file)
+                            target_content_raw = read_xliff_file(target_file)
+                            source_content = extract_xliff_strings(source_content_raw)
+                            target_content = extract_xliff_strings(target_content_raw)
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
@@ -528,7 +553,10 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             elif target_file.endswith((".xlf", ".xliff")):
                                 if use_in_place:
                                     click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
-                                write_xliff_file(target_file, target_content, source_language, target_lang)
+                                # Update the original XLIFF structure with translations, preserving source text
+                                # Also add new units from source that don't exist in target
+                                updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw, xlf_target_state)
+                                write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
                             
                             click.echo(f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -729,6 +757,12 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".html"):
                             source_content = read_html_file(source_file)
                             target_content = read_html_file(target_file)
+                        elif source_file.endswith((".xlf", ".xliff")):
+                            # For XLIFF files, extract translatable strings to get a flat dictionary
+                            source_content_raw = read_xliff_file(source_file)
+                            target_content_raw = read_xliff_file(target_file)
+                            source_content = extract_xliff_strings(source_content_raw)
+                            target_content = extract_xliff_strings(target_content_raw)
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
@@ -784,7 +818,10 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith((".xlf", ".xliff")):
                             if use_in_place:
                                 click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
-                            write_xliff_file(target_file, translated_content, source_language, target_lang)
+                            # Update the original XLIFF structure with translations, preserving source text
+                            # Also add new units from source that don't exist in target
+                            updated_content = update_xliff_targets(target_content_raw, translated_content, source_content_raw, xlf_target_state)
+                            write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -831,7 +868,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".html"):
                             write_html_file(target_file, source_file, translated_content)
                         elif source_file.endswith((".xlf", ".xliff")):
-                            write_xliff_file(target_file, translated_content, source_language, target_lang)
+                            write_xliff_file(target_file, translated_content, source_language, target_lang, xlf_target_state)
                         
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
         
