@@ -8,7 +8,8 @@ import xml.etree.ElementTree as ET
 import pytest
 from algebras.utils.xliff_handler import (
     read_xliff_file, write_xliff_file, extract_translatable_strings,
-    create_xliff_from_translations, is_valid_xliff_file, get_xliff_language_code
+    create_xliff_from_translations, is_valid_xliff_file, get_xliff_language_code,
+    update_xliff_targets
 )
 
 
@@ -277,3 +278,325 @@ class TestXLIFFHandler:
             assert is_valid_xliff_file(temp_file) is True
         finally:
             os.unlink(temp_file)
+
+    def test_update_xliff_targets(self):
+        """Test updating XLIFF targets while preserving source text."""
+        xliff_content = {
+            'version': '2.0',
+            'files': [{
+                'original': 'messages',
+                'source-language': 'en',
+                'target-language': 'vi',
+                'trans-units': [
+                    {
+                        'id': '1009606887419612072',
+                        'source': 'Patient management',
+                        'target': ''
+                    },
+                    {
+                        'id': '6439365426343089851',
+                        'source': 'General',
+                        'target': 'Tổng quát'
+                    }
+                ]
+            }]
+        }
+        
+        translations = {
+            '1009606887419612072': 'Quản lý bệnh nhân',
+            '6439365426343089851': 'Tổng quát mới'  # Update existing translation
+        }
+        
+        result = update_xliff_targets(xliff_content, translations)
+        
+        # Verify source text is preserved
+        assert result['files'][0]['trans-units'][0]['source'] == 'Patient management'
+        assert result['files'][0]['trans-units'][1]['source'] == 'General'
+        
+        # Verify target text is updated
+        assert result['files'][0]['trans-units'][0]['target'] == 'Quản lý bệnh nhân'
+        assert result['files'][0]['trans-units'][1]['target'] == 'Tổng quát mới'
+        
+        # Verify structure is preserved
+        assert result['version'] == '2.0'
+        assert result['files'][0]['original'] == 'messages'
+        assert result['files'][0]['source-language'] == 'en'
+        assert result['files'][0]['target-language'] == 'vi'
+
+    def test_update_xliff_targets_preserves_untranslated(self):
+        """Test that update_xliff_targets preserves units not in translations."""
+        xliff_content = {
+            'version': '1.2',
+            'files': [{
+                'trans-units': [
+                    {
+                        'id': 'key1',
+                        'source': 'Source 1',
+                        'target': 'Target 1'
+                    },
+                    {
+                        'id': 'key2',
+                        'source': 'Source 2',
+                        'target': ''
+                    },
+                    {
+                        'id': 'key3',
+                        'source': 'Source 3',
+                        'target': 'Target 3'
+                    }
+                ]
+            }]
+        }
+        
+        translations = {
+            'key2': 'New Target 2'
+        }
+        
+        result = update_xliff_targets(xliff_content, translations)
+        
+        # Verify all units are preserved
+        assert len(result['files'][0]['trans-units']) == 3
+        
+        # Verify key1 is unchanged
+        assert result['files'][0]['trans-units'][0]['source'] == 'Source 1'
+        assert result['files'][0]['trans-units'][0]['target'] == 'Target 1'
+        
+        # Verify key2 is updated
+        assert result['files'][0]['trans-units'][1]['source'] == 'Source 2'
+        assert result['files'][0]['trans-units'][1]['target'] == 'New Target 2'
+        
+        # Verify key3 is unchanged
+        assert result['files'][0]['trans-units'][2]['source'] == 'Source 3'
+        assert result['files'][0]['trans-units'][2]['target'] == 'Target 3'
+
+    def test_write_xliff_file_preserves_source_text(self):
+        """Test that write_xliff_file preserves source text when writing."""
+        xliff_content = {
+            'version': '2.0',
+            'files': [{
+                'original': 'ng.template',
+                'id': 'ngi18n',
+                'source-language': 'en',
+                'target-language': 'vi',
+                'trans-units': [
+                    {
+                        'id': '1009606887419612072',
+                        'source': 'Patient management',
+                        'target': 'Quản lý bệnh nhân'
+                    }
+                ]
+            }]
+        }
+        
+        with tempfile.NamedTemporaryFile(suffix='.xlf', delete=False) as f:
+            temp_file = f.name
+        
+        try:
+            write_xliff_file(temp_file, xliff_content, "en", "vi")
+            
+            # Read it back and verify
+            result = read_xliff_file(temp_file)
+            assert result['version'] == '2.0'
+            assert len(result['files']) == 1
+            assert result['files'][0]['trans-units'][0]['source'] == 'Patient management'
+            assert result['files'][0]['trans-units'][0]['target'] == 'Quản lý bệnh nhân'
+        finally:
+            os.unlink(temp_file)
+
+    def test_write_xliff_file_preserves_version_2_0(self):
+        """Test that write_xliff_file preserves XLIFF 2.0 format."""
+        xliff_content = {
+            'version': '2.0',
+            'files': [{
+                'original': 'ng.template',
+                'id': 'ngi18n',
+                'source-language': 'en-US',
+                'target-language': 'vi',
+                'trans-units': [
+                    {
+                        'id': '6439365426343089851',
+                        'source': 'General',
+                        'target': 'Tổng quát'
+                    }
+                ]
+            }]
+        }
+        
+        with tempfile.NamedTemporaryFile(suffix='.xlf', delete=False) as f:
+            temp_file = f.name
+        
+        try:
+            write_xliff_file(temp_file, xliff_content, "en-US", "vi")
+            
+            # Read it back and verify it's still XLIFF 2.0
+            result = read_xliff_file(temp_file)
+            assert result['version'] == '2.0'
+            assert result['files'][0]['source-language'] == 'en-US'
+            
+            # Verify the XML structure is XLIFF 2.0 (unit with segment)
+            with open(temp_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                assert 'version="2.0"' in content
+                assert 'xmlns="urn:oasis:names:tc:xliff:document:2.0"' in content
+                assert '<unit id=' in content
+                assert '<segment>' in content
+        finally:
+            os.unlink(temp_file)
+
+    def test_write_xliff_file_preserves_version_1_2(self):
+        """Test that write_xliff_file preserves XLIFF 1.2 format."""
+        xliff_content = {
+            'version': '1.2',
+            'files': [{
+                'original': 'messages',
+                'source-language': 'en',
+                'target-language': 'fr',
+                'datatype': 'plaintext',
+                'trans-units': [
+                    {
+                        'id': 'app.title',
+                        'source': 'My App',
+                        'target': 'Mon App'
+                    }
+                ]
+            }]
+        }
+        
+        with tempfile.NamedTemporaryFile(suffix='.xlf', delete=False) as f:
+            temp_file = f.name
+        
+        try:
+            write_xliff_file(temp_file, xliff_content, "en", "fr")
+            
+            # Read it back and verify it's still XLIFF 1.2
+            result = read_xliff_file(temp_file)
+            assert result['version'] == '1.2'
+            
+            # Verify the XML structure is XLIFF 1.2 (trans-unit in body)
+            with open(temp_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                assert 'version="1.2"' in content
+                assert 'xmlns="urn:oasis:names:tc:xliff:document:1.2"' in content
+                assert '<body>' in content
+                assert '<trans-unit id=' in content
+        finally:
+            os.unlink(temp_file)
+
+    def test_update_xliff_targets_with_empty_target(self):
+        """Test updating XLIFF targets when original target is empty."""
+        xliff_content = {
+            'version': '1.2',
+            'files': [{
+                'trans-units': [
+                    {
+                        'id': 'key1',
+                        'source': 'Hello',
+                        'target': ''  # Empty target
+                    }
+                ]
+            }]
+        }
+        
+        translations = {
+            'key1': 'Bonjour'
+        }
+        
+        result = update_xliff_targets(xliff_content, translations)
+        
+        assert result['files'][0]['trans-units'][0]['source'] == 'Hello'
+        assert result['files'][0]['trans-units'][0]['target'] == 'Bonjour'
+
+    def test_update_xliff_targets_handles_missing_translation(self):
+        """Test that update_xliff_targets handles units without translations gracefully."""
+        xliff_content = {
+            'version': '1.2',
+            'files': [{
+                'trans-units': [
+                    {
+                        'id': 'key1',
+                        'source': 'Hello',
+                        'target': ''
+                    }
+                ]
+            }]
+        }
+        
+        translations = {}  # No translations provided
+        
+        result = update_xliff_targets(xliff_content, translations)
+        
+        # Should use source as target if no translation and target is empty
+        assert result['files'][0]['trans-units'][0]['source'] == 'Hello'
+        assert result['files'][0]['trans-units'][0]['target'] == 'Hello'
+
+    def test_update_xliff_targets_adds_missing_units_from_source(self):
+        """Test that update_xliff_targets adds new units from source that don't exist in target."""
+        target_content = {
+            'version': '2.0',
+            'files': [{
+                'original': 'messages',
+                'source-language': 'en',
+                'target-language': 'es',
+                'trans-units': [
+                    {
+                        'id': 'key1',
+                        'source': 'Hello',
+                        'target': 'Hola'
+                    }
+                ]
+            }]
+        }
+        
+        source_content = {
+            'version': '2.0',
+            'files': [{
+                'original': 'messages',
+                'source-language': 'en',
+                'target-language': 'en',
+                'trans-units': [
+                    {
+                        'id': 'key1',
+                        'source': 'Hello',
+                        'target': 'Hello'
+                    },
+                    {
+                        'id': 'key2',
+                        'source': 'World',
+                        'target': 'World'
+                    },
+                    {
+                        'id': 'key3',
+                        'source': 'Test',
+                        'target': 'Test'
+                    }
+                ]
+            }]
+        }
+        
+        translations = {
+            'key1': 'Hola',
+            'key2': 'Mundo',
+            'key3': 'Prueba'
+        }
+        
+        result = update_xliff_targets(target_content, translations, source_content)
+        
+        # Verify existing unit is updated
+        assert result['files'][0]['trans-units'][0]['id'] == 'key1'
+        assert result['files'][0]['trans-units'][0]['source'] == 'Hello'
+        assert result['files'][0]['trans-units'][0]['target'] == 'Hola'
+        
+        # Verify new units from source are added
+        assert len(result['files'][0]['trans-units']) == 3
+        
+        # Find key2
+        key2_unit = next((u for u in result['files'][0]['trans-units'] if u['id'] == 'key2'), None)
+        assert key2_unit is not None
+        assert key2_unit['source'] == 'World'
+        assert key2_unit['target'] == 'Mundo'
+        
+        # Find key3
+        key3_unit = next((u for u in result['files'][0]['trans-units'] if u['id'] == 'key3'), None)
+        assert key3_unit is not None
+        assert key3_unit['source'] == 'Test'
+        assert key3_unit['target'] == 'Prueba'

@@ -212,31 +212,62 @@ def create_xliff_from_translations(translations: Dict[str, str],
     }
 
 
-def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, str]) -> Dict[str, Any]:
+def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, str], 
+                         source_content: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Update XLIFF target elements with translated strings while preserving source text.
+    Also adds new units from source that don't exist in target.
     
     Args:
-        xliff_content: Original XLIFF content structure
+        xliff_content: Original XLIFF content structure (target file)
         translations: Dictionary of translated strings (key -> translated_value)
+        source_content: Optional source XLIFF content to add missing units from
         
     Returns:
-        Updated XLIFF content with target elements updated
+        Updated XLIFF content with target elements updated and new units added
     """
     import copy
     updated_content = copy.deepcopy(xliff_content)
+    
+    # Track which unit IDs already exist in target
+    existing_unit_ids = set()
     
     if 'files' in updated_content:
         for file_data in updated_content['files']:
             if 'trans-units' in file_data:
                 for unit in file_data['trans-units']:
                     unit_id = unit.get('id')
-                    if unit_id and unit_id in translations:
-                        # Update target with translation, preserve source
-                        unit['target'] = translations[unit_id]
-                    elif unit_id and 'source' in unit and not unit.get('target'):
-                        # If no translation provided but source exists, use source as target
-                        unit['target'] = unit['source']
+                    if unit_id:
+                        existing_unit_ids.add(unit_id)
+                        if unit_id in translations:
+                            # Update target with translation, preserve source
+                            unit['target'] = translations[unit_id]
+                        elif 'source' in unit and not unit.get('target'):
+                            # If no translation provided but source exists, use source as target
+                            unit['target'] = unit['source']
+    
+    # Add new units from source that don't exist in target
+    if source_content and 'files' in source_content:
+        for source_file_data in source_content['files']:
+            if 'trans-units' in source_file_data:
+                # Find the corresponding target file data
+                target_file_data = None
+                if 'files' in updated_content and updated_content['files']:
+                    target_file_data = updated_content['files'][0]
+                    if 'trans-units' not in target_file_data:
+                        target_file_data['trans-units'] = []
+                
+                if target_file_data:
+                    for source_unit in source_file_data['trans-units']:
+                        source_unit_id = source_unit.get('id')
+                        if source_unit_id and source_unit_id not in existing_unit_ids:
+                            # This is a new unit from source, add it to target
+                            new_unit = {
+                                'id': source_unit_id,
+                                'source': source_unit.get('source', ''),
+                                'target': translations.get(source_unit_id, source_unit.get('source', ''))
+                            }
+                            target_file_data['trans-units'].append(new_unit)
     
     return updated_content
 

@@ -325,7 +325,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             if use_in_place:
                                 click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             # Update the original XLIFF structure with translations, preserving source text
-                            updated_content = update_xliff_targets(target_content_raw, target_content)
+                            # Also add new units from source that don't exist in target
+                            updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw)
                             write_xliff_file(target_file, updated_content, source_language, target_lang)
                         
                         updated_count = len(missing_keys) + len(modified_keys)
@@ -441,7 +442,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             if use_in_place:
                                 click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             # Update the original XLIFF structure with translations, preserving source text
-                            updated_content = update_xliff_targets(target_content_raw, target_content)
+                            # Also add new units from source that don't exist in target
+                            updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw)
                             write_xliff_file(target_file, updated_content, source_language, target_lang)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
@@ -549,7 +551,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 if use_in_place:
                                     click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                                 # Update the original XLIFF structure with translations, preserving source text
-                                updated_content = update_xliff_targets(target_content_raw, target_content)
+                                # Also add new units from source that don't exist in target
+                                updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw)
                                 write_xliff_file(target_file, updated_content, source_language, target_lang)
                             
                             click.echo(f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m")
@@ -813,7 +816,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             if use_in_place:
                                 click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             # Update the original XLIFF structure with translations, preserving source text
-                            updated_content = update_xliff_targets(target_content_raw, translated_content)
+                            # Also add new units from source that don't exist in target
+                            updated_content = update_xliff_targets(target_content_raw, translated_content, source_content_raw)
                             write_xliff_file(target_file, updated_content, source_language, target_lang)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
