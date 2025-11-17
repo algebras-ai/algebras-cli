@@ -555,8 +555,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                     click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                                 # Update the original XLIFF structure with translations, preserving source text
                                 # Also add new units from source that don't exist in target
-                                updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw)
-                                write_xliff_file(target_file, updated_content, source_language, target_lang)
+                                updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw, xlf_target_state)
+                                write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
                             
                             click.echo(f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -820,8 +820,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             # Update the original XLIFF structure with translations, preserving source text
                             # Also add new units from source that don't exist in target
-                            updated_content = update_xliff_targets(target_content_raw, translated_content, source_content_raw)
-                            write_xliff_file(target_file, updated_content, source_language, target_lang)
+                            updated_content = update_xliff_targets(target_content_raw, translated_content, source_content_raw, xlf_target_state)
+                            write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:

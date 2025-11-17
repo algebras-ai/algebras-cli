@@ -126,10 +126,9 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                         source_elem.text = unit['source']
                         target_elem = ET.SubElement(segment, 'target')
                         target_elem.text = unit.get('target', unit['source'])
-                        # Add state attribute if provided or if unit has a state
-                        unit_state = unit.get('state', target_state)
-                        if unit_state:
-                            target_elem.set('state', unit_state)
+                        # Add state attribute only if unit explicitly has one
+                        if 'state' in unit and unit['state']:
+                            target_elem.set('state', unit['state'])
                     else:
                         # XLIFF 1.2: use <trans-unit>
                         trans_unit = ET.SubElement(container, 'trans-unit')
@@ -138,10 +137,9 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                         source_elem.text = unit['source']
                         target_elem = ET.SubElement(trans_unit, 'target')
                         target_elem.text = unit.get('target', unit['source'])
-                        # Add state attribute if provided or if unit has a state
-                        unit_state = unit.get('state', target_state)
-                        if unit_state:
-                            target_elem.set('state', unit_state)
+                        # Add state attribute only if unit explicitly has one
+                        if 'state' in unit and unit['state']:
+                            target_elem.set('state', unit['state'])
     else:
         # Handle flat dictionary structure (always write as XLIFF 1.2)
         for key, value in content.items():
@@ -152,9 +150,7 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                 source_elem.text = value
                 target_elem = ET.SubElement(trans_unit, 'target')
                 target_elem.text = value
-                # Add state attribute if provided
-                if target_state:
-                    target_elem.set('state', target_state)
+                # Don't add state for flat dictionary structure - state should be set in update_xliff_targets
     
     # Write to file with proper formatting
     rough_string = ET.tostring(xliff_root, encoding='unicode')
@@ -260,11 +256,6 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
                         elif 'source' in unit and not unit.get('target'):
                             # If no translation provided but source exists, use source as target
                             unit['target'] = unit['source']
-                        
-                        # Set state if provided and unit doesn't already have one
-                        # This applies to all units, not just newly translated ones
-                        if target_state and 'state' not in unit:
-                            unit['state'] = target_state
     
     # Add new units from source that don't exist in target
     if source_content and 'files' in source_content:
