@@ -56,20 +56,57 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
         raise ValueError("XLIFF content must be a dictionary")
     
     # Ensure the directory exists
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    if os.path.dirname(file_path):
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    
+    # Determine XLIFF version from content or default to 1.2
+    version = content.get('version', '1.2')
+    if version == '2.0':
+        namespace = 'urn:oasis:names:tc:xliff:document:2.0'
+        xmlns_attr = namespace
+    else:
+        namespace = 'urn:oasis:names:tc:xliff:document:1.2'
+        xmlns_attr = namespace
+        version = '1.2'
     
     # Create XLIFF structure
     xliff_root = ET.Element('xliff')
-    xliff_root.set('version', '1.2')
-    xliff_root.set('xmlns', 'urn:oasis:names:tc:xliff:document:1.2')
+    xliff_root.set('version', version)
+    xliff_root.set('xmlns', xmlns_attr)
+    
+    # Get source language from content if available
+    if 'files' in content and content['files'] and content['files'][0].get('source-language'):
+        source_language = content['files'][0]['source-language']
+    
+    # For XLIFF 2.0, set srcLang on root element
+    if version == '2.0':
+        xliff_root.set('srcLang', source_language)
     
     file_elem = ET.SubElement(xliff_root, 'file')
-    file_elem.set('original', 'messages')
-    file_elem.set('source-language', source_language)
-    file_elem.set('target-language', target_language)
-    file_elem.set('datatype', 'plaintext')
     
-    body_elem = ET.SubElement(file_elem, 'body')
+    # Preserve original file attributes from content if available
+    if 'files' in content and content['files']:
+        file_data = content['files'][0]
+        file_elem.set('original', file_data.get('original', 'messages'))
+        file_elem.set('source-language', file_data.get('source-language', source_language))
+        file_elem.set('target-language', file_data.get('target-language', target_language))
+        if file_data.get('datatype'):
+            file_elem.set('datatype', file_data['datatype'])
+        if version == '2.0' and file_data.get('id'):
+            file_elem.set('id', file_data['id'])
+    else:
+        file_elem.set('original', 'messages')
+        file_elem.set('source-language', source_language)
+        file_elem.set('target-language', target_language)
+        file_elem.set('datatype', 'plaintext')
+    
+    if version == '2.0':
+        # XLIFF 2.0: units go directly under file, not in body
+        container = file_elem
+    else:
+        # XLIFF 1.2: units go in body
+        body_elem = ET.SubElement(file_elem, 'body')
+        container = body_elem
     
     # Handle different content structures
     if 'files' in content and isinstance(content['files'], list) and content['files']:
@@ -78,24 +115,31 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
         if 'trans-units' in file_data:
             for unit in file_data['trans-units']:
                 if 'id' in unit and 'source' in unit:
-                    trans_unit = ET.SubElement(body_elem, 'trans-unit')
-                    trans_unit.set('id', unit['id'])
-                    
-                    source_elem = ET.SubElement(trans_unit, 'source')
-                    source_elem.text = unit['source']
-                    
-                    target_elem = ET.SubElement(trans_unit, 'target')
-                    target_elem.text = unit.get('target', unit['source'])
+                    if version == '2.0':
+                        # XLIFF 2.0: use <unit> with <segment>
+                        unit_elem = ET.SubElement(container, 'unit')
+                        unit_elem.set('id', unit['id'])
+                        segment = ET.SubElement(unit_elem, 'segment')
+                        source_elem = ET.SubElement(segment, 'source')
+                        source_elem.text = unit['source']
+                        target_elem = ET.SubElement(segment, 'target')
+                        target_elem.text = unit.get('target', unit['source'])
+                    else:
+                        # XLIFF 1.2: use <trans-unit>
+                        trans_unit = ET.SubElement(container, 'trans-unit')
+                        trans_unit.set('id', unit['id'])
+                        source_elem = ET.SubElement(trans_unit, 'source')
+                        source_elem.text = unit['source']
+                        target_elem = ET.SubElement(trans_unit, 'target')
+                        target_elem.text = unit.get('target', unit['source'])
     else:
-        # Handle flat dictionary structure
+        # Handle flat dictionary structure (always write as XLIFF 1.2)
         for key, value in content.items():
             if isinstance(value, str):
-                trans_unit = ET.SubElement(body_elem, 'trans-unit')
+                trans_unit = ET.SubElement(container, 'trans-unit')
                 trans_unit.set('id', key)
-                
                 source_elem = ET.SubElement(trans_unit, 'source')
                 source_elem.text = value
-                
                 target_elem = ET.SubElement(trans_unit, 'target')
                 target_elem.text = value
     
@@ -166,6 +210,35 @@ def create_xliff_from_translations(translations: Dict[str, str],
             'trans-units': trans_units
         }]
     }
+
+
+def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, str]) -> Dict[str, Any]:
+    """
+    Update XLIFF target elements with translated strings while preserving source text.
+    
+    Args:
+        xliff_content: Original XLIFF content structure
+        translations: Dictionary of translated strings (key -> translated_value)
+        
+    Returns:
+        Updated XLIFF content with target elements updated
+    """
+    import copy
+    updated_content = copy.deepcopy(xliff_content)
+    
+    if 'files' in updated_content:
+        for file_data in updated_content['files']:
+            if 'trans-units' in file_data:
+                for unit in file_data['trans-units']:
+                    unit_id = unit.get('id')
+                    if unit_id and unit_id in translations:
+                        # Update target with translation, preserve source
+                        unit['target'] = translations[unit_id]
+                    elif unit_id and 'source' in unit and not unit.get('target'):
+                        # If no translation provided but source exists, use source as target
+                        unit['target'] = unit['source']
+    
+    return updated_content
 
 
 def _parse_xliff_root(root: ET.Element) -> Dict[str, Any]:

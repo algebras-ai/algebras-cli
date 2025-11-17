@@ -26,7 +26,7 @@ from algebras.utils.ios_stringsdict_handler import (
 )
 from algebras.utils.po_handler import read_po_file, write_po_file
 from algebras.utils.html_handler import read_html_file, write_html_file
-from algebras.utils.xliff_handler import read_xliff_file, write_xliff_file, extract_translatable_strings as extract_xliff_strings
+from algebras.utils.xliff_handler import read_xliff_file, write_xliff_file, extract_translatable_strings as extract_xliff_strings, update_xliff_targets
 
 
 def execute(language: Optional[str] = None, force: bool = False, only_missing: bool = False,
@@ -324,9 +324,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif target_file.endswith((".xlf", ".xliff")):
                             if use_in_place:
                                 click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
-                            # Persist updated XLIFF using writer, preserving structure
-                            # Use source/target languages inferred from config/loop
-                            write_xliff_file(target_file, target_content, source_language, target_lang)
+                            # Update the original XLIFF structure with translations, preserving source text
+                            updated_content = update_xliff_targets(target_content_raw, target_content)
+                            write_xliff_file(target_file, updated_content, source_language, target_lang)
                         
                         updated_count = len(missing_keys) + len(modified_keys)
                         click.echo(f"  {Fore.GREEN}✓ Updated {updated_count} keys in {target_file}\x1b[0m")
@@ -440,7 +440,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif target_file.endswith((".xlf", ".xliff")):
                             if use_in_place:
                                 click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
-                            write_xliff_file(target_file, target_content, source_language, target_lang)
+                            # Update the original XLIFF structure with translations, preserving source text
+                            updated_content = update_xliff_targets(target_content_raw, target_content)
+                            write_xliff_file(target_file, updated_content, source_language, target_lang)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                 except Exception as e:
@@ -546,7 +548,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             elif target_file.endswith((".xlf", ".xliff")):
                                 if use_in_place:
                                     click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
-                                write_xliff_file(target_file, target_content, source_language, target_lang)
+                                # Update the original XLIFF structure with translations, preserving source text
+                                updated_content = update_xliff_targets(target_content_raw, target_content)
+                                write_xliff_file(target_file, updated_content, source_language, target_lang)
                             
                             click.echo(f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -808,7 +812,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith((".xlf", ".xliff")):
                             if use_in_place:
                                 click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
-                            write_xliff_file(target_file, translated_content, source_language, target_lang)
+                            # Update the original XLIFF structure with translations, preserving source text
+                            updated_content = update_xliff_targets(target_content_raw, translated_content)
+                            write_xliff_file(target_file, updated_content, source_language, target_lang)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
