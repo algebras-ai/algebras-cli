@@ -34,7 +34,7 @@ class TestXLIFFHandler:
   </file>
 </xliff>'''
         
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False, encoding='utf-8') as f:
             f.write(xliff_content)
             temp_file = f.name
         
@@ -149,7 +149,7 @@ class TestXLIFFHandler:
   </file>
 </xliff>'''
         
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False, encoding='utf-8') as f:
             f.write(xliff_content)
             temp_file = f.name
         
@@ -182,7 +182,7 @@ class TestXLIFFHandler:
   </file>
 </xliff>'''
         
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False, encoding='utf-8') as f:
             f.write(xliff_content)
             temp_file = f.name
         
@@ -211,7 +211,7 @@ class TestXLIFFHandler:
   </file>
 </xliff>'''
         
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False, encoding='utf-8') as f:
             f.write(xliff_content)
             temp_file = f.name
         
@@ -270,7 +270,7 @@ class TestXLIFFHandler:
   </file>
 </xliff>'''
         
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False, encoding='utf-8') as f:
             f.write(xliff_content)
             temp_file = f.name
         
@@ -730,7 +730,7 @@ class TestXLIFFHandler:
   </file>
 </xliff>'''
         
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False, encoding='utf-8') as f:
             f.write(xliff_content)
             temp_file = f.name
         
@@ -977,7 +977,7 @@ class TestXLIFFHandler:
   </file>
 </xliff>'''
         
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False, encoding='utf-8') as f:
             f.write(xliff_content)
             temp_file = f.name
         
