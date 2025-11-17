@@ -26,7 +26,7 @@ from algebras.utils.ios_stringsdict_handler import (
 )
 from algebras.utils.po_handler import read_po_file, write_po_file
 from algebras.utils.html_handler import read_html_file, write_html_file
-from algebras.utils.xliff_handler import write_xliff_file
+from algebras.utils.xliff_handler import read_xliff_file, write_xliff_file, extract_translatable_strings as extract_xliff_strings
 
 
 def execute(language: Optional[str] = None, force: bool = False, only_missing: bool = False,
@@ -208,11 +208,17 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     elif source_file.endswith(".html"):
                         source_content = read_html_file(source_file)
                         target_content = read_html_file(target_file)
+                    elif source_file.endswith((".xlf", ".xliff")):
+                        # For XLIFF files, extract translatable strings to get a flat dictionary
+                        source_content_raw = read_xliff_file(source_file)
+                        target_content_raw = read_xliff_file(target_file)
+                        source_content = extract_xliff_strings(source_content_raw)
+                        target_content = extract_xliff_strings(target_content_raw)
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
                     # Extract all keys from both files
-                    if source_file.endswith(".html"):
+                    if source_file.endswith((".html", ".xlf", ".xliff")):
                         source_keys = set(source_content.keys())
                         target_keys = set(target_content.keys())
                     else:
@@ -225,8 +231,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     # Compare values to find potentially modified keys
                     modified_keys = []
                     for key in common_keys:
-                        if source_file.endswith(".html"):
-                            # For HTML files, keys are already hash-based, so compare values directly
+                        if source_file.endswith((".html", ".xlf", ".xliff")):
+                            # For HTML and XLIFF files, keys are flat, so compare values directly
                             source_value = source_content.get(key)
                             target_value = target_content.get(key)
                         else:
@@ -367,6 +373,12 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     elif source_file.endswith(".html"):
                         source_content = read_html_file(source_file)
                         target_content = read_html_file(target_file)
+                    elif source_file.endswith((".xlf", ".xliff")):
+                        # For XLIFF files, extract translatable strings to get a flat dictionary
+                        source_content_raw = read_xliff_file(source_file)
+                        target_content_raw = read_xliff_file(target_file)
+                        source_content = extract_xliff_strings(source_content_raw)
+                        target_content = extract_xliff_strings(target_content_raw)
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
@@ -471,6 +483,12 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".html"):
                             source_content = read_html_file(source_file)
                             target_content = read_html_file(target_file)
+                        elif source_file.endswith((".xlf", ".xliff")):
+                            # For XLIFF files, extract translatable strings to get a flat dictionary
+                            source_content_raw = read_xliff_file(source_file)
+                            target_content_raw = read_xliff_file(target_file)
+                            source_content = extract_xliff_strings(source_content_raw)
+                            target_content = extract_xliff_strings(target_content_raw)
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
@@ -729,6 +747,12 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".html"):
                             source_content = read_html_file(source_file)
                             target_content = read_html_file(target_file)
+                        elif source_file.endswith((".xlf", ".xliff")):
+                            # For XLIFF files, extract translatable strings to get a flat dictionary
+                            source_content_raw = read_xliff_file(source_file)
+                            target_content_raw = read_xliff_file(target_file)
+                            source_content = extract_xliff_strings(source_content_raw)
+                            target_content = extract_xliff_strings(target_content_raw)
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
