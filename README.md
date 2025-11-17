@@ -470,6 +470,8 @@ The `.algebras.config` file is used to configure the Algebras CLI. It contains t
   - `provider`: The translation provider to use. Supported values:
     - `algebras-ai`: (Default) Use Algebras AI translation API (requires `ALGEBRAS_API_KEY` environment variable)
   - `model`: The model to use (for Algebras AI provider)
+- `xlf`: XLIFF-specific configuration:
+  - `default_target_state`: Default state attribute to add to `<target>` elements for newly translated keys (default: `"translated"`). Common values: `"translated"`, `"needs-review-translation"`, `"needs-review"`, `"final"`, etc.
 
 ### Source Files Configuration
 
@@ -572,6 +574,15 @@ source_files:
 source_files:
   "html_files/index.html":
     destination_path: "html_files/index.%algebras_locale_code%.html"
+```
+
+**XLIFF files (Angular)**
+```yaml
+source_files:
+  "locale/messages.xlf":
+    destination_path: "locale/messages.%algebras_locale_code%.xlf"
+xlf:
+  default_target_state: "needs-review-translation"
 ```
 
 ### Migration from path_rules
