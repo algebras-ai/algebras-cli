@@ -16,6 +16,7 @@ from algebras.utils.android_xml_handler import read_android_xml_file
 from algebras.utils.ios_strings_handler import read_ios_strings_file
 from algebras.utils.ios_stringsdict_handler import read_ios_stringsdict_file, extract_translatable_strings
 from algebras.utils.po_handler import read_po_file
+from algebras.utils.xliff_handler import read_xliff_file, extract_translatable_strings as extract_xliff_strings
 
 
 def read_language_file(file_path: str) -> Dict[str, Any]:
@@ -46,6 +47,10 @@ def read_language_file(file_path: str) -> Dict[str, Any]:
         return extract_translatable_strings(content)
     elif file_path.endswith('.po'):
         return read_po_file(file_path)
+    elif file_path.endswith(('.xlf', '.xliff')):
+        # For XLIFF files, extract translatable strings to get a flat dictionary
+        content = read_xliff_file(file_path)
+        return extract_xliff_strings(content)
     else:
         raise ValueError(f"Unsupported file format: {file_path}")
 
@@ -112,9 +117,9 @@ def validate_language_files(source_file: str, target_file: str) -> Tuple[bool, S
         source_data = read_language_file(source_file)
         target_data = read_language_file(target_file)
         
-        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict) 
+        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff) 
         # These formats return flat key-value dictionaries rather than nested structures
-        if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict')):
+        if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff')):
             source_keys = set(source_data.keys())
             target_keys = set(target_data.keys())
             

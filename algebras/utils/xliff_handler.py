@@ -171,6 +171,7 @@ def create_xliff_from_translations(translations: Dict[str, str],
 def _parse_xliff_root(root: ET.Element) -> Dict[str, Any]:
     """
     Parse XLIFF root element into a dictionary.
+    Supports both XLIFF 1.2 and 2.0 formats.
     
     Args:
         root: XLIFF root element
@@ -178,46 +179,89 @@ def _parse_xliff_root(root: ET.Element) -> Dict[str, Any]:
     Returns:
         Dictionary representation of XLIFF content
     """
+    version = root.get('version', '1.2')
     result = {
-        'version': root.get('version', '1.2'),
+        'version': version,
         'files': []
     }
     
-    # Define namespace for XLIFF elements
-    namespace = 'urn:oasis:names:tc:xliff:document:1.2'
+    # Determine namespace based on version
+    if version == '2.0':
+        namespace = 'urn:oasis:names:tc:xliff:document:2.0'
+    else:
+        namespace = 'urn:oasis:names:tc:xliff:document:1.2'
+    
+    # Get source language from root (XLIFF 2.0) or from file element (XLIFF 1.2)
+    source_lang = root.get('srcLang') or root.get('source-language', '')
     
     # Parse file elements (handle both with and without namespace)
     file_elements = root.findall('.//file') or root.findall(f'.//{{{namespace}}}file')
     
     for file_elem in file_elements:
+        # XLIFF 2.0 uses srcLang on root, 1.2 uses source-language on file
+        file_source_lang = file_elem.get('source-language') or source_lang
         file_data = {
             'original': file_elem.get('original', ''),
-            'source-language': file_elem.get('source-language', ''),
+            'source-language': file_source_lang,
             'target-language': file_elem.get('target-language', ''),
             'datatype': file_elem.get('datatype', 'plaintext'),
             'trans-units': []
         }
         
-        # Parse translation units (handle both with and without namespace)
-        trans_units = file_elem.findall('.//trans-unit') or file_elem.findall(f'.//{{{namespace}}}trans-unit')
-        
-        for trans_unit in trans_units:
-            unit_data = {
-                'id': trans_unit.get('id', ''),
-                'source': '',
-                'target': ''
-            }
+        if version == '2.0':
+            # XLIFF 2.0: <unit> with <segment> containing <source>/<target>
+            units = file_elem.findall('.//unit') or file_elem.findall(f'.//{{{namespace}}}unit')
             
-            # Find source and target elements (handle both with and without namespace)
-            source_elem = trans_unit.find('source') or trans_unit.find(f'{{{namespace}}}source')
-            if source_elem is not None:
-                unit_data['source'] = source_elem.text or ''
+            for unit in units:
+                unit_data = {
+                    'id': unit.get('id', ''),
+                    'source': '',
+                    'target': ''
+                }
+                
+                # Find segment element
+                segment = unit.find('segment') or unit.find(f'{{{namespace}}}segment')
+                if segment is not None:
+                    # Find source and target within segment
+                    source_elem = segment.find('source') or segment.find(f'{{{namespace}}}source')
+                    if source_elem is not None:
+                        unit_data['source'] = source_elem.text or ''
+                    
+                    target_elem = segment.find('target') or segment.find(f'{{{namespace}}}target')
+                    if target_elem is not None:
+                        unit_data['target'] = target_elem.text or ''
+                else:
+                    # Fallback: look for source/target directly in unit
+                    source_elem = unit.find('source') or unit.find(f'{{{namespace}}}source')
+                    if source_elem is not None:
+                        unit_data['source'] = source_elem.text or ''
+                    
+                    target_elem = unit.find('target') or unit.find(f'{{{namespace}}}target')
+                    if target_elem is not None:
+                        unit_data['target'] = target_elem.text or ''
+                
+                file_data['trans-units'].append(unit_data)
+        else:
+            # XLIFF 1.2: <trans-unit> with <source>/<target> in <body>
+            trans_units = file_elem.findall('.//trans-unit') or file_elem.findall(f'.//{{{namespace}}}trans-unit')
             
-            target_elem = trans_unit.find('target') or trans_unit.find(f'{{{namespace}}}target')
-            if target_elem is not None:
-                unit_data['target'] = target_elem.text or ''
-            
-            file_data['trans-units'].append(unit_data)
+            for trans_unit in trans_units:
+                unit_data = {
+                    'id': trans_unit.get('id', ''),
+                    'source': '',
+                    'target': ''
+                }
+                
+                # Find source and target elements (handle both with and without namespace)
+                source_elem = trans_unit.find('source') or trans_unit.find(f'{{{namespace}}}source')
+                if source_elem is not None:
+                    unit_data['source'] = source_elem.text or ''
+                
+                target_elem = trans_unit.find('target') or trans_unit.find(f'{{{namespace}}}target')
+                if target_elem is not None:
+                    unit_data['target'] = target_elem.text or ''
+                
+                file_data['trans-units'].append(unit_data)
         
         result['files'].append(file_data)
     

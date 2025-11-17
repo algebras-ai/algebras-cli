@@ -190,3 +190,90 @@ class TestXLIFFHandler:
             assert result == "de"
         finally:
             os.unlink(temp_file)
+
+    def test_read_xliff_file_2_0(self):
+        """Test reading XLIFF 2.0 files."""
+        xliff_content = '''<?xml version="1.0" encoding="UTF-8" ?>
+<xliff version="2.0" xmlns="urn:oasis:names:tc:xliff:document:2.0" srcLang="en-US">
+  <file id="ngi18n" original="ng.template">
+    <unit id="6439365426343089851">
+      <segment>
+        <source>General</source>
+      </segment>
+    </unit>
+    <unit id="6812930637022637485">
+      <segment>
+        <source>Display</source>
+        <target>Affichage</target>
+      </segment>
+    </unit>
+  </file>
+</xliff>'''
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as f:
+            f.write(xliff_content)
+            temp_file = f.name
+        
+        try:
+            result = read_xliff_file(temp_file)
+            assert 'files' in result
+            assert result['version'] == '2.0'
+            assert len(result['files']) == 1
+            assert 'trans-units' in result['files'][0]
+            assert len(result['files'][0]['trans-units']) == 2
+            assert result['files'][0]['trans-units'][0]['id'] == '6439365426343089851'
+            assert result['files'][0]['trans-units'][0]['source'] == 'General'
+            assert result['files'][0]['trans-units'][1]['id'] == '6812930637022637485'
+            assert result['files'][0]['trans-units'][1]['source'] == 'Display'
+            assert result['files'][0]['trans-units'][1]['target'] == 'Affichage'
+        finally:
+            os.unlink(temp_file)
+
+    def test_extract_translatable_strings_xliff_2_0(self):
+        """Test extracting translatable strings from XLIFF 2.0 content."""
+        xliff_content = {
+            'version': '2.0',
+            'files': [{
+                'trans-units': [
+                    {
+                        'id': '6439365426343089851',
+                        'source': 'General',
+                        'target': ''
+                    },
+                    {
+                        'id': '6812930637022637485',
+                        'source': 'Display',
+                        'target': 'Affichage'
+                    }
+                ]
+            }]
+        }
+        
+        result = extract_translatable_strings(xliff_content)
+        expected = {
+            '6439365426343089851': 'General',
+            '6812930637022637485': 'Display'
+        }
+        assert result == expected
+
+    def test_is_valid_xliff_file_2_0(self):
+        """Test XLIFF 2.0 file validation."""
+        xliff_content = '''<?xml version="1.0" encoding="UTF-8" ?>
+<xliff version="2.0" xmlns="urn:oasis:names:tc:xliff:document:2.0" srcLang="en-US">
+  <file id="ngi18n" original="ng.template">
+    <unit id="6439365426343089851">
+      <segment>
+        <source>General</source>
+      </segment>
+    </unit>
+  </file>
+</xliff>'''
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as f:
+            f.write(xliff_content)
+            temp_file = f.name
+        
+        try:
+            assert is_valid_xliff_file(temp_file) is True
+        finally:
+            os.unlink(temp_file)
