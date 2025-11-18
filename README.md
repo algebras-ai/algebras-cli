@@ -90,9 +90,116 @@ Comprehensive guides for each supported file format with detailed usage examples
 
 ## Installation
 
+### Prerequisites
+
+- Python 3.7 or higher
+- pip (Python package installer)
+
+### Installation Methods
+
+#### Using pip
+
+Install Algebras CLI directly using pip:
+
 ```bash
 pip install git+https://github.com/algebras-ai/algebras-cli.git
 ```
+
+For a specific version or to upgrade:
+
+```bash
+pip install --upgrade git+https://github.com/algebras-ai/algebras-cli.git
+```
+
+#### Using pipx (Recommended)
+
+[pipx](https://pipx.pypa.io/) installs Python applications in isolated environments, preventing dependency conflicts with other Python packages. This is the recommended installation method.
+
+**Install pipx first:**
+
+```bash
+# On macOS/Linux
+pip install --user pipx
+pipx ensurepath
+
+# Or using Homebrew (macOS)
+brew install pipx
+pipx ensurepath
+```
+
+**Then install Algebras CLI:**
+
+```bash
+pipx install git+https://github.com/algebras-ai/algebras-cli.git
+```
+
+**Upgrade Algebras CLI:**
+
+```bash
+pipx upgrade algebras-cli
+```
+
+### Windows Installation
+
+#### Installing pipx on Windows
+
+You can install pipx on Windows using several methods:
+
+**Option 1: Using pip**
+```powershell
+# In PowerShell or Command Prompt
+pip install --user pipx
+pipx ensurepath
+```
+
+**Option 2: Using winget**
+```powershell
+winget install pipx
+```
+
+**Option 3: Using Chocolatey**
+```powershell
+choco install pipx
+```
+
+After installing pipx, restart your terminal or run `pipx ensurepath` to add pipx to your PATH.
+
+**Install Algebras CLI with pipx:**
+```powershell
+pipx install git+https://github.com/algebras-ai/algebras-cli.git
+```
+
+#### Setting Environment Variables on Windows
+
+To set the `ALGEBRAS_API_KEY` environment variable on Windows:
+
+**PowerShell (Current Session):**
+```powershell
+$env:ALGEBRAS_API_KEY="your_api_key_here"
+```
+
+**PowerShell (Permanent - User Level):**
+```powershell
+[System.Environment]::SetEnvironmentVariable('ALGEBRAS_API_KEY', 'your_api_key_here', 'User')
+```
+
+**Command Prompt (Current Session):**
+```cmd
+set ALGEBRAS_API_KEY=your_api_key_here
+```
+
+**Command Prompt (Permanent - User Level):**
+```cmd
+setx ALGEBRAS_API_KEY "your_api_key_here"
+```
+
+**Note:** After setting environment variables permanently, you may need to restart your terminal or log out and log back in for the changes to take effect.
+
+#### Windows Path Considerations
+
+- The cache location `~/.algebras.cache` resolves to `%USERPROFILE%\.algebras.cache` on Windows
+- File paths in `.algebras.config` can use both forward slashes (`/`) and backslashes (`\`) on Windows
+- If you encounter path-related issues, use forward slashes or raw strings in your configuration
 
 ## Quick Start
 
