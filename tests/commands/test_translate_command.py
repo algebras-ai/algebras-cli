@@ -338,4 +338,124 @@ class TestTranslateCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments
-            mock_execute.assert_called_with(None, False, False, ui_safe=True, verbose=False, batch_size=None, max_parallel_batches=None, glossary_id=None, prompt_file=None, regenerate_from_scratch=False, config_file=None) 
+            mock_execute.assert_called_with(None, False, False, ui_safe=True, verbose=False, batch_size=None, max_parallel_batches=None, glossary_id=None, prompt_file=None, regenerate_from_scratch=False, config_file=None)
+
+    def test_execute_reads_po_mark_fuzzy_config(self):
+        """Test that execute reads po.mark_fuzzy config and passes it to write_po_file"""
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_source_language.return_value = "en"
+        mock_config.check_deprecated_format.return_value = False
+        # Mock get_setting to return True for po.mark_fuzzy
+        mock_config.get_setting.side_effect = lambda key, default: {
+            "xlf.default_target_state": "translated",
+            "po.mark_fuzzy": True
+        }.get(key, default)
+
+        # Set up paths for testing
+        source_file = "public/locales/en/messages.po"
+        target_file = "public/locales/fr/messages.po"
+        
+        # Mock FileScanner
+        mock_scanner = MagicMock(spec=FileScanner)
+        mock_scanner.group_files_by_language.return_value = {
+            "en": [source_file],
+            "fr": []
+        }
+
+        # Mock Translator
+        mock_translator = MagicMock(spec=Translator)
+        mock_translator.translate_file.return_value = {"Hello": "Bonjour"}
+
+        # Mock write_po_file to verify it's called with mark_fuzzy=True
+        with patch("algebras.commands.translate_command.Config", return_value=mock_config), \
+             patch("algebras.commands.translate_command.FileScanner", return_value=mock_scanner), \
+             patch("algebras.commands.translate_command.Translator", return_value=mock_translator), \
+             patch("algebras.commands.translate_command.write_po_file") as mock_write_po, \
+             patch("builtins.open", mock_open()), \
+             patch("os.path.exists", return_value=False), \
+             patch("os.path.getmtime", return_value=0), \
+             patch("os.makedirs", return_value=None), \
+             patch("os.path.dirname", return_value="public/locales/fr"), \
+             patch("os.path.basename", return_value="messages.po"), \
+             patch("os.path.getsize", return_value=1024), \
+             patch("os.path.relpath", return_value=source_file), \
+             patch("algebras.commands.translate_command.determine_target_path", return_value=target_file), \
+             patch("algebras.commands.translate_command.click.echo"), \
+             patch("builtins.print"):
+
+            # Call execute
+            translate_command.execute()
+
+            # Verify get_setting was called for po.mark_fuzzy
+            mock_config.get_setting.assert_any_call("po.mark_fuzzy", False)
+            
+            # Verify write_po_file was called with mark_fuzzy=True
+            assert mock_write_po.called, "write_po_file should be called"
+            call_args = mock_write_po.call_args
+            assert call_args is not None, "write_po_file should have been called with arguments"
+            # Check that mark_fuzzy=True was passed (third argument)
+            assert len(call_args[0]) >= 3, "write_po_file should be called with at least 3 arguments"
+            assert call_args[0][2] == True, "write_po_file should be called with mark_fuzzy=True"
+
+    def test_execute_reads_po_mark_fuzzy_config_false(self):
+        """Test that execute reads po.mark_fuzzy config (False) and passes it to write_po_file"""
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_source_language.return_value = "en"
+        mock_config.check_deprecated_format.return_value = False
+        # Mock get_setting to return False for po.mark_fuzzy (default)
+        mock_config.get_setting.side_effect = lambda key, default: {
+            "xlf.default_target_state": "translated",
+            "po.mark_fuzzy": False
+        }.get(key, default)
+
+        # Set up paths for testing
+        source_file = "public/locales/en/messages.po"
+        target_file = "public/locales/fr/messages.po"
+        
+        # Mock FileScanner
+        mock_scanner = MagicMock(spec=FileScanner)
+        mock_scanner.group_files_by_language.return_value = {
+            "en": [source_file],
+            "fr": []
+        }
+
+        # Mock Translator
+        mock_translator = MagicMock(spec=Translator)
+        mock_translator.translate_file.return_value = {"Hello": "Bonjour"}
+
+        # Mock write_po_file to verify it's called with mark_fuzzy=False
+        with patch("algebras.commands.translate_command.Config", return_value=mock_config), \
+             patch("algebras.commands.translate_command.FileScanner", return_value=mock_scanner), \
+             patch("algebras.commands.translate_command.Translator", return_value=mock_translator), \
+             patch("algebras.commands.translate_command.write_po_file") as mock_write_po, \
+             patch("builtins.open", mock_open()), \
+             patch("os.path.exists", return_value=False), \
+             patch("os.path.getmtime", return_value=0), \
+             patch("os.makedirs", return_value=None), \
+             patch("os.path.dirname", return_value="public/locales/fr"), \
+             patch("os.path.basename", return_value="messages.po"), \
+             patch("os.path.getsize", return_value=1024), \
+             patch("os.path.relpath", return_value=source_file), \
+             patch("algebras.commands.translate_command.determine_target_path", return_value=target_file), \
+             patch("algebras.commands.translate_command.click.echo"), \
+             patch("builtins.print"):
+
+            # Call execute
+            translate_command.execute()
+
+            # Verify get_setting was called for po.mark_fuzzy
+            mock_config.get_setting.assert_any_call("po.mark_fuzzy", False)
+            
+            # Verify write_po_file was called with mark_fuzzy=False
+            assert mock_write_po.called, "write_po_file should be called"
+            call_args = mock_write_po.call_args
+            assert call_args is not None, "write_po_file should have been called with arguments"
+            # Check that mark_fuzzy=False was passed (third argument)
+            assert len(call_args[0]) >= 3, "write_po_file should be called with at least 3 arguments"
+            assert call_args[0][2] == False, "write_po_file should be called with mark_fuzzy=False" 
