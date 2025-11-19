@@ -75,6 +75,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
     # Get XLIFF target state from config (default: "translated")
     xlf_target_state = config.get_setting("xlf.default_target_state", "translated")
     
+    # Get PO mark_fuzzy from config (default: false)
+    po_mark_fuzzy = config.get_setting("po.mark_fuzzy", False)
+    
     # Get languages
     languages = config.get_languages()
     if verbose:
@@ -434,9 +437,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif target_file.endswith(".po"):
                             if use_in_place:
                                 # PO files already support in-place updates via write_po_file
-                                write_po_file(target_file, target_content)
+                                write_po_file(target_file, target_content, po_mark_fuzzy)
                             else:
-                                write_po_file(target_file, target_content)
+                                write_po_file(target_file, target_content, po_mark_fuzzy)
                         elif target_file.endswith(".html"):
                             if use_in_place:
                                 click.echo(f"  {Fore.YELLOW}HTML format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
@@ -545,7 +548,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 write_ios_stringsdict_file(target_file, updated_content)
                             elif target_file.endswith(".po"):
                                 # PO files already support in-place updates via write_po_file
-                                write_po_file(target_file, target_content)
+                                write_po_file(target_file, target_content, po_mark_fuzzy)
                             elif target_file.endswith(".html"):
                                 if use_in_place:
                                     click.echo(f"  {Fore.YELLOW}HTML format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
@@ -810,7 +813,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             write_ios_stringsdict_file(target_file, updated_content)
                         elif source_file.endswith(".po"):
                             # PO files already support in-place updates via write_po_file
-                            write_po_file(target_file, translated_content)
+                            write_po_file(target_file, translated_content, po_mark_fuzzy)
                         elif source_file.endswith(".html"):
                             if use_in_place:
                                 click.echo(f"  {Fore.YELLOW}HTML format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
@@ -864,7 +867,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".strings"):
                             write_ios_strings_file(target_file, translated_content)
                         elif source_file.endswith(".po"):
-                            write_po_file(target_file, translated_content)
+                            write_po_file(target_file, translated_content, po_mark_fuzzy)
                         elif source_file.endswith(".html"):
                             write_html_file(target_file, source_file, translated_content)
                         elif source_file.endswith((".xlf", ".xliff")):

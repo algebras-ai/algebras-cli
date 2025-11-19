@@ -31,13 +31,14 @@ def read_po_file(file_path: str) -> Dict[str, Any]:
     return result
 
 
-def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
+def write_po_file(file_path: str, content: Dict[str, Any], mark_fuzzy: bool = False) -> None:
     """
     Write a dictionary to a .po localization file while preserving structure.
     
     Args:
         file_path: Path to the .po file
         content: Dictionary to write
+        mark_fuzzy: If True, add "#, fuzzy" comment to every translated entry
     """
     import os
     # Check if target file exists
@@ -55,7 +56,12 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
         # Update msgstr values with new translations
         for entry in entries:
             if entry['msgid'] in content:
-                entry['msgstr'] = content[entry['msgid']]
+                old_msgstr = entry.get('msgstr', '')
+                new_msgstr = content[entry['msgid']]
+                entry['msgstr'] = new_msgstr
+                # Only add fuzzy if translation actually changed
+                if old_msgstr != new_msgstr:
+                    _add_fuzzy_comment_if_needed(entry, mark_fuzzy)
                 updated_keys.add(entry['msgid'])
         
         # Find keys that need to be added (exist in content but not in original file)
@@ -115,6 +121,7 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
                 'start_line': len(entries),
                 'end_line': len(entries)
             }
+            _add_fuzzy_comment_if_needed(new_entry, mark_fuzzy)
             entries.append(new_entry)
         
         # Reconstruct the .po file content
@@ -159,7 +166,12 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
             # Update msgstr values with new translations
             for entry in entries:
                 if entry['msgid'] in content:
-                    entry['msgstr'] = content[entry['msgid']]
+                    old_msgstr = entry.get('msgstr', '')
+                    new_msgstr = content[entry['msgid']]
+                    entry['msgstr'] = new_msgstr
+                    # Only add fuzzy if translation actually changed
+                    if old_msgstr != new_msgstr:
+                        _add_fuzzy_comment_if_needed(entry, mark_fuzzy)
                     updated_keys.add(entry['msgid'])
             
             # Find keys that need to be added (exist in content but not in template)
@@ -177,13 +189,14 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
                     'start_line': len(entries),
                     'end_line': len(entries)
                 }
+                _add_fuzzy_comment_if_needed(new_entry, mark_fuzzy)
                 entries.append(new_entry)
             
             # Reconstruct the .po file content
             new_content = _reconstruct_po_content(entries, template_content)
         else:
             # No template found, create a simple .po file from scratch
-            new_content = _create_po_from_scratch(content)
+            new_content = _create_po_from_scratch(content, mark_fuzzy)
     
     # Ensure directory exists
     dir_path = os.path.dirname(file_path)
@@ -192,6 +205,24 @@ def write_po_file(file_path: str, content: Dict[str, Any]) -> None:
     
     with open(file_path, 'w', encoding='utf-8') as f:
         f.write(new_content)
+
+
+def _add_fuzzy_comment_if_needed(entry: Dict[str, Any], mark_fuzzy: bool) -> None:
+    """
+    Add "#, fuzzy" comment to entry if mark_fuzzy is True and entry has a non-empty msgstr.
+    
+    Args:
+        entry: PO entry dictionary
+        mark_fuzzy: Whether to add fuzzy comment
+    """
+    if mark_fuzzy and entry.get('msgstr') and entry['msgstr'].strip():
+        # Check if fuzzy comment already exists
+        has_fuzzy = any('#, fuzzy' in comment or comment.strip() == '#, fuzzy' for comment in entry.get('comments', []))
+        if not has_fuzzy:
+            # Add "#, fuzzy" at the beginning of comments (standard PO format)
+            if 'comments' not in entry:
+                entry['comments'] = []
+            entry['comments'].insert(0, '#, fuzzy')
 
 
 def _parse_po_content(content: str) -> List[Dict[str, Any]]:
@@ -593,12 +624,13 @@ def _format_multiline_entry(entry_type: str, text: str) -> List[str]:
     return lines
 
 
-def _create_po_from_scratch(content: Dict[str, Any]) -> str:
+def _create_po_from_scratch(content: Dict[str, Any], mark_fuzzy: bool = False) -> str:
     """
     Create a .po file from scratch when no template is available.
     
     Args:
         content: Dictionary of translations
+        mark_fuzzy: If True, add "#, fuzzy" comment to every translated entry
         
     Returns:
         Complete .po file content
@@ -621,6 +653,10 @@ def _create_po_from_scratch(content: Dict[str, Any]) -> str:
         # Skip empty keys
         if not msgid:
             continue
+        
+        # Add fuzzy comment if needed
+        if mark_fuzzy and msgstr and msgstr.strip():
+            lines.append('#, fuzzy')
             
         # Add msgid
         if _should_be_multiline(msgid):
