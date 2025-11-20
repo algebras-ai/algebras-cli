@@ -768,7 +768,13 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                 # Handle the translation based on mode (full or missing keys only)
                 if only_missing and os.path.exists(target_file):
                     # Check which keys are missing in the target file
-                    is_valid, missing_keys = validate_language_files(source_file, target_file)
+                    # For CSV files, pass language parameters to compare the correct language columns
+                    is_valid, missing_keys = validate_language_files(
+                        source_file, target_file, 
+                        source_language=source_language, 
+                        target_language=target_lang, 
+                        config=config
+                    )
                     
                     # When --only-missing is specified, we skip outdated key detection to avoid git overhead
                     # The user explicitly wants only missing keys, not outdated ones

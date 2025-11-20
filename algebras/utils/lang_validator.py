@@ -122,7 +122,10 @@ def get_key_value(data: Dict[str, Any], key: str) -> Any:
     return current
 
 
-def validate_language_files(source_file: str, target_file: str) -> Tuple[bool, Set[str]]:
+def validate_language_files(source_file: str, target_file: str, 
+                            source_language: Optional[str] = None,
+                            target_language: Optional[str] = None,
+                            config: Optional[Any] = None) -> Tuple[bool, Set[str]]:
     """
     Validate if a target language file contains all keys from the source language file.
     Keys with empty string values are considered missing.
@@ -130,17 +133,28 @@ def validate_language_files(source_file: str, target_file: str) -> Tuple[bool, S
     Args:
         source_file: Path to the source language file
         target_file: Path to the target language file
+        source_language: Optional language code for CSV files (to extract specific language column from source)
+        target_language: Optional language code for CSV files (to extract specific language column from target)
+        config: Optional Config object for locale mapping (used for CSV files)
         
     Returns:
         Tuple of (is_valid, missing_keys)
     """
     try:
-        source_data = read_language_file(source_file)
-        target_data = read_language_file(target_file)
+        # For CSV files, pass language parameters to read_language_file
+        if source_file.endswith('.csv'):
+            source_data = read_language_file(source_file, source_language, config)
+        else:
+            source_data = read_language_file(source_file)
         
-        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff) 
+        if target_file.endswith('.csv'):
+            target_data = read_language_file(target_file, target_language, config)
+        else:
+            target_data = read_language_file(target_file)
+        
+        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff, .csv) 
         # These formats return flat key-value dictionaries rather than nested structures
-        if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff')):
+        if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv')):
             source_keys = set(source_data.keys())
             target_keys = set(target_data.keys())
             
