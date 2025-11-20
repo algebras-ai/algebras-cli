@@ -7,6 +7,21 @@ import os
 from typing import Dict, Any, List, Optional, Tuple, Set
 
 
+def _get_delimiter(file_path: str) -> str:
+    """
+    Get the delimiter for CSV/TSV files based on file extension.
+    
+    Args:
+        file_path: Path to the file
+        
+    Returns:
+        Delimiter character (',' for CSV, '\t' for TSV)
+    """
+    if file_path.lower().endswith('.tsv'):
+        return '\t'
+    return ','
+
+
 def read_csv_file(file_path: str) -> Dict[str, Any]:
     """
     Read a CSV translation file and return its content as a dictionary.
@@ -24,14 +39,15 @@ def read_csv_file(file_path: str) -> Dict[str, Any]:
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"CSV file not found: {file_path}")
     
+    delimiter = _get_delimiter(file_path)
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f)
+            reader = csv.reader(f, delimiter=delimiter)
             rows = list(reader)
     except UnicodeDecodeError:
         # Try with latin-1 encoding
         with open(file_path, 'r', encoding='latin-1') as f:
-            reader = csv.reader(f)
+            reader = csv.reader(f, delimiter=delimiter)
             rows = list(reader)
     
     if not rows:
@@ -105,8 +121,21 @@ def write_csv_file(file_path: str, content: Dict[str, Any]) -> None:
     languages = content['languages']
     translations = content['translations']
     
+    # Validate that translations is actually a dict of translation keys, not the content dict itself
+    if not isinstance(translations, dict):
+        raise ValueError(f"CSV content 'translations' must be a dictionary, got {type(translations)}")
+    
+    # Additional safety check: ensure translations is not the entire content dict
+    # (which would have keys like 'key_column', 'languages', 'translations')
+    # Filter out metadata keys if they somehow got into translations
+    metadata_keys = {'key_column', 'languages', 'translations'}
+    if metadata_keys.intersection(translations.keys()):
+        # Filter out metadata keys - they shouldn't be in translations
+        translations = {k: v for k, v in translations.items() if k not in metadata_keys}
+    
+    delimiter = _get_delimiter(file_path)
     with open(file_path, 'w', encoding='utf-8', newline='') as f:
-        writer = csv.writer(f)
+        writer = csv.writer(f, delimiter=delimiter)
         
         # Write header
         writer.writerow([key_column] + languages)
@@ -267,16 +296,17 @@ def write_csv_file_in_place(file_path: str, translations: Dict[str, str],
         return
     
     # Determine encoding by trying to read the file
+    delimiter = _get_delimiter(file_path)
     encoding = 'utf-8'
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f)
+            reader = csv.reader(f, delimiter=delimiter)
             rows = list(reader)
     except UnicodeDecodeError:
         # Try with latin-1 encoding
         encoding = 'latin-1'
         with open(file_path, 'r', encoding=encoding) as f:
-            reader = csv.reader(f)
+            reader = csv.reader(f, delimiter=delimiter)
             rows = list(reader)
     
     if not rows:
@@ -345,7 +375,7 @@ def write_csv_file_in_place(file_path: str, translations: Dict[str, str],
     os.makedirs(os.path.dirname(file_path) if os.path.dirname(file_path) else '.', exist_ok=True)
     
     with open(file_path, 'w', encoding=encoding, newline='') as f:
-        writer = csv.writer(f)
+        writer = csv.writer(f, delimiter=delimiter)
         # Write header
         writer.writerow(headers)
         # Write all rows (preserving order)
@@ -369,9 +399,10 @@ def is_glossary_csv(file_path: str) -> bool:
     Returns:
         True if the file appears to be a glossary file, False otherwise
     """
+    delimiter = _get_delimiter(file_path)
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f)
+            reader = csv.reader(f, delimiter=delimiter)
             headers = next(reader)
             
             # Glossary files typically have "Record ID" as first column

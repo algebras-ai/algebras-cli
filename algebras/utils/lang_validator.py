@@ -54,8 +54,8 @@ def read_language_file(file_path: str, language: Optional[str] = None, config: O
         # For XLIFF files, extract translatable strings to get a flat dictionary
         content = read_xliff_file(file_path)
         return extract_xliff_strings(content)
-    elif file_path.endswith('.csv'):
-        # For CSV files, extract a specific language column
+    elif file_path.endswith(('.csv', '.tsv')):
+        # For CSV/TSV files, extract a specific language column
         csv_content = read_csv_file(file_path)
         if language:
             # Map language code to actual column name using config if available
@@ -141,20 +141,20 @@ def validate_language_files(source_file: str, target_file: str,
         Tuple of (is_valid, missing_keys)
     """
     try:
-        # For CSV files, pass language parameters to read_language_file
-        if source_file.endswith('.csv'):
+        # For CSV/TSV files, pass language parameters to read_language_file
+        if source_file.endswith(('.csv', '.tsv')):
             source_data = read_language_file(source_file, source_language, config)
         else:
             source_data = read_language_file(source_file)
         
-        if target_file.endswith('.csv'):
+        if target_file.endswith(('.csv', '.tsv')):
             target_data = read_language_file(target_file, target_language, config)
         else:
             target_data = read_language_file(target_file)
         
-        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff, .csv) 
+        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff, .csv, .tsv) 
         # These formats return flat key-value dictionaries rather than nested structures
-        if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv')):
+        if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv')):
             source_keys = set(source_data.keys())
             target_keys = set(target_data.keys())
             

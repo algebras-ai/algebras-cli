@@ -96,6 +96,10 @@ class FileScanner:
                 "locales/*.csv",
                 "**/locales/*.csv",
                 "**/*.csv",
+                # TSV translation files
+                "locales/*.tsv",
+                "**/locales/*.tsv",
+                "**/*.tsv",
                 # XLSX translation files
                 "locales/*.xlsx",
                 "**/locales/*.xlsx",
