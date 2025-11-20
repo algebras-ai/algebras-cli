@@ -385,7 +385,13 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
             
             # If using source_files configuration, match files using the same logic as group_files_by_language
             if config.get_source_files():
+                # First, count expected keys from ALL source files (regardless of whether destination files exist)
+                for source_file, source_config in config.get_source_files().items():
+                    if os.path.isfile(source_file):
+                        expected_keys = source_key_counts.get(source_file, 0)
+                        total_expected_keys += expected_keys
                 
+                # Then, count translated keys only from files that have destination files
                 for source_file, source_config in config.get_source_files().items():
                     if os.path.isfile(source_file):
                         # Check if this source file has a corresponding translated file for this language
@@ -393,9 +399,6 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                         if destination_pattern:
                             resolved_path = resolve_destination_path(destination_pattern, lang, config)
                             if os.path.isfile(resolved_path):
-                                expected_keys = source_key_counts.get(source_file, 0)
-                                total_expected_keys += expected_keys
-                                
                                 # Count current translated keys and outdated keys
                                 # For CSV/TSV files, pass language parameters
                                 source_lang = source_language if source_file.endswith(('.csv', '.tsv')) else None
