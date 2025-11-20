@@ -20,13 +20,14 @@ from algebras.utils.xliff_handler import read_xliff_file, extract_translatable_s
 from algebras.utils.csv_handler import read_csv_file, extract_translatable_strings as extract_csv_strings
 
 
-def read_language_file(file_path: str, language: Optional[str] = None) -> Dict[str, Any]:
+def read_language_file(file_path: str, language: Optional[str] = None, config: Optional[Any] = None) -> Dict[str, Any]:
     """
     Read a language file and return its contents as a dictionary.
     
     Args:
         file_path: Path to the language file
         language: Optional language code for CSV files (to extract specific language column)
+        config: Optional Config object for locale mapping (used for CSV files)
         
     Returns:
         Dictionary containing the file contents
@@ -57,8 +58,13 @@ def read_language_file(file_path: str, language: Optional[str] = None) -> Dict[s
         # For CSV files, extract a specific language column
         csv_content = read_csv_file(file_path)
         if language:
-            # Extract specific language column
-            return extract_csv_strings(csv_content, language)
+            # Map language code to actual column name using config if available
+            if config is not None:
+                mapped_language = config.get_destination_locale_code(language)
+            else:
+                mapped_language = language
+            # Extract specific language column using the mapped name
+            return extract_csv_strings(csv_content, mapped_language)
         else:
             # If no language specified, return all translations (for backward compatibility)
             # Extract the first language found, or return empty dict

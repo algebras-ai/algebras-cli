@@ -45,17 +45,30 @@ def validate_languages_with_api(languages: List[str], config_file: str = None) -
         if response.status_code == 200:
             api_languages = response.json()
             # Extract language codes from API response
+            valid_codes = set()
             if isinstance(api_languages, dict) and "data" in api_languages:
-                valid_codes = set(api_languages["data"])
+                data = api_languages["data"]
+                # Extract strings from data, handling both list and dict formats
+                if isinstance(data, list):
+                    valid_codes = {item for item in data if isinstance(item, str)}
+                elif isinstance(data, dict):
+                    # If data is a dict, extract keys or values that are strings
+                    valid_codes = {k for k in data.keys() if isinstance(k, str)}
+                    valid_codes.update({v for v in data.values() if isinstance(v, str)})
             elif isinstance(api_languages, list):
-                valid_codes = set(api_languages)
+                valid_codes = {item for item in api_languages if isinstance(item, str)}
+            elif isinstance(api_languages, dict):
+                # If response is a dict, extract string keys/values
+                valid_codes = {k for k in api_languages.keys() if isinstance(k, str)}
+                valid_codes.update({v for v in api_languages.values() if isinstance(v, str)})
             else:
                 # If we can't parse the response, assume all languages are valid
                 click.echo(click.style("Warning: Could not parse language validation response.", fg='yellow'))
                 return languages, []
             
-            valid_languages = [lang for lang in languages if lang in valid_codes]
-            invalid_languages = [lang for lang in languages if lang not in valid_codes]
+            # Ensure all languages are strings before checking membership
+            valid_languages = [lang for lang in languages if isinstance(lang, str) and lang in valid_codes]
+            invalid_languages = [lang for lang in languages if isinstance(lang, str) and lang not in valid_codes]
             
             return valid_languages, invalid_languages
         else:
@@ -67,13 +80,14 @@ def validate_languages_with_api(languages: List[str], config_file: str = None) -
         return languages, []
 
 
-def count_translated_keys(file_path: str, language: Optional[str] = None) -> Tuple[int, int]:
+def count_translated_keys(file_path: str, language: Optional[str] = None, config: Optional[Config] = None) -> Tuple[int, int]:
     """
     Count translated keys (non-empty values) in a translation file.
     
     Args:
         file_path: Path to the translation file
         language: Optional language code for CSV files (to extract specific language column)
+        config: Optional Config object for locale mapping (used for CSV files)
         
     Returns:
         Tuple of (translated_keys_count, total_keys_count)
@@ -93,7 +107,7 @@ def count_translated_keys(file_path: str, language: Optional[str] = None) -> Tup
                     translated_count += 1
             return translated_count, total_keys
         
-        data = read_language_file(file_path, language)
+        data = read_language_file(file_path, language, config)
         
         # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff, .csv) 
         # These formats return flat key-value dictionaries rather than nested structures
@@ -129,7 +143,8 @@ def count_translated_keys(file_path: str, language: Optional[str] = None) -> Tup
 
 def count_current_and_outdated_keys(source_file_path: str, target_file_path: str, 
                                     source_language: Optional[str] = None, 
-                                    target_language: Optional[str] = None) -> Tuple[int, int]:
+                                    target_language: Optional[str] = None,
+                                    config: Optional[Config] = None) -> Tuple[int, int]:
     """
     Count current translated keys and outdated keys in a target translation file.
     
@@ -138,6 +153,7 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
         target_file_path: Path to the target translation file
         source_language: Optional language code for CSV source files
         target_language: Optional language code for CSV target files
+        config: Optional Config object for locale mapping (used for CSV files)
         
     Returns:
         Tuple of (current_translated_keys, outdated_keys)
@@ -172,8 +188,8 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
             # For CSV files, use the provided language parameters
             source_lang = source_language if target_file_path.endswith('.csv') else None
             target_lang = target_language if target_file_path.endswith('.csv') else None
-            source_data = read_language_file(source_file_path, source_lang)
-            target_data = read_language_file(target_file_path, target_lang)
+            source_data = read_language_file(source_file_path, source_lang, config)
+            target_data = read_language_file(target_file_path, target_lang, config)
             
             # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff, .csv)
             if target_file_path.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv')):
@@ -277,6 +293,9 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
     # Get languages
     all_languages = config.get_languages()
     
+    # Ensure all languages are strings (filter out any non-string values)
+    all_languages = [lang for lang in all_languages if isinstance(lang, str)]
+    
     # Validate languages with API
     valid_languages, invalid_languages = validate_languages_with_api(all_languages, config_file)
     
@@ -326,7 +345,7 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
             try:
                 # For CSV files, pass the source language
                 lang = source_language if source_file.endswith('.csv') else None
-                translated_keys, key_count = count_translated_keys(source_file, lang)
+                translated_keys, key_count = count_translated_keys(source_file, lang, config)
                 source_key_counts[source_file] = key_count
                 total_source_keys += key_count
             except Exception as e:
@@ -382,7 +401,7 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                                 source_lang = source_language if source_file.endswith('.csv') else None
                                 target_lang = lang if resolved_path.endswith('.csv') else None
                                 current_translated_keys, outdated_keys = count_current_and_outdated_keys(
-                                    source_file, resolved_path, source_lang, target_lang
+                                    source_file, resolved_path, source_lang, target_lang, config
                                 )
                                 
                                 total_translated_keys += current_translated_keys
@@ -428,7 +447,7 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                         source_lang = source_language if source_file.endswith('.csv') else None
                         target_lang = lang if lang_file.endswith('.csv') else None
                         current_translated_keys, outdated_keys = count_current_and_outdated_keys(
-                            source_file, lang_file, source_lang, target_lang
+                            source_file, lang_file, source_lang, target_lang, config
                         )
                         
                         total_translated_keys += current_translated_keys

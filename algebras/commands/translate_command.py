@@ -336,13 +336,15 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw, xlf_target_state)
                             write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
                         elif target_file.endswith(".csv"):
+                            # Map language code to actual column name using config
+                            mapped_target_lang = config.get_destination_locale_code(target_lang)
                             if use_in_place:
-                                write_csv_file_in_place(target_file, target_content, target_lang, keys_to_update)
+                                write_csv_file_in_place(target_file, target_content, mapped_target_lang, keys_to_update)
                             else:
                                 # Regenerate from scratch - read existing CSV and update language column
                                 existing_csv = read_csv_file(target_file) if os.path.exists(target_file) else {'languages': [], 'translations': {}, 'key_column': 'Key'}
                                 from algebras.utils.csv_handler import add_language_to_csv
-                                updated_csv = add_language_to_csv(existing_csv, target_lang, target_content)
+                                updated_csv = add_language_to_csv(existing_csv, mapped_target_lang, target_content)
                                 write_csv_file(target_file, updated_csv)
                         
                         updated_count = len(missing_keys) + len(modified_keys)
@@ -400,8 +402,11 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         # For CSV files, read the full CSV content and extract specific language columns
                         source_csv_content = read_csv_file(source_file)
                         target_csv_content = read_csv_file(target_file) if os.path.exists(target_file) else {'languages': [], 'translations': {}}
-                        source_content = extract_csv_strings(source_csv_content, source_language)
-                        target_content = extract_csv_strings(target_csv_content, target_lang) if target_lang in get_csv_language_codes(target_csv_content) else {}
+                        # Map language codes to actual column names using config
+                        mapped_source_lang = config.get_destination_locale_code(source_language)
+                        mapped_target_lang = config.get_destination_locale_code(target_lang) if target_lang else None
+                        source_content = extract_csv_strings(source_csv_content, mapped_source_lang)
+                        target_content = extract_csv_strings(target_csv_content, mapped_target_lang) if mapped_target_lang and mapped_target_lang in get_csv_language_codes(target_csv_content) else {}
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
@@ -468,13 +473,15 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw, xlf_target_state)
                             write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
                         elif target_file.endswith(".csv"):
+                            # Map language code to actual column name using config
+                            mapped_target_lang = config.get_destination_locale_code(target_lang)
                             if use_in_place:
-                                write_csv_file_in_place(target_file, target_content, target_lang, keys_to_update)
+                                write_csv_file_in_place(target_file, target_content, mapped_target_lang, keys_to_update)
                             else:
                                 # Regenerate from scratch - read existing CSV and update language column
                                 existing_csv = read_csv_file(target_file) if os.path.exists(target_file) else {'languages': [], 'translations': {}, 'key_column': 'Key'}
                                 from algebras.utils.csv_handler import add_language_to_csv
-                                updated_csv = add_language_to_csv(existing_csv, target_lang, target_content)
+                                updated_csv = add_language_to_csv(existing_csv, mapped_target_lang, target_content)
                                 write_csv_file(target_file, updated_csv)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
@@ -528,8 +535,11 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             # For CSV files, read the full CSV content and extract specific language columns
                             source_csv_content = read_csv_file(source_file)
                             target_csv_content = read_csv_file(target_file) if os.path.exists(target_file) else {'languages': [], 'translations': {}}
-                            source_content = extract_csv_strings(source_csv_content, source_language)
-                            target_content = extract_csv_strings(target_csv_content, target_lang) if target_lang in get_csv_language_codes(target_csv_content) else {}
+                            # Map language codes to actual column names using config
+                            mapped_source_lang = config.get_destination_locale_code(source_language)
+                            mapped_target_lang = config.get_destination_locale_code(target_lang) if target_lang else None
+                            source_content = extract_csv_strings(source_csv_content, mapped_source_lang)
+                            target_content = extract_csv_strings(target_csv_content, mapped_target_lang) if mapped_target_lang and mapped_target_lang in get_csv_language_codes(target_csv_content) else {}
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
@@ -810,8 +820,11 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             # For CSV files, read the full CSV content and extract specific language columns
                             source_csv_content = read_csv_file(source_file)
                             target_csv_content = read_csv_file(target_file) if os.path.exists(target_file) else {'languages': [], 'translations': {}}
-                            source_content = extract_csv_strings(source_csv_content, source_language)
-                            target_content = extract_csv_strings(target_csv_content, target_lang) if target_lang in get_csv_language_codes(target_csv_content) else {}
+                            # Map language codes to actual column names using config
+                            mapped_source_lang = config.get_destination_locale_code(source_language)
+                            mapped_target_lang = config.get_destination_locale_code(target_lang) if target_lang else None
+                            source_content = extract_csv_strings(source_csv_content, mapped_source_lang)
+                            target_content = extract_csv_strings(target_csv_content, mapped_target_lang) if mapped_target_lang and mapped_target_lang in get_csv_language_codes(target_csv_content) else {}
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
