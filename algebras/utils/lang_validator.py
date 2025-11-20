@@ -1,7 +1,7 @@
 import os
 import json
 import yaml
-from typing import Dict, Any, Set, List, Tuple
+from typing import Dict, Any, Set, List, Tuple, Optional
 from tqdm import tqdm
 from datetime import datetime
 from algebras.utils.git_utils import (
@@ -17,14 +17,16 @@ from algebras.utils.ios_strings_handler import read_ios_strings_file
 from algebras.utils.ios_stringsdict_handler import read_ios_stringsdict_file, extract_translatable_strings
 from algebras.utils.po_handler import read_po_file
 from algebras.utils.xliff_handler import read_xliff_file, extract_translatable_strings as extract_xliff_strings
+from algebras.utils.csv_handler import read_csv_file, extract_translatable_strings as extract_csv_strings
 
 
-def read_language_file(file_path: str) -> Dict[str, Any]:
+def read_language_file(file_path: str, language: Optional[str] = None) -> Dict[str, Any]:
     """
     Read a language file and return its contents as a dictionary.
     
     Args:
         file_path: Path to the language file
+        language: Optional language code for CSV files (to extract specific language column)
         
     Returns:
         Dictionary containing the file contents
@@ -51,6 +53,19 @@ def read_language_file(file_path: str) -> Dict[str, Any]:
         # For XLIFF files, extract translatable strings to get a flat dictionary
         content = read_xliff_file(file_path)
         return extract_xliff_strings(content)
+    elif file_path.endswith('.csv'):
+        # For CSV files, extract a specific language column
+        csv_content = read_csv_file(file_path)
+        if language:
+            # Extract specific language column
+            return extract_csv_strings(csv_content, language)
+        else:
+            # If no language specified, return all translations (for backward compatibility)
+            # Extract the first language found, or return empty dict
+            languages = csv_content.get('languages', [])
+            if languages:
+                return extract_csv_strings(csv_content, languages[0])
+            return {}
     else:
         raise ValueError(f"Unsupported file format: {file_path}")
 

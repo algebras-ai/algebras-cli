@@ -4,7 +4,7 @@ CSV translation file handler for multi-language translations
 
 import csv
 import os
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Set
 
 
 def read_csv_file(file_path: str) -> Dict[str, Any]:
@@ -247,6 +247,116 @@ def get_csv_language_code(file_path: str) -> Optional[str]:
     # since they contain multiple languages. Return None to indicate
     # this is a multi-language file.
     return None
+
+
+def write_csv_file_in_place(file_path: str, translations: Dict[str, str], 
+                            target_language: str, keys_to_update: Optional[Set[str]] = None) -> None:
+    """
+    Update an existing CSV file in-place, preserving structure, formatting, and other language columns.
+    
+    Args:
+        file_path: Path to the CSV file to update
+        translations: Dictionary of key-value translation pairs to update
+        target_language: Language code for the column to update
+        keys_to_update: Optional set of keys to update. If None, all keys in translations will be updated.
+    """
+    if not os.path.exists(file_path):
+        # If file doesn't exist, create new CSV file
+        csv_content = create_csv_from_translations(translations, [target_language])
+        write_csv_file(file_path, csv_content)
+        return
+    
+    # Determine encoding by trying to read the file
+    encoding = 'utf-8'
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+    except UnicodeDecodeError:
+        # Try with latin-1 encoding
+        encoding = 'latin-1'
+        with open(file_path, 'r', encoding=encoding) as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+    
+    if not rows:
+        # Empty file, create new
+        csv_content = create_csv_from_translations(translations, [target_language])
+        write_csv_file(file_path, csv_content)
+        return
+    
+    # First row is headers
+    headers = rows[0]
+    if len(headers) < 2:
+        raise ValueError(f"CSV file {file_path} must have at least 2 columns (key and at least one language)")
+    
+    key_column = headers[0]
+    language_columns = headers[1:]
+    
+    # Check if target language column exists, add if needed
+    language_index = None
+    if target_language in language_columns:
+        language_index = language_columns.index(target_language) + 1  # +1 for key column
+    else:
+        # Add new language column
+        language_columns.append(target_language)
+        language_index = len(headers)  # New column index
+        headers.append(target_language)
+    
+    # Create a map of key to row index for quick lookup
+    key_to_row_index = {}
+    for i, row in enumerate(rows[1:], start=1):
+        if row and len(row) > 0:
+            key = row[0].strip()
+            if key:
+                key_to_row_index[key] = i
+    
+    # Update existing rows and track which keys we've updated
+    updated_keys = set()
+    for key, value in translations.items():
+        # Check if we should update this key
+        if keys_to_update is not None and key not in keys_to_update:
+            continue
+        
+        if key in key_to_row_index:
+            # Update existing row
+            row_index = key_to_row_index[key]
+            row = rows[row_index]
+            
+            # Ensure row has enough columns
+            while len(row) <= language_index:
+                row.append("")
+            
+            # Update the language column
+            row[language_index] = value
+            updated_keys.add(key)
+        else:
+            # Add new row for this key
+            new_row = [key]
+            # Fill with empty values for all language columns
+            for _ in language_columns:
+                new_row.append("")
+            # Set the target language value
+            new_row[language_index] = value
+            rows.append(new_row)
+            updated_keys.add(key)
+    
+    # Write back the updated CSV file
+    os.makedirs(os.path.dirname(file_path) if os.path.dirname(file_path) else '.', exist_ok=True)
+    
+    with open(file_path, 'w', encoding=encoding, newline='') as f:
+        writer = csv.writer(f)
+        # Write header
+        writer.writerow(headers)
+        # Write all rows (preserving order)
+        for row in rows[1:]:
+            # Ensure row has correct number of columns
+            while len(row) < len(headers):
+                row.append("")
+            # Trim row if it has too many columns (shouldn't happen, but be safe)
+            if len(row) > len(headers):
+                row = row[:len(headers)]
+            writer.writerow(row)
 
 
 def is_glossary_csv(file_path: str) -> bool:
