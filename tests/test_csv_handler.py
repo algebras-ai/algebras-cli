@@ -91,6 +91,7 @@ login.button,Log In,Anmelden,Se connecter
     def test_extract_translatable_strings(self):
         """Test extracting translatable strings for a specific language."""
         csv_content = {
+            'languages': ['en', 'de', 'fr'],
             'translations': {
                 'app.title': {
                     'en': 'My Application',

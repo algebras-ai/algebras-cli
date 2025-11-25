@@ -508,10 +508,10 @@ class Translator:
             content = read_xliff_file(file_path)
         elif file_path.endswith(".properties"):
             content = read_properties_file(file_path)
-        elif file_path.endswith(".csv"):
-            # Check if it's a glossary CSV or translation CSV
+        elif file_path.endswith((".csv", ".tsv")):
+            # Check if it's a glossary CSV/TSV or translation CSV/TSV
             if is_glossary_csv(file_path):
-                raise ValueError(f"CSV file {file_path} appears to be a glossary file, not a translation file")
+                raise ValueError(f"CSV/TSV file {file_path} appears to be a glossary file, not a translation file")
             content = read_csv_file(file_path)
         elif file_path.endswith((".xlsx", ".xls")):
             # Check if it's a glossary XLSX or translation XLSX
@@ -544,8 +544,8 @@ class Translator:
         elif file_path.endswith(".properties"):
             # Properties files are flat dictionaries, translate directly
             translated = self._translate_flat_dict(content, source_lang, target_lang, ui_safe, glossary_id)
-        elif file_path.endswith(".csv"):
-            # CSV files need special handling for multi-language structure
+        elif file_path.endswith((".csv", ".tsv")):
+            # CSV/TSV files need special handling for multi-language structure
             translated = self._translate_csv_content(content, source_lang, target_lang, ui_safe, glossary_id)
         elif file_path.endswith((".xlsx", ".xls")):
             # XLSX files need special handling for multi-language structure

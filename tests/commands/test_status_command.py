@@ -108,7 +108,7 @@ class TestStatusCommand:
         
         # Create a side effect function for count_translated_keys to return different values
         # based on the file being processed
-        def count_translated_keys_side_effect(file_path):
+        def count_translated_keys_side_effect(file_path, language=None, config=None):
             if "messages.en.json" in file_path:
                 return (2, 2)  # 2 translated out of 2 total keys
             elif "labels.en.json" in file_path:
@@ -123,7 +123,7 @@ class TestStatusCommand:
                 return (0, 0)
         
         # Create a side effect function for count_current_and_outdated_keys
-        def count_current_and_outdated_keys_side_effect(source_file, target_file):
+        def count_current_and_outdated_keys_side_effect(source_file, target_file, source_language=None, target_language=None, config=None):
             if "messages.fr.json" in target_file:
                 return (1, 0)  # 1 current translated, 0 outdated
             elif "messages.es.json" in target_file:
@@ -178,7 +178,7 @@ class TestStatusCommand:
         
         # Create a side effect function for count_translated_keys to return different values
         # based on the file being processed
-        def count_translated_keys_side_effect(file_path):
+        def count_translated_keys_side_effect(file_path, language=None, config=None):
             if "messages.en.json" in file_path:
                 return (2, 2)  # 2 translated out of 2 total keys
             elif "labels.en.json" in file_path:
@@ -189,7 +189,7 @@ class TestStatusCommand:
                 return (0, 0)
         
         # Create a side effect function for count_current_and_outdated_keys
-        def count_current_and_outdated_keys_side_effect(source_file, target_file):
+        def count_current_and_outdated_keys_side_effect(source_file, target_file, source_language=None, target_language=None, config=None):
             if "messages.fr.json" in target_file:
                 return (1, 0)  # 1 current translated, 0 outdated
             else:

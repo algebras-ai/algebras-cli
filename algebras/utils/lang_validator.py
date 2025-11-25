@@ -1,7 +1,7 @@
 import os
 import json
 import yaml
-from typing import Dict, Any, Set, List, Tuple
+from typing import Dict, Any, Set, List, Tuple, Optional
 from tqdm import tqdm
 from datetime import datetime
 from algebras.utils.git_utils import (
@@ -17,14 +17,17 @@ from algebras.utils.ios_strings_handler import read_ios_strings_file
 from algebras.utils.ios_stringsdict_handler import read_ios_stringsdict_file, extract_translatable_strings
 from algebras.utils.po_handler import read_po_file
 from algebras.utils.xliff_handler import read_xliff_file, extract_translatable_strings as extract_xliff_strings
+from algebras.utils.csv_handler import read_csv_file, extract_translatable_strings as extract_csv_strings
 
 
-def read_language_file(file_path: str) -> Dict[str, Any]:
+def read_language_file(file_path: str, language: Optional[str] = None, config: Optional[Any] = None) -> Dict[str, Any]:
     """
     Read a language file and return its contents as a dictionary.
     
     Args:
         file_path: Path to the language file
+        language: Optional language code for CSV files (to extract specific language column)
+        config: Optional Config object for locale mapping (used for CSV files)
         
     Returns:
         Dictionary containing the file contents
@@ -51,6 +54,24 @@ def read_language_file(file_path: str) -> Dict[str, Any]:
         # For XLIFF files, extract translatable strings to get a flat dictionary
         content = read_xliff_file(file_path)
         return extract_xliff_strings(content)
+    elif file_path.endswith(('.csv', '.tsv')):
+        # For CSV/TSV files, extract a specific language column
+        csv_content = read_csv_file(file_path)
+        if language:
+            # Map language code to actual column name using config if available
+            if config is not None:
+                mapped_language = config.get_destination_locale_code(language)
+            else:
+                mapped_language = language
+            # Extract specific language column using the mapped name
+            return extract_csv_strings(csv_content, mapped_language)
+        else:
+            # If no language specified, return all translations (for backward compatibility)
+            # Extract the first language found, or return empty dict
+            languages = csv_content.get('languages', [])
+            if languages:
+                return extract_csv_strings(csv_content, languages[0])
+            return {}
     else:
         raise ValueError(f"Unsupported file format: {file_path}")
 
@@ -101,7 +122,10 @@ def get_key_value(data: Dict[str, Any], key: str) -> Any:
     return current
 
 
-def validate_language_files(source_file: str, target_file: str) -> Tuple[bool, Set[str]]:
+def validate_language_files(source_file: str, target_file: str, 
+                            source_language: Optional[str] = None,
+                            target_language: Optional[str] = None,
+                            config: Optional[Any] = None) -> Tuple[bool, Set[str]]:
     """
     Validate if a target language file contains all keys from the source language file.
     Keys with empty string values are considered missing.
@@ -109,17 +133,28 @@ def validate_language_files(source_file: str, target_file: str) -> Tuple[bool, S
     Args:
         source_file: Path to the source language file
         target_file: Path to the target language file
+        source_language: Optional language code for CSV files (to extract specific language column from source)
+        target_language: Optional language code for CSV files (to extract specific language column from target)
+        config: Optional Config object for locale mapping (used for CSV files)
         
     Returns:
         Tuple of (is_valid, missing_keys)
     """
     try:
-        source_data = read_language_file(source_file)
-        target_data = read_language_file(target_file)
+        # For CSV/TSV files, pass language parameters to read_language_file
+        if source_file.endswith(('.csv', '.tsv')):
+            source_data = read_language_file(source_file, source_language, config)
+        else:
+            source_data = read_language_file(source_file)
         
-        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff) 
+        if target_file.endswith(('.csv', '.tsv')):
+            target_data = read_language_file(target_file, target_language, config)
+        else:
+            target_data = read_language_file(target_file)
+        
+        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff, .csv, .tsv) 
         # These formats return flat key-value dictionaries rather than nested structures
-        if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff')):
+        if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv')):
             source_keys = set(source_data.keys())
             target_keys = set(target_data.keys())
             

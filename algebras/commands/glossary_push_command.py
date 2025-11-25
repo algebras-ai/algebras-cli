@@ -100,11 +100,12 @@ def execute(csv_file: str, name: str, batch_size: int = 100, debug: bool = False
         if file_extension == '.xlsx':
             click.echo(f"{Fore.BLUE}Parsing XLSX file: {csv_file}{Fore.RESET}")
             parser = GlossaryXLSXParser(csv_file)
-        elif file_extension == '.csv':
-            click.echo(f"{Fore.BLUE}Parsing CSV file: {csv_file}{Fore.RESET}")
+        elif file_extension in ('.csv', '.tsv'):
+            file_type = 'TSV' if file_extension == '.tsv' else 'CSV'
+            click.echo(f"{Fore.BLUE}Parsing {file_type} file: {csv_file}{Fore.RESET}")
             parser = GlossaryCSVParser(csv_file)
         else:
-            click.echo(f"{Fore.RED}Error: Unsupported file type '{file_extension}'. Only .csv and .xlsx files are supported.{Fore.RESET}")
+            click.echo(f"{Fore.RED}Error: Unsupported file type '{file_extension}'. Only .csv, .tsv, and .xlsx files are supported.{Fore.RESET}")
             return
         
         # Get file summary first

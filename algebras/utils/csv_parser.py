@@ -10,6 +10,21 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 
+def _get_delimiter(file_path: str) -> str:
+    """
+    Get the delimiter for CSV/TSV files based on file extension.
+    
+    Args:
+        file_path: Path to the file
+        
+    Returns:
+        Delimiter character (',' for CSV, '\t' for TSV)
+    """
+    if file_path.lower().endswith('.tsv'):
+        return '\t'
+    return ','
+
+
 class GlossaryCSVParser:
     """Parser for glossary CSV files with structure: Record ID, lang1, lang2, ..."""
     
@@ -39,10 +54,11 @@ class GlossaryCSVParser:
         language_codes = []
         terms = []
         
+        delimiter = _get_delimiter(str(self.csv_file_path))
         try:
             with open(self.csv_file_path, 'r', encoding='utf-8') as file:
                 # Read the first line to get headers
-                reader = csv.reader(file)
+                reader = csv.reader(file, delimiter=delimiter)
                 headers = next(reader)
                 
                 if not headers or len(headers) < 2:
@@ -118,7 +134,7 @@ class GlossaryCSVParser:
             # Try with different encoding
             try:
                 with open(self.csv_file_path, 'r', encoding='latin-1') as file:
-                    reader = csv.reader(file)
+                    reader = csv.reader(file, delimiter=delimiter)
                     headers = next(reader)
                     language_codes = headers[1:]
                     
@@ -166,9 +182,10 @@ class GlossaryCSVParser:
         Returns:
             Dictionary with file summary information
         """
+        delimiter = _get_delimiter(str(self.csv_file_path))
         try:
             with open(self.csv_file_path, 'r', encoding='utf-8') as file:
-                reader = csv.reader(file)
+                reader = csv.reader(file, delimiter=delimiter)
                 headers = next(reader)
                 language_codes = headers[1:] if len(headers) > 1 else []
                 

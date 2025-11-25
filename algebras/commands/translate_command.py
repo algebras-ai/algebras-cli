@@ -27,6 +27,7 @@ from algebras.utils.ios_stringsdict_handler import (
 from algebras.utils.po_handler import read_po_file, write_po_file
 from algebras.utils.html_handler import read_html_file, write_html_file
 from algebras.utils.xliff_handler import read_xliff_file, write_xliff_file, extract_translatable_strings as extract_xliff_strings, update_xliff_targets
+from algebras.utils.csv_handler import read_csv_file, write_csv_file, write_csv_file_in_place, extract_translatable_strings as extract_csv_strings, get_csv_language_codes
 
 
 def execute(language: Optional[str] = None, force: bool = False, only_missing: bool = False,
@@ -224,7 +225,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
                     # Extract all keys from both files
-                    if source_file.endswith((".html", ".xlf", ".xliff")):
+                    if source_file.endswith((".html", ".xlf", ".xliff", ".csv", ".tsv")):
                         source_keys = set(source_content.keys())
                         target_keys = set(target_content.keys())
                     else:
@@ -237,8 +238,8 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     # Compare values to find potentially modified keys
                     modified_keys = []
                     for key in common_keys:
-                        if source_file.endswith((".html", ".xlf", ".xliff")):
-                            # For HTML and XLIFF files, keys are flat, so compare values directly
+                        if source_file.endswith((".html", ".xlf", ".xliff", ".csv", ".tsv")):
+                            # For HTML, XLIFF, and CSV files, keys are flat, so compare values directly
                             source_value = source_content.get(key)
                             target_value = target_content.get(key)
                         else:
@@ -252,6 +253,15 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     
                     # Find keys only in source (missing keys)
                     missing_keys = source_keys - target_keys
+                    
+                    # Also check for keys that exist in target but have empty values (for CSV/TSV and other flat formats)
+                    if source_file.endswith((".html", ".xlf", ".xliff", ".csv", ".tsv")):
+                        common_keys = source_keys & target_keys
+                        for key in common_keys:
+                            target_value = target_content.get(key)
+                            # Treat empty string values as missing keys
+                            if target_value == "" or target_value is None:
+                                missing_keys.add(key)
                     
                     # Report what we found
                     if missing_keys:
@@ -334,6 +344,17 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             # Also add new units from source that don't exist in target
                             updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw, xlf_target_state)
                             write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
+                        elif target_file.endswith((".csv", ".tsv")):
+                            # Map language code to actual column name using config
+                            mapped_target_lang = config.get_destination_locale_code(target_lang)
+                            if use_in_place:
+                                write_csv_file_in_place(target_file, target_content, mapped_target_lang, keys_to_update)
+                            else:
+                                # Regenerate from scratch - read existing CSV/TSV and update language column
+                                existing_csv = read_csv_file(target_file) if os.path.exists(target_file) else {'languages': [], 'translations': {}, 'key_column': 'Key'}
+                                from algebras.utils.csv_handler import add_language_to_csv
+                                updated_csv = add_language_to_csv(existing_csv, mapped_target_lang, target_content)
+                                write_csv_file(target_file, updated_csv)
                         
                         updated_count = len(missing_keys) + len(modified_keys)
                         click.echo(f"  {Fore.GREEN}✓ Updated {updated_count} keys in {target_file}\x1b[0m")
@@ -386,6 +407,16 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         target_content_raw = read_xliff_file(target_file)
                         source_content = extract_xliff_strings(source_content_raw)
                         target_content = extract_xliff_strings(target_content_raw)
+                    elif source_file.endswith((".csv", ".tsv")):
+                        # For CSV/TSV files, read the full CSV/TSV content and extract specific language columns
+                        source_csv_content = read_csv_file(source_file)
+                        target_csv_content = read_csv_file(target_file) if os.path.exists(target_file) else {'languages': [], 'translations': {}}
+                        # Map language codes to actual column names using config
+                        mapped_source_lang = config.get_destination_locale_code(source_language)
+                        mapped_target_lang = config.get_destination_locale_code(target_lang) if target_lang else None
+                        source_content = extract_csv_strings(source_csv_content, mapped_source_lang)
+                        # extract_csv_strings now handles fuzzy matching for column headers, so we can call it directly
+                        target_content = extract_csv_strings(target_csv_content, mapped_target_lang) if mapped_target_lang else {}
                     else:
                         raise ValueError(f"Unsupported file format: {source_file}")
                     
@@ -451,6 +482,17 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             # Also add new units from source that don't exist in target
                             updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw, xlf_target_state)
                             write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
+                        elif target_file.endswith((".csv", ".tsv")):
+                            # Map language code to actual column name using config
+                            mapped_target_lang = config.get_destination_locale_code(target_lang)
+                            if use_in_place:
+                                write_csv_file_in_place(target_file, target_content, mapped_target_lang, keys_to_update)
+                            else:
+                                # Regenerate from scratch - read existing CSV/TSV and update language column
+                                existing_csv = read_csv_file(target_file) if os.path.exists(target_file) else {'languages': [], 'translations': {}, 'key_column': 'Key'}
+                                from algebras.utils.csv_handler import add_language_to_csv
+                                updated_csv = add_language_to_csv(existing_csv, mapped_target_lang, target_content)
+                                write_csv_file(target_file, updated_csv)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                 except Exception as e:
@@ -499,6 +541,16 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             target_content_raw = read_xliff_file(target_file)
                             source_content = extract_xliff_strings(source_content_raw)
                             target_content = extract_xliff_strings(target_content_raw)
+                        elif source_file.endswith((".csv", ".tsv")):
+                            # For CSV/TSV files, read the full CSV/TSV content and extract specific language columns
+                            source_csv_content = read_csv_file(source_file)
+                            target_csv_content = read_csv_file(target_file) if os.path.exists(target_file) else {'languages': [], 'translations': {}}
+                            # Map language codes to actual column names using config
+                            mapped_source_lang = config.get_destination_locale_code(source_language)
+                            mapped_target_lang = config.get_destination_locale_code(target_lang) if target_lang else None
+                            source_content = extract_csv_strings(source_csv_content, mapped_source_lang)
+                            # extract_csv_strings now handles fuzzy matching for column headers, so we can call it directly
+                            target_content = extract_csv_strings(target_csv_content, mapped_target_lang) if mapped_target_lang else {}
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
@@ -560,6 +612,20 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 # Also add new units from source that don't exist in target
                                 updated_content = update_xliff_targets(target_content_raw, target_content, source_content_raw, xlf_target_state)
                                 write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
+                            elif target_file.endswith((".csv", ".tsv")):
+                                # mapped_target_lang is already defined above at line 542
+                                if use_in_place:
+                                    write_csv_file_in_place(target_file, target_content, mapped_target_lang, keys_to_update)
+                                else:
+                                    # Regenerate from scratch - if target doesn't exist, use source file structure to preserve all keys
+                                    if os.path.exists(target_file):
+                                        existing_csv = read_csv_file(target_file)
+                                    else:
+                                        # Read from source file to preserve all keys and structure
+                                        existing_csv = read_csv_file(source_file)
+                                    from algebras.utils.csv_handler import add_language_to_csv
+                                    updated_csv = add_language_to_csv(existing_csv, mapped_target_lang, target_content)
+                                    write_csv_file(target_file, updated_csv)
                             
                             click.echo(f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -718,7 +784,13 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                 # Handle the translation based on mode (full or missing keys only)
                 if only_missing and os.path.exists(target_file):
                     # Check which keys are missing in the target file
-                    is_valid, missing_keys = validate_language_files(source_file, target_file)
+                    # For CSV files, pass language parameters to compare the correct language columns
+                    is_valid, missing_keys = validate_language_files(
+                        source_file, target_file, 
+                        source_language=source_language, 
+                        target_language=target_lang, 
+                        config=config
+                    )
                     
                     # When --only-missing is specified, we skip outdated key detection to avoid git overhead
                     # The user explicitly wants only missing keys, not outdated ones
@@ -766,6 +838,16 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             target_content_raw = read_xliff_file(target_file)
                             source_content = extract_xliff_strings(source_content_raw)
                             target_content = extract_xliff_strings(target_content_raw)
+                        elif source_file.endswith((".csv", ".tsv")):
+                            # For CSV/TSV files, read the full CSV/TSV content and extract specific language columns
+                            source_csv_content = read_csv_file(source_file)
+                            target_csv_content = read_csv_file(target_file) if os.path.exists(target_file) else {'languages': [], 'translations': {}}
+                            # Map language codes to actual column names using config
+                            mapped_source_lang = config.get_destination_locale_code(source_language)
+                            mapped_target_lang = config.get_destination_locale_code(target_lang) if target_lang else None
+                            source_content = extract_csv_strings(source_csv_content, mapped_source_lang)
+                            # extract_csv_strings now handles fuzzy matching for column headers, so we can call it directly
+                            target_content = extract_csv_strings(target_csv_content, mapped_target_lang) if mapped_target_lang else {}
                         else:
                             raise ValueError(f"Unsupported file format: {source_file}")
                         
@@ -825,6 +907,20 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             # Also add new units from source that don't exist in target
                             updated_content = update_xliff_targets(target_content_raw, translated_content, source_content_raw, xlf_target_state)
                             write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
+                        elif source_file.endswith((".csv", ".tsv")):
+                            # mapped_target_lang is already defined above at line 843
+                            if use_in_place:
+                                write_csv_file_in_place(target_file, translated_content, mapped_target_lang, keys_to_update)
+                            else:
+                                # Regenerate from scratch - if target doesn't exist, use source file structure to preserve all keys
+                                if os.path.exists(target_file):
+                                    existing_csv = read_csv_file(target_file)
+                                else:
+                                    # Read from source file to preserve all keys and structure
+                                    existing_csv = read_csv_file(source_file)
+                                from algebras.utils.csv_handler import add_language_to_csv
+                                updated_csv = add_language_to_csv(existing_csv, mapped_target_lang, translated_content)
+                                write_csv_file(target_file, updated_csv)
                         
                         click.echo(f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m")
                     except Exception as e:
@@ -847,6 +943,16 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         # Update the target structure with translations
                         updated_content = update_translatable_strings(target_content_raw, translated_content)
                         write_ios_stringsdict_file(target_file, updated_content)
+                    elif source_file.endswith((".csv", ".tsv")):
+                        # For CSV/TSV files, read existing CSV/TSV and add/update language column
+                        existing_csv = read_csv_file(source_file)
+                        translated_content = translator.translate_file(source_file, target_lang, ui_safe, glossary_id)
+                        # Map language code to actual column name using config
+                        mapped_target_lang = config.get_destination_locale_code(target_lang)
+                        # Extract the translated strings (they come as flat dict from translator)
+                        from algebras.utils.csv_handler import add_language_to_csv
+                        updated_csv = add_language_to_csv(existing_csv, mapped_target_lang, translated_content)
+                        write_csv_file(target_file, updated_csv)
                     else:
                         # For other file types, use the normal translation flow
                         translated_content = translator.translate_file(source_file, target_lang, ui_safe, glossary_id)
