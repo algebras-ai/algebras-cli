@@ -317,24 +317,27 @@ class TestHealthcheckExecute:
 
     def test_execute_with_source_files_config(self):
         """Test execute with source_files configuration"""
+        source_file = os.path.join("locales", "en.json")
+        target_file = os.path.join("locales", "fr.json")
+        
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en", "fr"]
         mock_config.get_source_language.return_value = "en"
         mock_config.get_source_files.return_value = {
-            "locales/en.json": {"destination_path": "locales/{language}.json"}
+            source_file: {"destination_path": os.path.join("locales", "{language}.json")}
         }
         
         mock_scanner = MagicMock(spec=FileScanner)
         mock_scanner.group_files_by_language.return_value = {
-            "en": ["locales/en.json"],
-            "fr": ["locales/fr.json"]
+            "en": [source_file],
+            "fr": [target_file]
         }
         
         with patch("algebras.commands.healthcheck_command.Config", return_value=mock_config), \
              patch("algebras.commands.healthcheck_command.FileScanner", return_value=mock_scanner), \
              patch("os.path.isfile", return_value=True), \
-             patch("algebras.commands.healthcheck_command.resolve_destination_path", return_value="locales/fr.json"), \
+             patch("algebras.commands.healthcheck_command.resolve_destination_path", return_value=target_file), \
              patch("algebras.commands.healthcheck_command.validate_file_pair", return_value=([], 2, set(), set())), \
              patch("algebras.commands.healthcheck_command.click.echo"):
             
@@ -381,25 +384,33 @@ class TestFindSourceFile:
 
     def test_find_source_file_directory_pattern(self):
         """Test finding source file with /lang/ directory pattern"""
-        source_files = ["locales/en/messages.json", "locales/en/labels.json"]
-        target_file = "locales/fr/messages.json"
+        source_files = [
+            os.path.join("locales", "en", "messages.json"),
+            os.path.join("locales", "en", "labels.json")
+        ]
+        target_file = os.path.join("locales", "fr", "messages.json")
         
         result = healthcheck_command.find_source_file(
             target_file, source_files, "en", "fr"
         )
         
-        assert result == "locales/en/messages.json"
+        expected = os.path.join("locales", "en", "messages.json")
+        assert os.path.normpath(result) == os.path.normpath(expected)
 
     def test_find_source_file_android_xml(self):
         """Test finding source file for Android XML (values-es -> values)"""
-        source_files = ["res/values/strings.xml", "res/values/arrays.xml"]
-        target_file = "res/values-es/strings.xml"
+        source_files = [
+            os.path.join("res", "values", "strings.xml"),
+            os.path.join("res", "values", "arrays.xml")
+        ]
+        target_file = os.path.join("res", "values-es", "strings.xml")
         
         result = healthcheck_command.find_source_file(
             target_file, source_files, "en", "es"
         )
         
-        assert result == "res/values/strings.xml"
+        expected = os.path.join("res", "values", "strings.xml")
+        assert os.path.normpath(result) == os.path.normpath(expected)
 
     def test_find_source_file_not_found(self):
         """Test finding source file when no match is found"""
@@ -418,8 +429,8 @@ class TestValidateFilePair:
 
     def test_validate_file_pair_html(self):
         """Test validate_file_pair with HTML files"""
-        source_file = "templates/en.html"
-        target_file = "templates/fr.html"
+        source_file = os.path.join("templates", "en.html")
+        target_file = os.path.join("templates", "fr.html")
         
         source_data = {"key1": "Hello", "key2": "World"}
         target_data = {"key1": "Bonjour", "key2": "Monde"}
