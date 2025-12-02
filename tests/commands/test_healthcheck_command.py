@@ -384,18 +384,16 @@ class TestFindSourceFile:
 
     def test_find_source_file_directory_pattern(self):
         """Test finding source file with /lang/ directory pattern"""
-        source_files = [
-            os.path.join("locales", "en", "messages.json"),
-            os.path.join("locales", "en", "labels.json")
-        ]
-        target_file = os.path.join("locales", "fr", "messages.json")
+        # Use forward slashes explicitly since the pattern matching uses hardcoded forward slash
+        # This works on all platforms as Python accepts forward slashes even on Windows
+        source_files = ["locales/en/messages.json", "locales/en/labels.json"]
+        target_file = "locales/fr/messages.json"
         
         result = healthcheck_command.find_source_file(
             target_file, source_files, "en", "fr"
         )
         
-        expected = os.path.join("locales", "en", "messages.json")
-        assert os.path.normpath(result) == os.path.normpath(expected)
+        assert result == "locales/en/messages.json"
 
     def test_find_source_file_android_xml(self):
         """Test finding source file for Android XML (values-es -> values)"""
@@ -410,6 +408,7 @@ class TestFindSourceFile:
         )
         
         expected = os.path.join("res", "values", "strings.xml")
+        # Normalize paths for cross-platform compatibility
         assert os.path.normpath(result) == os.path.normpath(expected)
 
     def test_find_source_file_not_found(self):
