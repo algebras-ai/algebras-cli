@@ -357,6 +357,27 @@ algebras review
 algebras review --language fr
 ```
 
+### Validate translation quality
+
+```bash
+# Check all languages
+algebras healthcheck
+
+# Check specific language
+algebras healthcheck --language fr
+
+# Verbose output with detailed information
+algebras healthcheck --verbose
+
+# Output results in JSON format
+algebras healthcheck --format json
+
+# Combine options
+algebras healthcheck --language fr --verbose
+```
+
+**Note:** The healthcheck command validates translation quality by checking formatting, placeholders, and tags. It returns exit code 0 if no errors are found, or 1 if errors are detected (useful for CI/CD pipelines).
+
 ### Check the status of your translations
 
 ```bash

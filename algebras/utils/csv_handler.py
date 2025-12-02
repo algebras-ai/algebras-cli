@@ -285,6 +285,10 @@ def add_language_to_csv(csv_content: Dict[str, Any],
     """
     Add a new language to existing CSV content.
     
+    Preserves the order of keys from the source file by iterating over
+    csv_content['translations'].keys() first, then adding any new keys
+    from translations at the end.
+    
     Args:
         csv_content: Existing CSV content
         language: New language code to add
@@ -299,10 +303,21 @@ def add_language_to_csv(csv_content: Dict[str, Any],
     if language not in csv_content['languages']:
         csv_content['languages'].append(language)
     
+    # First, iterate over source file keys to preserve order
+    # This ensures rows are written in the same order as the source file
+    for key in csv_content['translations'].keys():
+        if key in translations:
+            # Key exists in both source and translations, add the translation
+            csv_content['translations'][key][language] = translations[key]
+        # If key doesn't exist in translations, leave it empty (don't add empty value)
+    
+    # Then, handle any new keys from translations that aren't in the source file
+    # These will be added at the end, preserving source file order for existing keys
     for key, value in translations.items():
         if key not in csv_content['translations']:
+            # New key not in source file, add it at the end
             csv_content['translations'][key] = {}
-        csv_content['translations'][key][language] = value
+            csv_content['translations'][key][language] = value
     
     return csv_content
 

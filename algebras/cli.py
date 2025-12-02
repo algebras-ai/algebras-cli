@@ -12,6 +12,7 @@ from algebras.commands import init_command, add_command
 from algebras.commands import translate_command, update_command
 from algebras.commands import review_command, status_command
 from algebras.commands import configure_command, glossary_push_command
+from algebras.commands import healthcheck_command
 
 # Initialize colorama
 init()
@@ -111,6 +112,18 @@ def status(ctx, language):
     """Check the status of your translations."""
     config_file = ctx.obj.get('config_file') if ctx.obj else None
     status_command.execute(language, config_file)
+
+
+@cli.command("healthcheck")
+@click.option("--language", "-l", help="Check only the specified language.")
+@click.option("--format", type=click.Choice(['console', 'json'], case_sensitive=False), default='console', help="Output format (console or json).")
+@click.option("--verbose", is_flag=True, help="Show detailed information.")
+@click.pass_context
+def healthcheck(ctx, language, format, verbose):
+    """Check translation quality and validate formatting, placeholders, and tags."""
+    config_file = ctx.obj.get('config_file') if ctx.obj else None
+    exit_code = healthcheck_command.execute(language=language, output_format=format, verbose=verbose, config_file=config_file)
+    sys.exit(exit_code)
 
 
 @cli.command("configure")
