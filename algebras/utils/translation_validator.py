@@ -566,7 +566,81 @@ def check_non_translatable_tokens(source: str, target: str, key: Optional[str] =
     return issues
 
 
-def validate_translation(source: str, target: str, key: Optional[str] = None) -> List[Issue]:
+def extract_xliff_placeholders(text: str) -> List[str]:
+    """
+    Extract XLIFF-specific placeholders from text.
+    
+    Detects XLIFF-specific tags: ph, pc, sc, ec, mrk and their attributes.
+    
+    Args:
+        text: Text that may contain XLIFF placeholders
+        
+    Returns:
+        List of placeholder strings (XML tags as strings)
+    """
+    placeholders = []
+    
+    if not text:
+        return placeholders
+    
+    # Pattern to match XLIFF tags: <ph .../>, <pc>...</pc>, <sc .../>, <ec .../>, <mrk>...</mrk>
+    # This matches self-closing tags and paired tags
+    xliff_tag_pattern = r'<(ph|pc|sc|ec|mrk)[^>]*(?:/>|>.*?</\1>)'
+    
+    for match in re.finditer(xliff_tag_pattern, text, re.DOTALL | re.IGNORECASE):
+        placeholders.append(match.group(0))
+    
+    return placeholders
+
+
+def check_xliff_placeholders(source: str, target: str, key: Optional[str] = None) -> List[Issue]:
+    """
+    Check XLIFF placeholder consistency between source and target.
+    
+    Args:
+        source: Source string
+        target: Target translation string
+        key: Optional key for context
+        
+    Returns:
+        List of placeholder issues
+    """
+    issues = []
+    
+    source_placeholders = extract_xliff_placeholders(source)
+    target_placeholders = extract_xliff_placeholders(target)
+    
+    # Count occurrences
+    source_counts = {}
+    for pl in source_placeholders:
+        source_counts[pl] = source_counts.get(pl, 0) + 1
+    
+    target_counts = {}
+    for pl in target_placeholders:
+        target_counts[pl] = target_counts.get(pl, 0) + 1
+    
+    # Check for missing placeholders
+    for pl, count in source_counts.items():
+        if pl not in target_counts:
+            issues.append(Issue('error', 'xliff_placeholders',
+                f'Missing XLIFF placeholder in translation: {pl[:50]}... (appears {count} time(s) in source)', key))
+        elif target_counts[pl] < count:
+            issues.append(Issue('error', 'xliff_placeholders',
+                f'XLIFF placeholder {pl[:50]}... appears {count} time(s) in source but only {target_counts[pl]} time(s) in translation', key))
+    
+    # Check for extra placeholders
+    for pl, count in target_counts.items():
+        if pl not in source_counts:
+            issues.append(Issue('warning', 'xliff_placeholders',
+                f'Extra XLIFF placeholder in translation: {pl[:50]}... (not in source)', key))
+        elif source_counts[pl] < count:
+            issues.append(Issue('warning', 'xliff_placeholders',
+                f'XLIFF placeholder {pl[:50]}... appears {count} time(s) in translation but only {source_counts[pl]} time(s) in source', key))
+    
+    return issues
+
+
+def validate_translation(source: str, target: str, key: Optional[str] = None, is_xliff: bool = False) -> List[Issue]:
     """
     Run all validation checks on a translation pair.
     
@@ -590,6 +664,10 @@ def validate_translation(source: str, target: str, key: Optional[str] = None) ->
     issues.extend(check_numbers(source, target, key))
     issues.extend(check_html_xml_tags(source, target, key))
     issues.extend(check_non_translatable_tokens(source, target, key))
+    
+    # For XLIFF files, also check XLIFF-specific placeholders
+    if is_xliff:
+        issues.extend(check_xliff_placeholders(source, target, key))
     
     return issues
 

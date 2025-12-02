@@ -76,6 +76,13 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
     # Get XLIFF target state from config (default: "translated")
     xlf_target_state = config.get_setting("xlf.default_target_state", "translated")
     
+    # Get XLIFF version from config (default: "1.2", supports "1.2" or "2.0")
+    xlf_version = config.get_setting("xlf.version", "1.2")
+    if xlf_version not in ["1.2", "2.0"]:
+        if verbose:
+            click.echo(f"{Fore.YELLOW}Invalid XLIFF version '{xlf_version}', using default '1.2'\x1b[0m")
+        xlf_version = "1.2"
+    
     # Get PO mark_fuzzy from config (default: false)
     po_mark_fuzzy = config.get_setting("po.mark_fuzzy", False)
     
@@ -218,7 +225,11 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     elif source_file.endswith((".xlf", ".xliff")):
                         # For XLIFF files, extract translatable strings to get a flat dictionary
                         source_content_raw = read_xliff_file(source_file)
-                        target_content_raw = read_xliff_file(target_file)
+                        if os.path.exists(target_file):
+                            target_content_raw = read_xliff_file(target_file)
+                        else:
+                            # Create empty target with version from config
+                            target_content_raw = {'version': xlf_version, 'files': []}
                         source_content = extract_xliff_strings(source_content_raw)
                         target_content = extract_xliff_strings(target_content_raw)
                     else:
@@ -404,7 +415,11 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     elif source_file.endswith((".xlf", ".xliff")):
                         # For XLIFF files, extract translatable strings to get a flat dictionary
                         source_content_raw = read_xliff_file(source_file)
-                        target_content_raw = read_xliff_file(target_file)
+                        if os.path.exists(target_file):
+                            target_content_raw = read_xliff_file(target_file)
+                        else:
+                            # Create empty target with version from config
+                            target_content_raw = {'version': xlf_version, 'files': []}
                         source_content = extract_xliff_strings(source_content_raw)
                         target_content = extract_xliff_strings(target_content_raw)
                     elif source_file.endswith((".csv", ".tsv")):
@@ -905,7 +920,16 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             # Update the original XLIFF structure with translations, preserving source text
                             # Also add new units from source that don't exist in target
+                            # Ensure version is set from config if target file doesn't exist
+                            if not target_content_raw or 'version' not in target_content_raw:
+                                if source_content_raw and 'version' in source_content_raw:
+                                    target_content_raw = {'version': source_content_raw['version'], 'files': []}
+                                else:
+                                    target_content_raw = {'version': xlf_version, 'files': []}
                             updated_content = update_xliff_targets(target_content_raw, translated_content, source_content_raw, xlf_target_state)
+                            # Ensure version is set in updated content
+                            if 'version' not in updated_content:
+                                updated_content['version'] = xlf_version
                             write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
                         elif source_file.endswith((".csv", ".tsv")):
                             # mapped_target_lang is already defined above at line 843
@@ -977,6 +1001,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         elif source_file.endswith(".html"):
                             write_html_file(target_file, source_file, translated_content)
                         elif source_file.endswith((".xlf", ".xliff")):
+                            # Ensure version is set from config
+                            if isinstance(translated_content, dict) and 'version' not in translated_content:
+                                translated_content['version'] = xlf_version
                             write_xliff_file(target_file, translated_content, source_language, target_lang, xlf_target_state)
                         
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
