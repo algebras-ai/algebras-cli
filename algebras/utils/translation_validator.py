@@ -8,6 +8,19 @@ from typing import List, Dict, Tuple, Set, Optional
 from html.parser import HTMLParser
 
 
+# HTML5 void elements that do not require closing tags
+VOID_ELEMENTS = {
+    'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+    'meta', 'param', 'source', 'track', 'wbr'
+}
+
+# HTML5 elements with optional closing tags (can be unclosed in certain contexts)
+OPTIONAL_CLOSING_TAGS = {
+    'html', 'head', 'body', 'p', 'dt', 'dd', 'li', 'option', 'thead', 'tbody',
+    'tfoot', 'tr', 'td', 'th', 'rt', 'rp', 'optgroup', 'colgroup', 'b', 'link'
+}
+
+
 class Issue:
     """Represents a validation issue"""
     def __init__(self, severity: str, category: str, message: str, key: Optional[str] = None):
@@ -288,26 +301,50 @@ def extract_html_tags(text: str) -> List[Tuple[str, str, Dict]]:
     Returns:
         List of (type, tag_name, attributes) tuples
     """
-    parser = HTMLTagParser()
-    try:
-        parser.feed(text)
-        return parser.tags
-    except:
-        # If parsing fails, try regex fallback
-        tags = []
-        # Match opening tags
-        for match in re.finditer(r'<([a-zA-Z][a-zA-Z0-9]*)([^>]*)>', text):
-            tag_name = match.group(1)
-            attrs_str = match.group(2)
-            attrs = {}
-            # Simple attribute extraction
+    # Check for custom tag format with unquoted =value attributes (e.g., <color=green>)
+    # HTMLParser doesn't handle this format correctly, so skip it and use regex directly
+    has_custom_tags = re.search(r'<[a-zA-Z][a-zA-Z0-9]*=[^\s>]+>', text)
+    
+    if not has_custom_tags:
+        # Try HTMLParser first for standard HTML/XML
+        parser = HTMLTagParser()
+        try:
+            parser.feed(text)
+            return parser.tags
+        except:
+            # If parsing fails, fall back to regex
+            pass
+    
+    # Use regex fallback (either because of custom tags or parser failure)
+    tags = []
+    # Match opening tags
+    for match in re.finditer(r'<([a-zA-Z][a-zA-Z0-9]*)([^>]*)>', text):
+        tag_name = match.group(1)
+        attrs_str = match.group(2).strip()
+        attrs = {}
+        
+        # Handle unquoted attributes (e.g., <color=green>)
+        # First check for unquoted =value pattern at the start
+        unquoted_match = re.match(r'=([^\s>]+)', attrs_str)
+        if unquoted_match:
+            # Store the value as an attribute (use a generic key like 'value' or the tag name)
+            # For custom tags like <color=green>, we'll store it as an attribute
+            attrs['value'] = unquoted_match.group(1)
+        else:
+            # Standard quoted attribute extraction
             for attr_match in re.finditer(r'(\w+)=["\']([^"\']*)["\']', attrs_str):
                 attrs[attr_match.group(1)] = attr_match.group(2)
-            tags.append(('start', tag_name, attrs))
-        # Match closing tags
-        for match in re.finditer(r'</([a-zA-Z][a-zA-Z0-9]*)>', text):
-            tags.append(('end', match.group(1), {}))
-        return tags
+            # Also handle unquoted attributes in standard format (e.g., <tag attr=value>)
+            for attr_match in re.finditer(r'(\w+)=([^\s>]+)(?=\s|>)', attrs_str):
+                # Only add if not already captured as quoted
+                if attr_match.group(1) not in attrs:
+                    attrs[attr_match.group(1)] = attr_match.group(2)
+        
+        tags.append(('start', tag_name, attrs))
+    # Match closing tags
+    for match in re.finditer(r'</([a-zA-Z][a-zA-Z0-9]*)>', text):
+        tags.append(('end', match.group(1), {}))
+    return tags
 
 
 def check_html_xml_tags(source: str, target: str, key: Optional[str] = None) -> List[Issue]:
@@ -332,12 +369,19 @@ def check_html_xml_tags(source: str, target: str, key: Optional[str] = None) -> 
     source_tag_map = {}
     for tag_type, tag_name, attrs in source_tags:
         if tag_type == 'start':
-            source_stack.append(tag_name)
+            # Add to tag_map for counting/comparison
             if tag_name not in source_tag_map:
                 source_tag_map[tag_name] = []
             source_tag_map[tag_name].append(attrs)
+            # Only add to stack if it's not a void element
+            if tag_name.lower() not in VOID_ELEMENTS:
+                source_stack.append(tag_name)
         elif tag_type == 'end':
-            if source_stack and source_stack[-1] == tag_name:
+            # Check if trying to close a void element (invalid HTML)
+            if tag_name.lower() in VOID_ELEMENTS:
+                issues.append(Issue('error', 'html_xml',
+                    f'Source has invalid closing tag for void element: </{tag_name}>', key))
+            elif source_stack and source_stack[-1] == tag_name:
                 source_stack.pop()
             else:
                 # Mismatched closing tag
@@ -354,12 +398,19 @@ def check_html_xml_tags(source: str, target: str, key: Optional[str] = None) -> 
     target_tag_map = {}
     for tag_type, tag_name, attrs in target_tags:
         if tag_type == 'start':
-            target_stack.append(tag_name)
+            # Add to tag_map for counting/comparison
             if tag_name not in target_tag_map:
                 target_tag_map[tag_name] = []
             target_tag_map[tag_name].append(attrs)
+            # Only add to stack if it's not a void element
+            if tag_name.lower() not in VOID_ELEMENTS:
+                target_stack.append(tag_name)
         elif tag_type == 'end':
-            if target_stack and target_stack[-1] == tag_name:
+            # Check if trying to close a void element (invalid HTML)
+            if tag_name.lower() in VOID_ELEMENTS:
+                issues.append(Issue('error', 'html_xml',
+                    f'Translation has invalid closing tag for void element: </{tag_name}>', key))
+            elif target_stack and target_stack[-1] == tag_name:
                 target_stack.pop()
             else:
                 # Mismatched closing tag
@@ -372,12 +423,35 @@ def check_html_xml_tags(source: str, target: str, key: Optional[str] = None) -> 
             target_tag_map[tag_name].append(attrs)
     
     # Check for unclosed tags
-    if source_stack:
+    # Separate optional closing tags from regular tags
+    source_optional_unclosed = [tag for tag in source_stack if tag.lower() in OPTIONAL_CLOSING_TAGS]
+    source_regular_unclosed = [tag for tag in source_stack if tag.lower() not in OPTIONAL_CLOSING_TAGS]
+    target_optional_unclosed = [tag for tag in target_stack if tag.lower() in OPTIONAL_CLOSING_TAGS]
+    target_regular_unclosed = [tag for tag in target_stack if tag.lower() not in OPTIONAL_CLOSING_TAGS]
+    
+    # Always flag regular (non-optional) unclosed tags as errors
+    if source_regular_unclosed:
         issues.append(Issue('error', 'html_xml',
-            f'Source has unclosed tags: {", ".join(source_stack)}', key))
-    if target_stack:
+            f'Source has unclosed tags: {", ".join(source_regular_unclosed)}', key))
+    if target_regular_unclosed:
         issues.append(Issue('error', 'html_xml',
-            f'Translation has unclosed tags: {", ".join(target_stack)}', key))
+            f'Translation has unclosed tags: {", ".join(target_regular_unclosed)}', key))
+    
+    # For optional closing tags, only flag if they're inconsistent between source and target
+    source_optional_set = set(tag.lower() for tag in source_optional_unclosed)
+    target_optional_set = set(tag.lower() for tag in target_optional_unclosed)
+    
+    # Tags unclosed in source but not in target
+    inconsistent_source = source_optional_set - target_optional_set
+    if inconsistent_source:
+        issues.append(Issue('error', 'html_xml',
+            f'Optional closing tag inconsistency: source has unclosed {", ".join(sorted(inconsistent_source))} but translation does not', key))
+    
+    # Tags unclosed in target but not in source
+    inconsistent_target = target_optional_set - source_optional_set
+    if inconsistent_target:
+        issues.append(Issue('error', 'html_xml',
+            f'Optional closing tag inconsistency: translation has unclosed {", ".join(sorted(inconsistent_target))} but source does not', key))
     
     # Check tag counts
     for tag_name in set(list(source_tag_map.keys()) + list(target_tag_map.keys())):
