@@ -34,67 +34,76 @@ class TestXLIFFConfigPrompt:
         mock_config.load.return_value = {}
         mock_config.get_source_language.return_value = "en"
         mock_config.get_languages.return_value = ["en", "fr"]
-        mock_config.get_source_files.return_value = {}
         mock_config.get_setting.side_effect = lambda key, default=None: {
             "api.prompt": "Add HELLO at the end of each string",
-            "xlf.default_target_state": "translated"
+            "xlf.default_target_state": "translated",
+            "xlf.version": "1.2"
         }.get(key, default)
         mock_config.get_destination_locale_code.return_value = "fr"
         
-        # Mock file scanner
+        # Mock file scanner - create temp source file for scanner to find
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as source_f:
+            source_file_path = source_f.name
+        
+        # Mock get_source_files to return the source file
+        mock_config.get_source_files.return_value = {
+            source_file_path: {"destination_path": "messages.%algebras_locale_code%.xlf"}
+        }
+        
         mock_scanner = MagicMock()
-        mock_scanner.scan.return_value = {}
+        mock_scanner.group_files_by_language.return_value = {
+            "en": [source_file_path],
+            "fr": []
+        }
         
         # Mock translator
         mock_translator = MagicMock()
         mock_translator.translate_missing_keys_batch.return_value = {"key1": "Bonjour"}
         
-        with patch("algebras.commands.translate_command.Config", return_value=mock_config), \
-             patch("algebras.commands.translate_command.FileScanner", return_value=mock_scanner), \
-             patch("algebras.commands.translate_command.Translator", return_value=mock_translator), \
-             patch("algebras.commands.translate_command.validate_language_files", return_value=(True, {"key1"})), \
-             patch("algebras.commands.translate_command.read_xliff_file") as mock_read, \
-             patch("algebras.commands.translate_command.extract_xliff_strings") as mock_extract, \
-             patch("algebras.commands.translate_command.update_xliff_targets") as mock_update, \
-             patch("algebras.commands.translate_command.write_xliff_file") as mock_write, \
-             patch("os.path.exists", return_value=True), \
-             patch("os.makedirs"):
-            
-            # Setup mocks
-            mock_read.return_value = {
-                'version': '1.2',
-                'files': [{'trans-units': [{'id': 'key1', 'source': 'Hello', 'target': ''}]}]
-            }
-            mock_extract.side_effect = lambda x: {'key1': 'Hello'} if x else {}
-            mock_update.return_value = {
-                'version': '1.2',
-                'files': [{'trans-units': [{'id': 'key1', 'source': 'Hello', 'target': 'Bonjour'}]}]
-            }
-            
-            # Create temp files
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as source_f, \
-                 tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as target_f:
-                source_file = source_f.name
-                target_file = target_f.name
-            
-            try:
-                # Mock file paths
-                with patch("algebras.commands.translate_command.resolve_destination_path", return_value=target_file):
-                    # Execute with --only-missing
-                    execute(language="fr", only_missing=True, config_file=None)
-                    
-                    # Verify set_custom_prompt was called with config prompt
-                    assert mock_translator.set_custom_prompt.called
-                    call_args = mock_translator.set_custom_prompt.call_args[0][0]
-                    assert "HELLO" in call_args or "hello" in call_args.lower()
-                    
-                    # Verify translate_missing_keys_batch was called
-                    assert mock_translator.translate_missing_keys_batch.called
-            finally:
-                if os.path.exists(source_file):
-                    os.unlink(source_file)
-                if os.path.exists(target_file):
-                    os.unlink(target_file)
+        # Create temp target file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as target_f:
+            target_file = target_f.name
+        
+        try:
+            with patch("algebras.commands.translate_command.Config", return_value=mock_config), \
+                 patch("algebras.commands.translate_command.FileScanner", return_value=mock_scanner), \
+                 patch("algebras.commands.translate_command.Translator", return_value=mock_translator), \
+                 patch("algebras.commands.translate_command.validate_language_files", return_value=(True, {"key1"})), \
+                 patch("algebras.commands.translate_command.read_xliff_file") as mock_read, \
+                 patch("algebras.commands.translate_command.extract_xliff_strings") as mock_extract, \
+                 patch("algebras.commands.translate_command.update_xliff_targets") as mock_update, \
+                 patch("algebras.commands.translate_command.write_xliff_file") as mock_write, \
+                 patch("os.path.exists", return_value=True), \
+                 patch("os.makedirs"), \
+                 patch("algebras.commands.translate_command.resolve_destination_path", return_value=target_file), \
+                 patch("algebras.commands.translate_command.determine_target_path", return_value=target_file):
+                
+                # Setup mocks
+                mock_read.return_value = {
+                    'version': '1.2',
+                    'files': [{'trans-units': [{'id': 'key1', 'source': 'Hello', 'target': ''}]}]
+                }
+                mock_extract.side_effect = lambda x: {'key1': 'Hello'} if x else {}
+                mock_update.return_value = {
+                    'version': '1.2',
+                    'files': [{'trans-units': [{'id': 'key1', 'source': 'Hello', 'target': 'Bonjour'}]}]
+                }
+                
+                # Execute with --only-missing
+                execute(language="fr", only_missing=True, config_file=None)
+                
+                # Verify set_custom_prompt was called with config prompt
+                assert mock_translator.set_custom_prompt.called
+                call_args = mock_translator.set_custom_prompt.call_args[0][0]
+                assert "HELLO" in call_args or "hello" in call_args.lower()
+                
+                # Verify translate_missing_keys_batch was called
+                assert mock_translator.translate_missing_keys_batch.called
+        finally:
+            if os.path.exists(source_file_path):
+                os.unlink(source_file_path)
+            if os.path.exists(target_file):
+                os.unlink(target_file)
     
     def test_prompt_file_takes_precedence_over_config(self, monkeypatch):
         """
@@ -193,6 +202,8 @@ class TestXLIFFConfigPrompt:
         mock_config.get_source_language.return_value = "en"
         mock_config.get_languages.return_value = ["en", "fr"]
         mock_config.get_source_files.return_value = {}
+        mock_config.has_setting.return_value = False  # No batch_size setting
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
         mock_config.get_setting.side_effect = lambda key, default=None: {
             "api.prompt": "Custom prompt",
             "xlf.default_target_state": "translated"

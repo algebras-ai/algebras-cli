@@ -54,13 +54,17 @@ class TestXLIFFStateAttribute:
             
             # Find target element
             namespace = 'urn:oasis:names:tc:xliff:document:1.2'
-            target_elem = root.find(f'.//{{{namespace}}}target') or root.find('.//target')
+            target_elem = root.find(f'.//{{{namespace}}}target')
+            if target_elem is None:
+                target_elem = root.find('.//target')
             
             assert target_elem is not None
             assert target_elem.get('state') == 'translated'
             
             # Verify state is NOT on segment (XLIFF 1.2 doesn't have segment)
-            segment_elem = root.find(f'.//{{{namespace}}}segment') or root.find('.//segment')
+            segment_elem = root.find(f'.//{{{namespace}}}segment')
+            if segment_elem is None:
+                segment_elem = root.find('.//segment')
             assert segment_elem is None  # XLIFF 1.2 doesn't use segment
         finally:
             if os.path.exists(temp_file):
@@ -102,7 +106,9 @@ class TestXLIFFStateAttribute:
             
             # Find segment element
             namespace = 'urn:oasis:names:tc:xliff:document:2.0'
-            segment_elem = root.find(f'.//{{{namespace}}}segment') or root.find('.//segment')
+            segment_elem = root.find(f'.//{{{namespace}}}segment')
+            if segment_elem is None:
+                segment_elem = root.find('.//segment')
             
             assert segment_elem is not None
             assert segment_elem.get('state') == 'translated'
@@ -184,7 +190,9 @@ class TestXLIFFStateAttribute:
             tree = ET.parse(temp_file_12)
             root = tree.getroot()
             namespace = 'urn:oasis:names:tc:xliff:document:1.2'
-            target_elem = root.find(f'.//{{{namespace}}}target') or root.find('.//target')
+            target_elem = root.find(f'.//{{{namespace}}}target')
+            if target_elem is None:
+                target_elem = root.find('.//target')
             
             # For 1.2, state should be on target
             assert target_elem is not None
@@ -215,7 +223,9 @@ class TestXLIFFStateAttribute:
             tree = ET.parse(temp_file_20)
             root = tree.getroot()
             namespace = 'urn:oasis:names:tc:xliff:document:2.0'
-            segment_elem = root.find(f'.//{{{namespace}}}segment') or root.find('.//segment')
+            segment_elem = root.find(f'.//{{{namespace}}}segment')
+            if segment_elem is None:
+                segment_elem = root.find('.//segment')
             
             # For 2.0, state should be on segment
             assert segment_elem is not None

@@ -926,7 +926,7 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                     target_content_raw = {'version': source_content_raw['version'], 'files': []}
                                 else:
                                     target_content_raw = {'version': xlf_version, 'files': []}
-                            updated_content = update_xliff_targets(target_content_raw, translated_content, source_content_raw, xlf_target_state)
+                            updated_content = update_xliff_targets(target_content_raw, translated_content, source_content_raw, xlf_target_state, only_missing=True)
                             # Ensure version is set in updated content
                             if 'version' not in updated_content:
                                 updated_content['version'] = xlf_version

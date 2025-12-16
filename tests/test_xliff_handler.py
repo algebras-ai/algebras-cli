@@ -627,10 +627,11 @@ class TestXLIFFHandler:
             write_xliff_file(temp_file, xliff_content, "en", "es", "translated")
             
             # Read it back and verify state attribute is present
+            # For XLIFF 2.0, state goes on segment, not target
             with open(temp_file, 'r', encoding='utf-8') as f:
                 content = f.read()
                 assert 'state="needs-review-translation"' in content
-                assert '<target state="needs-review-translation">Hola</target>' in content
+                assert '<segment state="needs-review-translation">' in content
         finally:
             os.unlink(temp_file)
 

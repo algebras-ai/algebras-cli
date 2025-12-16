@@ -174,7 +174,7 @@ class TestXLIFFOnlyMissingPreservation:
             'key2': 'Monde'   # Should be added (missing)
         }
         
-        updated = update_xliff_targets(target_content, translations, source_content)
+        updated = update_xliff_targets(target_content, translations, source_content, only_missing=True)
         
         # Verify key1 was NOT overwritten
         key1_unit = next((u for u in updated['files'][0]['trans-units'] if u['id'] == 'key1'), None)
