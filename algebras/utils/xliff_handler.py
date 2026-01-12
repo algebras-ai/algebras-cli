@@ -331,29 +331,14 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
                                 unit['target'] = translations[unit_id]
                             
                             # For existing units, preserve existing state if present
-                            # If no state exists and target_state is provided, add it
-                            # This applies even when preserving existing targets in only_missing mode
+                            # DO NOT add new state to existing units
                             if existing_state:
                                 unit['state'] = existing_state
                                 logger.debug(f"Preserved existing state '{existing_state}' for unit {unit_id}")
-                            elif target_state:
-                                # Add state to units that don't have one yet
-                                unit['state'] = target_state
-                                logger.debug(f"Added state '{target_state}' to existing unit {unit_id} (no previous state)")
                         elif 'source' in unit and not existing_target:
                             # If no translation provided but source exists and target is empty, use source as target
                             unit['target'] = unit['source']
-                            # Add state if provided and unit doesn't have one
-                            if not existing_state and target_state:
-                                unit['state'] = target_state
-                        
-                        # For ALL existing units (even if not in translations dict), add state if missing and target_state is provided
-                        # This ensures state is added to all units when using --only-missing or when file already has all translations
-                        # Check if state is missing or empty (empty string should be treated as missing)
-                        current_state = unit.get('state')
-                        if target_state and (not current_state or current_state.strip() == ''):
-                            unit['state'] = target_state
-                            logger.debug(f"Added state '{target_state}' to existing unit {unit_id} (unit not in translations dict or already had target)")
+                            # DO NOT add state to existing units
     
     # Add new units from source that don't exist in target
     if source_content and 'files' in source_content:

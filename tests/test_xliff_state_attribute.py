@@ -272,11 +272,11 @@ class TestXLIFFStateAttribute:
     
     def test_state_attribute_added_to_existing_units_without_state(self):
         """
-        Test that state attribute is added to existing units that don't have a state.
+        Test that state attribute is NOT added to existing units, only preserved if present.
         
-        Behavior: When update_xliff_targets is called with target_state, it should add
-        the state to existing units that don't have one yet. This allows default_target_state
-        from config to be applied to units that were added before the config was set.
+        Behavior: When update_xliff_targets is called with target_state, it should NOT add
+        the state to existing units. State is only added to new units from source_content.
+        This prevents changing the state of units that were already reviewed/translated.
         """
         # Target with existing units but no state
         target_content = {
@@ -302,14 +302,14 @@ class TestXLIFFStateAttribute:
             }]
         }
         
-        # Update with target_state - should add state to key1 but preserve key2's state
+        # Update with target_state - should NOT add state to key1, but preserve key2's state
         translations = {'key1': 'Salut', 'key2': 'Monde'}
         updated = update_xliff_targets(target_content, translations, None, target_state='translated')
         
-        # Verify key1 got state added
+        # Verify key1 did NOT get state added (existing units don't get state)
         key1_unit = next((u for u in updated['files'][0]['trans-units'] if u['id'] == 'key1'), None)
         assert key1_unit is not None
-        assert key1_unit.get('state') == 'translated'  # State was added
+        assert 'state' not in key1_unit  # State was NOT added to existing unit
         
         # Verify key2's existing state was preserved
         key2_unit = next((u for u in updated['files'][0]['trans-units'] if u['id'] == 'key2'), None)
@@ -318,11 +318,11 @@ class TestXLIFFStateAttribute:
     
     def test_state_attribute_added_to_existing_units_with_only_missing(self):
         """
-        Test that state attribute is added to existing units when using only_missing flag.
+        Test that state attribute is NOT added to existing units when using only_missing flag.
         
-        Behavior: When using --only-missing flag, existing units that don't have a state
-        should get the state attribute added if target_state is provided. This ensures
-        that default_target_state from config is applied even when preserving existing translations.
+        Behavior: When using --only-missing flag, existing units should NOT get the state
+        attribute added. State is only added to new units from source_content. This prevents
+        changing the state of units that were already reviewed/translated.
         """
         # Target with existing units but no state
         target_content = {
@@ -342,7 +342,7 @@ class TestXLIFFStateAttribute:
         }
         
         # Update with only_missing=True and target_state
-        # key1 already has a target, so it should be preserved but get state added
+        # key1 already has a target, so it should be preserved and state should NOT be added
         translations = {'key1': 'Salut'}  # This should be ignored due to only_missing
         updated = update_xliff_targets(target_content, translations, None, target_state='needs-review-translation', only_missing=True)
         
@@ -351,8 +351,8 @@ class TestXLIFFStateAttribute:
         assert key1_unit is not None
         assert key1_unit['target'] == 'Bonjour'  # Target preserved
         
-        # Verify key1 got state added even though target was preserved
-        assert key1_unit.get('state') == 'needs-review-translation'  # State was added
+        # Verify key1 did NOT get state added (existing units don't get state)
+        assert 'state' not in key1_unit  # State was NOT added to existing unit
     
     def test_state_attribute_on_segment_xliff_20_with_only_missing(self):
         """
