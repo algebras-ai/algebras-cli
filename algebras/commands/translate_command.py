@@ -125,8 +125,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
     
     # Initialize translator
     translator = Translator(config=config)
+    translator.set_verbose(verbose)
     if verbose:
-        click.echo(f"{Fore.BLUE}Initialized translator\x1b[0m")
+        click.echo(f"{Fore.BLUE}Initialized translator with verbose mode\x1b[0m")
     
     # Handle custom prompt from file or config
     custom_prompt = None
@@ -1036,6 +1037,39 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         from algebras.utils.csv_handler import add_language_to_csv
                         updated_csv = add_language_to_csv(existing_csv, mapped_target_lang, translated_content)
                         write_csv_file(target_file, updated_csv)
+                    elif source_file.endswith((".xlf", ".xliff")):
+                        # For XLIFF files, extract strings, translate, then update structure
+                        # Don't use translator.translate_file() as it returns structured dict, not flat translations
+                        source_content_raw = read_xliff_file(source_file)
+                        # Extract flat translatable strings
+                        source_content = extract_xliff_strings(source_content_raw)
+                        
+                        # Translate the flat dictionary
+                        translated_content = translator._translate_flat_dict(
+                            source_content, 
+                            source_language, 
+                            target_lang, 
+                            ui_safe, 
+                            glossary_id
+                        )
+                        
+                        # Create empty target structure with version from source
+                        target_version = source_content_raw.get('version', xlf_version) if source_content_raw else xlf_version
+                        target_content_raw = {'version': target_version, 'files': []}
+                        if verbose:
+                            click.echo(f"  {Fore.CYAN}Creating new XLIFF file with version {target_version} and state '{xlf_target_state}'\x1b[0m")
+                            # Show sample translations
+                            sample_count = min(3, len(translated_content))
+                            if sample_count > 0:
+                                click.echo(f"  {Fore.CYAN}Sample translations:{Fore.RESET}")
+                                for i, (key, value) in enumerate(list(translated_content.items())[:sample_count]):
+                                    source_value = source_content.get(key, '')
+                                    click.echo(f"    {key[:30]}... : '{source_value[:40]}...' → '{value[:40]}...'")
+                        
+                        # Use update_xliff_targets to properly structure the content and add state
+                        updated_content = update_xliff_targets(target_content_raw, translated_content, source_content_raw, xlf_target_state)
+                        write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
+                        click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     else:
                         # For other file types, use the normal translation flow
                         translated_content = translator.translate_file(source_file, target_lang, ui_safe, glossary_id)
@@ -1059,22 +1093,6 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             write_po_file(target_file, translated_content, po_mark_fuzzy)
                         elif source_file.endswith(".html"):
                             write_html_file(target_file, source_file, translated_content)
-                        elif source_file.endswith((".xlf", ".xliff")):
-                            # For XLIFF files, we need to use the structured format to properly add state
-                            # Read source file to get structure, then use update_xliff_targets
-                            source_content_raw = read_xliff_file(source_file)
-                            # Create empty target structure with version from source
-                            target_version = source_content_raw.get('version', xlf_version) if source_content_raw else xlf_version
-                            target_content_raw = {'version': target_version, 'files': []}
-                            if verbose:
-                                click.echo(f"  {Fore.CYAN}Creating new XLIFF file with version {target_version} and state '{xlf_target_state}'\x1b[0m")
-                            # Filter out any metadata keys (like 'version') from translated_content before processing
-                            # These shouldn't be treated as translation units
-                            filtered_translations = {k: v for k, v in translated_content.items() 
-                                                   if k != 'version' and isinstance(v, str)}
-                            # Use update_xliff_targets to properly structure the content and add state
-                            updated_content = update_xliff_targets(target_content_raw, filtered_translations, source_content_raw, xlf_target_state)
-                            write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
                         
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
         

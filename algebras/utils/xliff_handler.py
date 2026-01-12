@@ -336,8 +336,10 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
                                 unit['state'] = existing_state
                                 logger.debug(f"Preserved existing state '{existing_state}' for unit {unit_id}")
                         elif 'source' in unit and not existing_target:
-                            # If no translation provided but source exists and target is empty, use source as target
-                            unit['target'] = unit['source']
+                            # If no translation provided but source exists and target is empty
+                            # Leave target empty rather than copying source - this indicates missing translation
+                            logger.debug(f"No translation provided for existing unit {unit_id}, leaving target empty")
+                            unit['target'] = ''
                             # DO NOT add state to existing units
     
     # Add new units from source that don't exist in target
@@ -356,10 +358,16 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
                         source_unit_id = source_unit.get('id')
                         if source_unit_id and source_unit_id not in existing_unit_ids:
                             # This is a new unit from source, add it to target
+                            # Check if we have a translation, otherwise use empty string (not source)
+                            target_value = translations.get(source_unit_id, '')
+                            if not target_value:
+                                # No translation provided - this is important to detect
+                                logger.warning(f"No translation provided for new unit {source_unit_id}, using empty target")
+                            
                             new_unit = {
                                 'id': source_unit_id,
                                 'source': source_unit.get('source', ''),
-                                'target': translations.get(source_unit_id, source_unit.get('source', ''))
+                                'target': target_value
                             }
                             # Add state attribute if provided
                             if target_state:
