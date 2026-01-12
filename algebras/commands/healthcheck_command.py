@@ -237,7 +237,8 @@ def validate_file_pair(source_file: str, target_file: str, source_language: str,
                     
                     # Only check if target is translated (non-empty)
                     if target_value and target_value.strip():
-                        key_issues = validate_translation(source_value, target_value, key)
+                        is_xliff = source_file.endswith(('.xlf', '.xliff'))
+                        key_issues = validate_translation(source_value, target_value, key, is_xliff=is_xliff)
                         issues.extend(key_issues)
                         keys_checked += 1
                         # Track keys with issues
@@ -269,7 +270,8 @@ def validate_file_pair(source_file: str, target_file: str, source_language: str,
                         
                         # Only check if target is translated (non-empty)
                         if target_value and target_value.strip():
-                            key_issues = validate_translation(source_value, target_value, key)
+                            is_xliff = target_file.endswith(('.xlf', '.xliff'))
+                            key_issues = validate_translation(source_value, target_value, key, is_xliff=is_xliff)
                             issues.extend(key_issues)
                             keys_checked += 1
                             # Track keys with issues
@@ -294,7 +296,8 @@ def validate_file_pair(source_file: str, target_file: str, source_language: str,
                         # Only check string values that are translated
                         if isinstance(source_value, str) and isinstance(target_value, str):
                             if target_value and target_value.strip():
-                                key_issues = validate_translation(source_value, target_value, key)
+                                is_xliff = target_file.endswith(('.xlf', '.xliff'))
+                                key_issues = validate_translation(source_value, target_value, key, is_xliff=is_xliff)
                                 issues.extend(key_issues)
                                 keys_checked += 1
                                 # Track keys with issues

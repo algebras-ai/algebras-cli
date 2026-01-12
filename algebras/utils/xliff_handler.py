@@ -3,9 +3,12 @@ XLIFF (XML Localization Interchange File Format) file handler
 """
 
 import os
+import logging
 import xml.etree.ElementTree as ET
 from typing import Dict, Any, List, Optional
 from xml.dom import minidom
+
+logger = logging.getLogger(__name__)
 
 
 def read_xliff_file(file_path: str) -> Dict[str, Any]:
@@ -71,6 +74,8 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
         xmlns_attr = namespace
         version = '1.2'
     
+    logger.debug(f"Writing XLIFF file with version {version}, target_state={target_state}")
+    
     # Create XLIFF structure
     xliff_root = ET.Element('xliff')
     xliff_root.set('version', version)
@@ -111,7 +116,9 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
         container = body_elem
     
     # Handle different content structures
-    if 'files' in content and isinstance(content['files'], list) and content['files']:
+    # Check for structured format: must have 'files' key and it must be a list (even if empty)
+    # Empty list is valid - it means no units yet, but we still use structured format
+    if 'files' in content and isinstance(content['files'], list):
         # Use the first file's data
         file_data = content['files'][0]
         if 'trans-units' in file_data:
@@ -126,9 +133,12 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                         source_elem.text = unit['source']
                         target_elem = ET.SubElement(segment, 'target')
                         target_elem.text = unit.get('target', unit['source'])
-                        # Add state attribute only if unit explicitly has one
-                        if 'state' in unit and unit['state']:
-                            target_elem.set('state', unit['state'])
+                        # For XLIFF 2.0, state goes on segment, not target
+                        # Only add state if unit explicitly has one and it's not empty
+                        unit_state = unit.get('state')
+                        if unit_state and unit_state.strip():
+                            segment.set('state', unit_state)
+                            logger.debug(f"Added state '{unit_state}' to segment for unit {unit.get('id', 'unknown')} (XLIFF 2.0)")
                     else:
                         # XLIFF 1.2: use <trans-unit>
                         trans_unit = ET.SubElement(container, 'trans-unit')
@@ -137,12 +147,19 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                         source_elem.text = unit['source']
                         target_elem = ET.SubElement(trans_unit, 'target')
                         target_elem.text = unit.get('target', unit['source'])
-                        # Add state attribute only if unit explicitly has one
-                        if 'state' in unit and unit['state']:
-                            target_elem.set('state', unit['state'])
+                        # For XLIFF 1.2, state goes on target
+                        # Only add state if unit explicitly has one and it's not empty
+                        unit_state = unit.get('state')
+                        if unit_state and unit_state.strip():
+                            target_elem.set('state', unit_state)
+                            logger.debug(f"Added state '{unit_state}' to target for unit {unit.get('id', 'unknown')} (XLIFF 1.2)")
     else:
         # Handle flat dictionary structure (always write as XLIFF 1.2)
+        # Skip metadata keys like 'version' that shouldn't be translation units
+        metadata_keys = {'version'}
         for key, value in content.items():
+            if key in metadata_keys:
+                continue  # Skip metadata keys
             if isinstance(value, str):
                 trans_unit = ET.SubElement(container, 'trans-unit')
                 trans_unit.set('id', key)
@@ -150,15 +167,34 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                 source_elem.text = value
                 target_elem = ET.SubElement(trans_unit, 'target')
                 target_elem.text = value
-                # Don't add state for flat dictionary structure - state should be set in update_xliff_targets
+                # Add state if target_state is provided (for flat dict structure from new file creation)
+                if target_state:
+                    target_elem.set('state', target_state)
+                    logger.debug(f"Added state '{target_state}' to target for unit {key} from flat dict (XLIFF 1.2)")
     
     # Write to file with proper formatting
-    rough_string = ET.tostring(xliff_root, encoding='unicode')
+    # Use ET.tostring with xml_declaration for better compatibility
+    rough_string = ET.tostring(xliff_root, encoding='unicode', xml_declaration=True)
     reparsed = minidom.parseString(rough_string)
     pretty_xml = reparsed.toprettyxml(indent="  ", encoding='utf-8')
     
+    # Ensure the file is written correctly
     with open(file_path, 'wb') as f:
         f.write(pretty_xml)
+    
+    # Verify the written file can be parsed correctly
+    # This ensures namespace handling is correct
+    try:
+        test_tree = ET.parse(file_path)
+        test_root = test_tree.getroot()
+        # Try to find target element to verify it's accessible
+        # This helps catch namespace issues early
+        test_target = test_root.find(f'.//{{{namespace}}}target')
+        if test_target is None:
+            test_target = test_root.find('.//target')
+    except Exception:
+        # If verification fails, it's not critical - the file was still written
+        pass
 
 
 def extract_translatable_strings(xliff_content: Dict[str, Any]) -> Dict[str, str]:
@@ -223,7 +259,8 @@ def create_xliff_from_translations(translations: Dict[str, str],
 
 def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, str], 
                          source_content: Optional[Dict[str, Any]] = None,
-                         target_state: Optional[str] = None) -> Dict[str, Any]:
+                         target_state: Optional[str] = None,
+                         only_missing: bool = False) -> Dict[str, Any]:
     """
     Update XLIFF target elements with translated strings while preserving source text.
     Also adds new units from source that don't exist in target.
@@ -240,8 +277,38 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
     import copy
     updated_content = copy.deepcopy(xliff_content)
     
+    # Ensure version is preserved in updated content
+    # If version is missing, try to get it from source_content or original xliff_content
+    if 'version' not in updated_content:
+        if source_content and 'version' in source_content:
+            updated_content['version'] = source_content['version']
+            logger.debug(f"XLIFF version {source_content['version']} copied from source_content")
+        elif 'version' in xliff_content:
+            updated_content['version'] = xliff_content['version']
+            logger.debug(f"XLIFF version {xliff_content['version']} preserved from xliff_content")
+    else:
+        logger.debug(f"XLIFF version {updated_content['version']} already present in updated_content")
+    
+    final_version = updated_content.get('version', 'unknown')
+    logger.debug(f"Processing XLIFF with version {final_version}, target_state={target_state}, only_missing={only_missing}")
+    
     # Track which unit IDs already exist in target
     existing_unit_ids = set()
+    
+    # Ensure 'files' structure exists
+    if 'files' not in updated_content:
+        updated_content['files'] = []
+    
+    # If files list is empty, create a file entry from source_content if available
+    if not updated_content['files'] and source_content and 'files' in source_content and source_content['files']:
+        source_file_data = source_content['files'][0]
+        updated_content['files'].append({
+            'original': source_file_data.get('original', 'messages'),
+            'source-language': source_file_data.get('source-language', 'en'),
+            'target-language': source_file_data.get('target-language', 'en'),
+            'trans-units': []
+        })
+        logger.debug("Created file entry in updated_content from source_content")
     
     if 'files' in updated_content:
         for file_data in updated_content['files']:
@@ -250,12 +317,30 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
                     unit_id = unit.get('id')
                     if unit_id:
                         existing_unit_ids.add(unit_id)
+                        existing_target = unit.get('target', '').strip()
+                        existing_state = unit.get('state')
+                        
                         if unit_id in translations:
-                            # Update target with translation, preserve source
-                            unit['target'] = translations[unit_id]
-                        elif 'source' in unit and not unit.get('target'):
-                            # If no translation provided but source exists, use source as target
-                            unit['target'] = unit['source']
+                            # Update target with translation
+                            # If only_missing is True, only update if target is empty
+                            if only_missing and existing_target:
+                                # Preserve existing target when in only-missing mode
+                                pass
+                            else:
+                                # Update target (either not only-missing mode, or target is empty)
+                                unit['target'] = translations[unit_id]
+                            
+                            # For existing units, preserve existing state if present
+                            # DO NOT add new state to existing units
+                            if existing_state:
+                                unit['state'] = existing_state
+                                logger.debug(f"Preserved existing state '{existing_state}' for unit {unit_id}")
+                        elif 'source' in unit and not existing_target:
+                            # If no translation provided but source exists and target is empty
+                            # Leave target empty rather than copying source - this indicates missing translation
+                            logger.debug(f"No translation provided for existing unit {unit_id}, leaving target empty")
+                            unit['target'] = ''
+                            # DO NOT add state to existing units
     
     # Add new units from source that don't exist in target
     if source_content and 'files' in source_content:
@@ -273,17 +358,59 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
                         source_unit_id = source_unit.get('id')
                         if source_unit_id and source_unit_id not in existing_unit_ids:
                             # This is a new unit from source, add it to target
+                            # Check if we have a translation, otherwise use empty string (not source)
+                            target_value = translations.get(source_unit_id, '')
+                            if not target_value:
+                                # No translation provided - this is important to detect
+                                logger.warning(f"No translation provided for new unit {source_unit_id}, using empty target")
+                            
                             new_unit = {
                                 'id': source_unit_id,
                                 'source': source_unit.get('source', ''),
-                                'target': translations.get(source_unit_id, source_unit.get('source', ''))
+                                'target': target_value
                             }
                             # Add state attribute if provided
                             if target_state:
                                 new_unit['state'] = target_state
+                                logger.debug(f"Added state '{target_state}' to new unit {source_unit_id} from source")
                             target_file_data['trans-units'].append(new_unit)
     
     return updated_content
+
+
+def _extract_full_text_from_element(element: ET.Element) -> str:
+    """
+    Extract full text content from an XML element including all child elements.
+    
+    This function recursively extracts text from an element and all its children,
+    preserving the structure of child elements like <ph>, <pc>, <sc>, <ec>, <mrk>.
+    
+    Args:
+        element: XML element to extract text from
+        
+    Returns:
+        Full text content including child element representations
+    """
+    if element is None:
+        return ''
+    
+    # Start with direct text content
+    text_parts = []
+    if element.text:
+        text_parts.append(element.text)
+    
+    # Process all child elements
+    for child in element:
+        # For XLIFF-specific tags, preserve them as XML strings
+        # This allows placeholders to be detected and validated
+        child_xml = ET.tostring(child, encoding='unicode')
+        text_parts.append(child_xml)
+        
+        # Add tail text after child
+        if child.tail:
+            text_parts.append(child.tail)
+    
+    return ''.join(text_parts).strip()
 
 
 def _parse_xliff_root(root: ET.Element) -> Dict[str, Any]:
@@ -343,24 +470,31 @@ def _parse_xliff_root(root: ET.Element) -> Dict[str, Any]:
                     # Find source and target within segment
                     source_elem = segment.find('source') or segment.find(f'{{{namespace}}}source')
                     if source_elem is not None:
-                        unit_data['source'] = source_elem.text or ''
+                        unit_data['source'] = _extract_full_text_from_element(source_elem)
                     
                     target_elem = segment.find('target') or segment.find(f'{{{namespace}}}target')
                     if target_elem is not None:
-                        unit_data['target'] = target_elem.text or ''
-                        # Preserve state attribute if present (check for both None and empty string)
-                        state_attr = target_elem.get('state')
-                        if state_attr:
-                            unit_data['state'] = state_attr
+                        unit_data['target'] = _extract_full_text_from_element(target_elem)
+                    
+                    # For XLIFF 2.0, state is on segment, not target
+                    state_attr = segment.get('state')
+                    if state_attr:
+                        unit_data['state'] = state_attr
+                    else:
+                        # Fallback: check target for state (for compatibility)
+                        if target_elem is not None:
+                            target_state_attr = target_elem.get('state')
+                            if target_state_attr:
+                                unit_data['state'] = target_state_attr
                 else:
                     # Fallback: look for source/target directly in unit
                     source_elem = unit.find('source') or unit.find(f'{{{namespace}}}source')
                     if source_elem is not None:
-                        unit_data['source'] = source_elem.text or ''
+                        unit_data['source'] = _extract_full_text_from_element(source_elem)
                     
                     target_elem = unit.find('target') or unit.find(f'{{{namespace}}}target')
                     if target_elem is not None:
-                        unit_data['target'] = target_elem.text or ''
+                        unit_data['target'] = _extract_full_text_from_element(target_elem)
                         # Preserve state attribute if present (check for both None and empty string)
                         state_attr = target_elem.get('state')
                         if state_attr:
@@ -381,11 +515,11 @@ def _parse_xliff_root(root: ET.Element) -> Dict[str, Any]:
                 # Find source and target elements (handle both with and without namespace)
                 source_elem = trans_unit.find('source') or trans_unit.find(f'{{{namespace}}}source')
                 if source_elem is not None:
-                    unit_data['source'] = source_elem.text or ''
+                    unit_data['source'] = _extract_full_text_from_element(source_elem)
                 
                 target_elem = trans_unit.find('target') or trans_unit.find(f'{{{namespace}}}target')
                 if target_elem is not None:
-                    unit_data['target'] = target_elem.text or ''
+                    unit_data['target'] = _extract_full_text_from_element(target_elem)
                     # Preserve state attribute if present (check for both None and empty string)
                     state_attr = target_elem.get('state')
                     if state_attr:

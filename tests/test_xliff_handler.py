@@ -525,9 +525,10 @@ class TestXLIFFHandler:
         
         result = update_xliff_targets(xliff_content, translations)
         
-        # Should use source as target if no translation and target is empty
+        # Should keep target empty (not use source) when no translation provided
+        # This makes missing translations more visible
         assert result['files'][0]['trans-units'][0]['source'] == 'Hello'
-        assert result['files'][0]['trans-units'][0]['target'] == 'Hello'
+        assert result['files'][0]['trans-units'][0]['target'] == ''
 
     def test_update_xliff_targets_adds_missing_units_from_source(self):
         """Test that update_xliff_targets adds new units from source that don't exist in target."""
@@ -627,10 +628,11 @@ class TestXLIFFHandler:
             write_xliff_file(temp_file, xliff_content, "en", "es", "translated")
             
             # Read it back and verify state attribute is present
+            # For XLIFF 2.0, state goes on segment, not target
             with open(temp_file, 'r', encoding='utf-8') as f:
                 content = f.read()
                 assert 'state="needs-review-translation"' in content
-                assert '<target state="needs-review-translation">Hola</target>' in content
+                assert '<segment state="needs-review-translation">' in content
         finally:
             os.unlink(temp_file)
 

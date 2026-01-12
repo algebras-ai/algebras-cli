@@ -75,6 +75,21 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
     
     # Get XLIFF target state from config (default: "translated")
     xlf_target_state = config.get_setting("xlf.default_target_state", "translated")
+    if verbose:
+        click.echo(f"{Fore.BLUE}XLIFF target state: {xlf_target_state}\x1b[0m")
+    
+    # Get XLIFF version from config (default: "1.2", supports "1.2" or "2.0")
+    # Convert to string in case config returns a number
+    xlf_version_raw = config.get_setting("xlf.version", "1.2")
+    xlf_version = str(xlf_version_raw) if xlf_version_raw is not None else "1.2"
+    
+    # Validate version - must be "1.2" or "2.0"
+    if xlf_version not in ["1.2", "2.0"]:
+        if verbose:
+            click.echo(f"{Fore.YELLOW}Invalid XLIFF version '{xlf_version}' in config, using default '1.2'\x1b[0m")
+        xlf_version = "1.2"
+    if verbose:
+        click.echo(f"{Fore.BLUE}XLIFF version from config: {xlf_version} (will be overridden by file version if detected)\x1b[0m")
     
     # Get PO mark_fuzzy from config (default: false)
     po_mark_fuzzy = config.get_setting("po.mark_fuzzy", False)
@@ -110,8 +125,9 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
     
     # Initialize translator
     translator = Translator(config=config)
+    translator.set_verbose(verbose)
     if verbose:
-        click.echo(f"{Fore.BLUE}Initialized translator\x1b[0m")
+        click.echo(f"{Fore.BLUE}Initialized translator with verbose mode\x1b[0m")
     
     # Handle custom prompt from file or config
     custom_prompt = None
@@ -218,7 +234,20 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     elif source_file.endswith((".xlf", ".xliff")):
                         # For XLIFF files, extract translatable strings to get a flat dictionary
                         source_content_raw = read_xliff_file(source_file)
-                        target_content_raw = read_xliff_file(target_file)
+                        # Detect version from source file first (most authoritative)
+                        if source_content_raw and 'version' in source_content_raw:
+                            detected_source_version = source_content_raw['version']
+                            if verbose and detected_source_version != xlf_version:
+                                click.echo(f"  {Fore.CYAN}Source file has XLIFF version {detected_source_version}, overriding config version {xlf_version}\x1b[0m")
+                        
+                        if os.path.exists(target_file):
+                            target_content_raw = read_xliff_file(target_file)
+                        else:
+                            # Create empty target with version from source file (if available) or config
+                            target_version = source_content_raw.get('version', xlf_version) if source_content_raw else xlf_version
+                            target_content_raw = {'version': target_version, 'files': []}
+                            if verbose:
+                                click.echo(f"  {Fore.CYAN}Created new target file with XLIFF version {target_version}\x1b[0m")
                         source_content = extract_xliff_strings(source_content_raw)
                         target_content = extract_xliff_strings(target_content_raw)
                     else:
@@ -404,7 +433,20 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                     elif source_file.endswith((".xlf", ".xliff")):
                         # For XLIFF files, extract translatable strings to get a flat dictionary
                         source_content_raw = read_xliff_file(source_file)
-                        target_content_raw = read_xliff_file(target_file)
+                        # Detect version from source file first (most authoritative)
+                        if source_content_raw and 'version' in source_content_raw:
+                            detected_source_version = source_content_raw['version']
+                            if verbose and detected_source_version != xlf_version:
+                                click.echo(f"  {Fore.CYAN}Source file has XLIFF version {detected_source_version}, overriding config version {xlf_version}\x1b[0m")
+                        
+                        if os.path.exists(target_file):
+                            target_content_raw = read_xliff_file(target_file)
+                        else:
+                            # Create empty target with version from source file (if available) or config
+                            target_version = source_content_raw.get('version', xlf_version) if source_content_raw else xlf_version
+                            target_content_raw = {'version': target_version, 'files': []}
+                            if verbose:
+                                click.echo(f"  {Fore.CYAN}Created new target file with XLIFF version {target_version}\x1b[0m")
                         source_content = extract_xliff_strings(source_content_raw)
                         target_content = extract_xliff_strings(target_content_raw)
                     elif source_file.endswith((".csv", ".tsv")):
@@ -905,7 +947,49 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                                 click.echo(f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}")
                             # Update the original XLIFF structure with translations, preserving source text
                             # Also add new units from source that don't exist in target
-                            updated_content = update_xliff_targets(target_content_raw, translated_content, source_content_raw, xlf_target_state)
+                            # Ensure version is set - prefer source file version, then target file version, then config
+                            if not target_content_raw:
+                                target_content_raw = {}
+                            
+                            # Determine XLIFF version from source/target files or config
+                            detected_version = None
+                            if source_content_raw and 'version' in source_content_raw:
+                                detected_version = source_content_raw['version']
+                                if verbose:
+                                    click.echo(f"  {Fore.CYAN}Detected XLIFF version {detected_version} from source file\x1b[0m")
+                            elif target_content_raw and 'version' in target_content_raw:
+                                detected_version = target_content_raw['version']
+                                if verbose:
+                                    click.echo(f"  {Fore.CYAN}Detected XLIFF version {detected_version} from target file\x1b[0m")
+                            else:
+                                detected_version = xlf_version
+                                if verbose:
+                                    click.echo(f"  {Fore.CYAN}Using XLIFF version {detected_version} from config\x1b[0m")
+                            
+                            # Prefer source file version as authoritative, fallback to target file version, then config
+                            if source_content_raw and 'version' in source_content_raw:
+                                target_content_raw['version'] = source_content_raw['version']
+                            elif 'version' not in target_content_raw:
+                                target_content_raw['version'] = xlf_version
+                            
+                            if verbose:
+                                click.echo(f"  {Fore.CYAN}Applying target state '{xlf_target_state}' to XLIFF units\x1b[0m")
+                            
+                            updated_content = update_xliff_targets(target_content_raw, translated_content, source_content_raw, xlf_target_state, only_missing=True)
+                            # Ensure version is set in updated content (update_xliff_targets should preserve it, but double-check)
+                            if 'version' not in updated_content:
+                                # Fallback: prefer source version, then target version, then config
+                                if source_content_raw and 'version' in source_content_raw:
+                                    updated_content['version'] = source_content_raw['version']
+                                elif target_content_raw and 'version' in target_content_raw:
+                                    updated_content['version'] = target_content_raw['version']
+                                else:
+                                    updated_content['version'] = xlf_version
+                            
+                            final_version = updated_content.get('version', xlf_version)
+                            if verbose:
+                                click.echo(f"  {Fore.CYAN}Writing XLIFF file with version {final_version} and state '{xlf_target_state}'\x1b[0m")
+                            
                             write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
                         elif source_file.endswith((".csv", ".tsv")):
                             # mapped_target_lang is already defined above at line 843
@@ -953,6 +1037,39 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                         from algebras.utils.csv_handler import add_language_to_csv
                         updated_csv = add_language_to_csv(existing_csv, mapped_target_lang, translated_content)
                         write_csv_file(target_file, updated_csv)
+                    elif source_file.endswith((".xlf", ".xliff")):
+                        # For XLIFF files, extract strings, translate, then update structure
+                        # Don't use translator.translate_file() as it returns structured dict, not flat translations
+                        source_content_raw = read_xliff_file(source_file)
+                        # Extract flat translatable strings
+                        source_content = extract_xliff_strings(source_content_raw)
+                        
+                        # Translate the flat dictionary
+                        translated_content = translator._translate_flat_dict(
+                            source_content, 
+                            source_language, 
+                            target_lang, 
+                            ui_safe, 
+                            glossary_id
+                        )
+                        
+                        # Create empty target structure with version from source
+                        target_version = source_content_raw.get('version', xlf_version) if source_content_raw else xlf_version
+                        target_content_raw = {'version': target_version, 'files': []}
+                        if verbose:
+                            click.echo(f"  {Fore.CYAN}Creating new XLIFF file with version {target_version} and state '{xlf_target_state}'\x1b[0m")
+                            # Show sample translations
+                            sample_count = min(3, len(translated_content))
+                            if sample_count > 0:
+                                click.echo(f"  {Fore.CYAN}Sample translations:{Fore.RESET}")
+                                for i, (key, value) in enumerate(list(translated_content.items())[:sample_count]):
+                                    source_value = source_content.get(key, '')
+                                    click.echo(f"    {key[:30]}... : '{source_value[:40]}...' → '{value[:40]}...'")
+                        
+                        # Use update_xliff_targets to properly structure the content and add state
+                        updated_content = update_xliff_targets(target_content_raw, translated_content, source_content_raw, xlf_target_state)
+                        write_xliff_file(target_file, updated_content, source_language, target_lang, xlf_target_state)
+                        click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     else:
                         # For other file types, use the normal translation flow
                         translated_content = translator.translate_file(source_file, target_lang, ui_safe, glossary_id)
@@ -976,8 +1093,6 @@ def execute(language: Optional[str] = None, force: bool = False, only_missing: b
                             write_po_file(target_file, translated_content, po_mark_fuzzy)
                         elif source_file.endswith(".html"):
                             write_html_file(target_file, source_file, translated_content)
-                        elif source_file.endswith((".xlf", ".xliff")):
-                            write_xliff_file(target_file, translated_content, source_language, target_lang, xlf_target_state)
                         
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
         

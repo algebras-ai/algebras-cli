@@ -151,6 +151,9 @@ class Translator:
         # Initialize custom prompt
         self.custom_prompt = ""
         
+        # Initialize verbose flag
+        self.verbose = False
+        
         # Shared rate limiting state for coordinating retries across parallel batches
         self._rate_limit_lock = threading.Lock()
         self._rate_limit_backoff_until = 0.0  # Timestamp until which we should back off
@@ -169,6 +172,15 @@ class Translator:
             prompt: Custom prompt text to use for translation
         """
         self.custom_prompt = prompt
+    
+    def set_verbose(self, verbose: bool) -> None:
+        """
+        Set verbose mode for detailed logging.
+        
+        Args:
+            verbose: Whether to enable verbose logging
+        """
+        self.verbose = verbose
     
     def _wait_for_rate_limit(self):
         """
@@ -861,6 +873,11 @@ class Translator:
             "flag": ui_safe
         }
         
+        if self.verbose:
+            print(f"  {Fore.CYAN}[API Request] Translating {len(non_empty_texts)} texts from {source_lang_value} to {target_lang}{Fore.RESET}")
+            if len(non_empty_texts) > 0:
+                print(f"  {Fore.CYAN}[API Request] Sample input: '{non_empty_texts[0][:50]}...'{Fore.RESET}")
+        
         try:
             # Use retry helper for 429 errors
             def make_api_call():
@@ -870,6 +887,9 @@ class Translator:
             
             if response.status_code == 200:
                 result = response.json()
+                
+                if self.verbose:
+                    print(f"  {Fore.CYAN}[API Response] Status: {response.status_code}{Fore.RESET}")
                 
                 # Handle the correct API response format
                 if "data" in result and "translations" in result["data"]:
@@ -882,15 +902,35 @@ class Translator:
                     # Fallback to old format if structure is different
                     translations = result.get("data", [])
                 
+                if self.verbose and len(translations) > 0:
+                    print(f"  {Fore.CYAN}[API Response] Sample output: '{translations[0][:50]}...'{Fore.RESET}")
+                    # Check if translation matches source (potential issue)
+                    if len(translations) > 0 and len(non_empty_texts) > 0:
+                        matches_source = sum(1 for i, trans in enumerate(translations) if trans == non_empty_texts[i])
+                        if matches_source > len(translations) * 0.5:
+                            print(f"  {Fore.YELLOW}[WARNING] {matches_source}/{len(translations)} translations match source text - API may not be translating{Fore.RESET}")
+                
                 # Ensure we have the same number of translations as non-empty input texts
                 if len(translations) != len(non_empty_texts):
                     raise Exception(f"Expected {len(non_empty_texts)} translations, but got {len(translations)}")
                 
-                # Apply normalization to each translation
+                # Apply normalization to each translation and validate
                 normalized_translations = []
+                empty_translation_count = 0
                 for i, translation in enumerate(translations):
                     normalized_translation = self.normalize_translation_string(non_empty_texts[i], translation)
                     normalized_translations.append(normalized_translation)
+                    
+                    # Check for empty or missing translations
+                    if not normalized_translation or normalized_translation.strip() == "":
+                        empty_translation_count += 1
+                        if self.verbose:
+                            print(f"  {Fore.YELLOW}[WARNING] Empty translation for: '{non_empty_texts[i][:50]}...'{Fore.RESET}")
+                
+                # Warn if many translations are empty
+                if empty_translation_count > 0:
+                    if self.verbose:
+                        print(f"  {Fore.YELLOW}[WARNING] {empty_translation_count}/{len(translations)} translations are empty{Fore.RESET}")
                 
                 # Reconstruct full result list with empty strings in correct positions
                 full_translations = []

@@ -437,7 +437,7 @@ class TestValidateFilePair:
         mock_issue_key1 = Issue('error', 'placeholders', 'Missing placeholder', 'key1')
         mock_issue_key2 = Issue('warning', 'formatting', 'Extra space', 'key2')
         
-        def validate_side_effect(source, target, key):
+        def validate_side_effect(source, target, key, is_xliff=False):
             if key == "key1":
                 return [mock_issue_key1]
             elif key == "key2":
@@ -474,7 +474,7 @@ class TestValidateFilePair:
         
         mock_issue_key1 = Issue('warning', 'formatting', 'Extra space', 'key1')
         
-        def validate_side_effect(source, target, key):
+        def validate_side_effect(source, target, key, is_xliff=False):
             if key == "key1":
                 return [mock_issue_key1]
             return []  # key2 has no issues
@@ -505,7 +505,7 @@ class TestValidateFilePair:
         
         mock_issue_key1 = Issue('error', 'placeholders', 'Missing placeholder', 'nested.key1')
         
-        def validate_side_effect(source, target, key):
+        def validate_side_effect(source, target, key, is_xliff=False):
             if key == "nested.key1":
                 return [mock_issue_key1]
             return []  # nested.key2 has no issues
@@ -639,7 +639,7 @@ class TestValidateFilePair:
         
         mock_config = MagicMock(spec=Config)
         
-        def validate_side_effect(source, target, key):
+        def validate_side_effect(source, target, key, is_xliff=False):
             if key == "key1":
                 return [error_issue]
             elif key == "key2":
