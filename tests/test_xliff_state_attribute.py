@@ -269,4 +269,197 @@ class TestXLIFFStateAttribute:
         assert key1_unit is not None
         # The state might be preserved or updated based on implementation
         assert 'state' in key1_unit
+    
+    def test_state_attribute_added_to_existing_units_without_state(self):
+        """
+        Test that state attribute is added to existing units that don't have a state.
+        
+        Behavior: When update_xliff_targets is called with target_state, it should add
+        the state to existing units that don't have one yet. This allows default_target_state
+        from config to be applied to units that were added before the config was set.
+        """
+        # Target with existing units but no state
+        target_content = {
+            'version': '2.0',
+            'files': [{
+                'original': 'messages',
+                'source-language': 'en',
+                'target-language': 'fr',
+                'trans-units': [
+                    {
+                        'id': 'key1',
+                        'source': 'Hello',
+                        'target': 'Bonjour'
+                        # No state attribute
+                    },
+                    {
+                        'id': 'key2',
+                        'source': 'World',
+                        'target': 'Monde',
+                        'state': 'needs-review-translation'  # Has existing state
+                    }
+                ]
+            }]
+        }
+        
+        # Update with target_state - should add state to key1 but preserve key2's state
+        translations = {'key1': 'Salut', 'key2': 'Monde'}
+        updated = update_xliff_targets(target_content, translations, None, target_state='translated')
+        
+        # Verify key1 got state added
+        key1_unit = next((u for u in updated['files'][0]['trans-units'] if u['id'] == 'key1'), None)
+        assert key1_unit is not None
+        assert key1_unit.get('state') == 'translated'  # State was added
+        
+        # Verify key2's existing state was preserved
+        key2_unit = next((u for u in updated['files'][0]['trans-units'] if u['id'] == 'key2'), None)
+        assert key2_unit is not None
+        assert key2_unit.get('state') == 'needs-review-translation'  # Existing state preserved
+    
+    def test_state_attribute_added_to_existing_units_with_only_missing(self):
+        """
+        Test that state attribute is added to existing units when using only_missing flag.
+        
+        Behavior: When using --only-missing flag, existing units that don't have a state
+        should get the state attribute added if target_state is provided. This ensures
+        that default_target_state from config is applied even when preserving existing translations.
+        """
+        # Target with existing units but no state
+        target_content = {
+            'version': '2.0',
+            'files': [{
+                'original': 'messages',
+                'source-language': 'en',
+                'target-language': 'fr',
+                'trans-units': [
+                    {
+                        'id': 'key1',
+                        'source': 'Hello',
+                        'target': 'Bonjour'  # Existing translation, no state
+                    }
+                ]
+            }]
+        }
+        
+        # Update with only_missing=True and target_state
+        # key1 already has a target, so it should be preserved but get state added
+        translations = {'key1': 'Salut'}  # This should be ignored due to only_missing
+        updated = update_xliff_targets(target_content, translations, None, target_state='needs-review-translation', only_missing=True)
+        
+        # Verify key1's target was preserved
+        key1_unit = next((u for u in updated['files'][0]['trans-units'] if u['id'] == 'key1'), None)
+        assert key1_unit is not None
+        assert key1_unit['target'] == 'Bonjour'  # Target preserved
+        
+        # Verify key1 got state added even though target was preserved
+        assert key1_unit.get('state') == 'needs-review-translation'  # State was added
+    
+    def test_state_attribute_on_segment_xliff_20_with_only_missing(self):
+        """
+        Test that state attribute is placed on <segment> element for XLIFF 2.0 when using only_missing flag.
+        
+        Behavior: When using --only-missing flag with XLIFF 2.0 files, the state attribute should be
+        placed on the <segment> element, not on <target>. This is the correct behavior per XLIFF 2.0 spec.
+        """
+        # Target file with one existing translation
+        target_content = {
+            'version': '2.0',
+            'files': [{
+                'original': 'messages',
+                'source-language': 'en',
+                'target-language': 'fr',
+                'trans-units': [
+                    {'id': 'key1', 'source': 'Hello', 'target': 'Bonjour'}  # Already translated
+                ]
+            }]
+        }
+        
+        # Source file with two keys
+        source_content = {
+            'version': '2.0',
+            'files': [{
+                'original': 'messages',
+                'source-language': 'en',
+                'target-language': 'fr',
+                'trans-units': [
+                    {'id': 'key1', 'source': 'Hello', 'target': ''},
+                    {'id': 'key2', 'source': 'World', 'target': ''}  # Missing
+                ]
+            }]
+        }
+        
+        # Translations dict contains both keys, but only key2 should be added (only_missing=True)
+        translations = {
+            'key1': 'Salut',  # Should be ignored (already exists)
+            'key2': 'Monde'   # Should be added (missing)
+        }
+        
+        # Update with only_missing=True and target_state
+        updated = update_xliff_targets(target_content, translations, source_content, target_state='translated', only_missing=True)
+        
+        # Verify key1 was NOT overwritten
+        key1_unit = next((u for u in updated['files'][0]['trans-units'] if u['id'] == 'key1'), None)
+        assert key1_unit is not None
+        assert key1_unit['target'] == 'Bonjour'  # Original preserved, not 'Salut'
+        
+        # Verify key2 was added with state
+        key2_unit = next((u for u in updated['files'][0]['trans-units'] if u['id'] == 'key2'), None)
+        assert key2_unit is not None
+        assert key2_unit['target'] == 'Monde'
+        assert key2_unit.get('state') == 'translated'
+        
+        # Write to file and verify state is on segment, not target
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False, encoding='utf-8') as f:
+            temp_file = f.name
+        
+        try:
+            write_xliff_file(temp_file, updated, "en", "fr", "translated")
+            
+            # Read back and verify state is on segment for XLIFF 2.0
+            tree = ET.parse(temp_file)
+            root = tree.getroot()
+            
+            # Verify version is 2.0
+            assert root.get('version') == '2.0'
+            
+            namespace = 'urn:oasis:names:tc:xliff:document:2.0'
+            
+            # Find segment elements
+            segments = root.findall(f'.//{{{namespace}}}segment')
+            if not segments:
+                segments = root.findall('.//segment')
+            
+            assert len(segments) >= 2  # At least key1 and key2
+            
+            # Find the segment for key2 (the newly added one)
+            # We need to find the unit with id="key2" and then its segment
+            units = root.findall(f'.//{{{namespace}}}unit')
+            if not units:
+                units = root.findall('.//unit')
+            
+            key2_unit_elem = None
+            for unit in units:
+                if unit.get('id') == 'key2':
+                    key2_unit_elem = unit
+                    break
+            
+            assert key2_unit_elem is not None
+            key2_segment = key2_unit_elem.find(f'{{{namespace}}}segment')
+            if key2_segment is None:
+                key2_segment = key2_unit_elem.find('segment')
+            
+            assert key2_segment is not None
+            # State should be on segment for XLIFF 2.0
+            assert key2_segment.get('state') == 'translated'
+            
+            # Verify state is NOT on target element
+            key2_target = key2_segment.find(f'{{{namespace}}}target')
+            if key2_target is None:
+                key2_target = key2_segment.find('target')
+            
+            assert key2_target is not None
+            assert key2_target.get('state') is None  # State should NOT be on target
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
 

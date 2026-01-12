@@ -3,9 +3,12 @@ XLIFF (XML Localization Interchange File Format) file handler
 """
 
 import os
+import logging
 import xml.etree.ElementTree as ET
 from typing import Dict, Any, List, Optional
 from xml.dom import minidom
+
+logger = logging.getLogger(__name__)
 
 
 def read_xliff_file(file_path: str) -> Dict[str, Any]:
@@ -71,6 +74,8 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
         xmlns_attr = namespace
         version = '1.2'
     
+    logger.debug(f"Writing XLIFF file with version {version}, target_state={target_state}")
+    
     # Create XLIFF structure
     xliff_root = ET.Element('xliff')
     xliff_root.set('version', version)
@@ -111,7 +116,9 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
         container = body_elem
     
     # Handle different content structures
-    if 'files' in content and isinstance(content['files'], list) and content['files']:
+    # Check for structured format: must have 'files' key and it must be a list (even if empty)
+    # Empty list is valid - it means no units yet, but we still use structured format
+    if 'files' in content and isinstance(content['files'], list):
         # Use the first file's data
         file_data = content['files'][0]
         if 'trans-units' in file_data:
@@ -127,9 +134,11 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                         target_elem = ET.SubElement(segment, 'target')
                         target_elem.text = unit.get('target', unit['source'])
                         # For XLIFF 2.0, state goes on segment, not target
-                        # Only add state if unit explicitly has one
-                        if 'state' in unit and unit['state']:
-                            segment.set('state', unit['state'])
+                        # Only add state if unit explicitly has one and it's not empty
+                        unit_state = unit.get('state')
+                        if unit_state and unit_state.strip():
+                            segment.set('state', unit_state)
+                            logger.debug(f"Added state '{unit_state}' to segment for unit {unit.get('id', 'unknown')} (XLIFF 2.0)")
                     else:
                         # XLIFF 1.2: use <trans-unit>
                         trans_unit = ET.SubElement(container, 'trans-unit')
@@ -139,12 +148,18 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                         target_elem = ET.SubElement(trans_unit, 'target')
                         target_elem.text = unit.get('target', unit['source'])
                         # For XLIFF 1.2, state goes on target
-                        # Only add state if unit explicitly has one
-                        if 'state' in unit and unit['state']:
-                            target_elem.set('state', unit['state'])
+                        # Only add state if unit explicitly has one and it's not empty
+                        unit_state = unit.get('state')
+                        if unit_state and unit_state.strip():
+                            target_elem.set('state', unit_state)
+                            logger.debug(f"Added state '{unit_state}' to target for unit {unit.get('id', 'unknown')} (XLIFF 1.2)")
     else:
         # Handle flat dictionary structure (always write as XLIFF 1.2)
+        # Skip metadata keys like 'version' that shouldn't be translation units
+        metadata_keys = {'version'}
         for key, value in content.items():
+            if key in metadata_keys:
+                continue  # Skip metadata keys
             if isinstance(value, str):
                 trans_unit = ET.SubElement(container, 'trans-unit')
                 trans_unit.set('id', key)
@@ -152,7 +167,10 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                 source_elem.text = value
                 target_elem = ET.SubElement(trans_unit, 'target')
                 target_elem.text = value
-                # Don't add state for flat dictionary structure - state should be set in update_xliff_targets
+                # Add state if target_state is provided (for flat dict structure from new file creation)
+                if target_state:
+                    target_elem.set('state', target_state)
+                    logger.debug(f"Added state '{target_state}' to target for unit {key} from flat dict (XLIFF 1.2)")
     
     # Write to file with proper formatting
     # Use ET.tostring with xml_declaration for better compatibility
@@ -259,8 +277,38 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
     import copy
     updated_content = copy.deepcopy(xliff_content)
     
+    # Ensure version is preserved in updated content
+    # If version is missing, try to get it from source_content or original xliff_content
+    if 'version' not in updated_content:
+        if source_content and 'version' in source_content:
+            updated_content['version'] = source_content['version']
+            logger.debug(f"XLIFF version {source_content['version']} copied from source_content")
+        elif 'version' in xliff_content:
+            updated_content['version'] = xliff_content['version']
+            logger.debug(f"XLIFF version {xliff_content['version']} preserved from xliff_content")
+    else:
+        logger.debug(f"XLIFF version {updated_content['version']} already present in updated_content")
+    
+    final_version = updated_content.get('version', 'unknown')
+    logger.debug(f"Processing XLIFF with version {final_version}, target_state={target_state}, only_missing={only_missing}")
+    
     # Track which unit IDs already exist in target
     existing_unit_ids = set()
+    
+    # Ensure 'files' structure exists
+    if 'files' not in updated_content:
+        updated_content['files'] = []
+    
+    # If files list is empty, create a file entry from source_content if available
+    if not updated_content['files'] and source_content and 'files' in source_content and source_content['files']:
+        source_file_data = source_content['files'][0]
+        updated_content['files'].append({
+            'original': source_file_data.get('original', 'messages'),
+            'source-language': source_file_data.get('source-language', 'en'),
+            'target-language': source_file_data.get('target-language', 'en'),
+            'trans-units': []
+        })
+        logger.debug("Created file entry in updated_content from source_content")
     
     if 'files' in updated_content:
         for file_data in updated_content['files']:
@@ -282,14 +330,30 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
                                 # Update target (either not only-missing mode, or target is empty)
                                 unit['target'] = translations[unit_id]
                             
-                            # For existing units, preserve existing state, don't set new state
-                            # State should only be set for new units from source
+                            # For existing units, preserve existing state if present
+                            # If no state exists and target_state is provided, add it
+                            # This applies even when preserving existing targets in only_missing mode
                             if existing_state:
                                 unit['state'] = existing_state
-                            # Don't set state for existing units, even if target was empty
+                                logger.debug(f"Preserved existing state '{existing_state}' for unit {unit_id}")
+                            elif target_state:
+                                # Add state to units that don't have one yet
+                                unit['state'] = target_state
+                                logger.debug(f"Added state '{target_state}' to existing unit {unit_id} (no previous state)")
                         elif 'source' in unit and not existing_target:
                             # If no translation provided but source exists and target is empty, use source as target
                             unit['target'] = unit['source']
+                            # Add state if provided and unit doesn't have one
+                            if not existing_state and target_state:
+                                unit['state'] = target_state
+                        
+                        # For ALL existing units (even if not in translations dict), add state if missing and target_state is provided
+                        # This ensures state is added to all units when using --only-missing or when file already has all translations
+                        # Check if state is missing or empty (empty string should be treated as missing)
+                        current_state = unit.get('state')
+                        if target_state and (not current_state or current_state.strip() == ''):
+                            unit['state'] = target_state
+                            logger.debug(f"Added state '{target_state}' to existing unit {unit_id} (unit not in translations dict or already had target)")
     
     # Add new units from source that don't exist in target
     if source_content and 'files' in source_content:
@@ -315,6 +379,7 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
                             # Add state attribute if provided
                             if target_state:
                                 new_unit['state'] = target_state
+                                logger.debug(f"Added state '{target_state}' to new unit {source_unit_id} from source")
                             target_file_data['trans-units'].append(new_unit)
     
     return updated_content
