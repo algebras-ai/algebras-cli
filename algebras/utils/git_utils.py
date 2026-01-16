@@ -672,10 +672,10 @@ def find_outdated_translations(source_file: str, target_file: str) -> Dict[str, 
 
 def _extract_all_keys(data: Dict, prefix: str = "", result: List[str] = None) -> List[str]:
     """
-    Extract all keys from a nested dictionary, using dot notation for nested keys.
+    Extract all keys from a nested dictionary or array, using dot notation for nested keys.
     
     Args:
-        data: Dictionary to extract keys from
+        data: Dictionary or list to extract keys from
         prefix: Current key prefix (for recursion)
         result: List to store the keys (for recursion)
         
@@ -684,19 +684,41 @@ def _extract_all_keys(data: Dict, prefix: str = "", result: List[str] = None) ->
     """
     if result is None:
         result = []
-        
-    if not isinstance(data, dict):
-        return result
-        
-    for key, value in data.items():
-        current_key = f"{prefix}.{key}" if prefix else key
-        
+    
+    def _extract_recursive(value: Any, current_prefix: str) -> None:
+        """Recursively extract keys from any value type."""
         if isinstance(value, dict):
-            # Recursively process nested dictionaries
-            _extract_all_keys(value, current_key, result)
+            for key, val in value.items():
+                full_key = f"{current_prefix}.{key}" if current_prefix else key
+                _extract_recursive(val, full_key)
+        elif isinstance(value, list):
+            # Process array elements
+            for index, item in enumerate(value):
+                array_key = f"{current_prefix}.{index}" if current_prefix else str(index)
+                # If item is a primitive, add the key
+                if not isinstance(item, (dict, list)):
+                    result.append(array_key)
+                else:
+                    # If item is a dict or list, recursively extract
+                    _extract_recursive(item, array_key)
         else:
-            # Add leaf key to the result
-            result.append(current_key)
+            # For strings, numbers, booleans, None - add as a key
+            if current_prefix:
+                result.append(current_prefix)
+    
+    # Handle root level
+    if isinstance(data, dict):
+        for key, value in data.items():
+            current_key = f"{prefix}.{key}" if prefix else key
+            # If value is a primitive (string, number, bool, None), add the key directly
+            if not isinstance(value, (dict, list)):
+                result.append(current_key)
+            else:
+                # For dicts and lists, recursively extract
+                _extract_recursive(value, current_key)
+    elif isinstance(data, list):
+        # If root is a list, process it
+        _extract_recursive(data, prefix)
             
     return result
 

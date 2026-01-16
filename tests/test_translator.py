@@ -317,7 +317,7 @@ class TestTranslator:
             translator.translate_file("messages.en.txt", "fr")
 
     def test_translate_nested_dict(self, monkeypatch):
-        """Test _translate_nested_dict method"""
+        """Test nested dict translation using strategy"""
         # Sample nested dictionary
         nested_dict = {
             "welcome": "Welcome to our application!",
@@ -359,8 +359,10 @@ class TestTranslator:
         # Mock environment variable
         monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
 
-        # Mock batch translation method
-        def mock_translate_batch(texts, source_lang, target_lang, ui_safe=False, glossary_id=""):
+        from algebras.services.batch_processor import BatchResult
+        
+        # Mock batch processor result
+        def mock_process(texts, source_lang, target_lang, ui_safe=False, glossary_id="", on_batch_complete=None, translate_text_func=None):
             translations = []
             for text in texts:
                 if text == "Welcome to our application!":
@@ -371,14 +373,24 @@ class TestTranslator:
                     translations.append("Se connecter")
                 else:
                     translations.append(text)
-            return translations
+            return BatchResult(
+                translations=translations,
+                error_stats={"5xx": [], "429": [], "other": []},
+                failed_batches=[],
+                successful_batches=1,
+                total_batches=1,
+            )
         
         translator = Translator()
-        # Mock the batch translation method
-        translator._translate_with_algebras_ai_batch = mock_translate_batch
+        # Mock the batch processor
+        mock_batch_processor = MagicMock()
+        mock_batch_processor.process = mock_process
+        translator._batch_processor = mock_batch_processor
         
-        # Test _translate_nested_dict
-        result = translator._translate_nested_dict(nested_dict, "en", "fr")
+        # Test using nested dict strategy
+        from algebras.services.strategies.strategy_factory import TranslationStrategyFactory
+        strategy = TranslationStrategyFactory.get_nested_dict_strategy(translator)
+        result = strategy.translate(nested_dict, "en", "fr")
         
         # Verify the translation
         assert result == expected_translation
@@ -457,25 +469,25 @@ class TestTranslator:
         # Test 1: Normal case - should normalize escaped apostrophe
         source_text = "More"
         translated_text = "Ko\\'proq"
-        result = translator.normalize_translation_string(source_text, translated_text)
+        result = translator.string_normalizer.normalize(source_text, translated_text)
         assert result == "Ko'proq"
 
         # Test 2: Source has escaped character - should NOT normalize
         source_text = "Say \\'hello\\'"
         translated_text = "Salom \\'aytish\\'"
-        result = translator.normalize_translation_string(source_text, translated_text)
+        result = translator.string_normalizer.normalize(source_text, translated_text)
         assert result == "Salom \\'aytish\\'"  # Should remain escaped
 
         # Test 3: Multiple escaped characters
         source_text = "Hello world"
         translated_text = "Salom \\'dunyo\\' va \\\"odam\\\""
-        result = translator.normalize_translation_string(source_text, translated_text)
+        result = translator.string_normalizer.normalize(source_text, translated_text)
         assert result == "Salom 'dunyo' va \"odam\""
 
         # Test 4: Mixed case - some should normalize, some shouldn't
         source_text = "Text with \\'existing\\' escapes"
         translated_text = "Matn \\'mavjud\\' va \\\"yangi\\\" qochishlar bilan"
-        result = translator.normalize_translation_string(source_text, translated_text)
+        result = translator.string_normalizer.normalize(source_text, translated_text)
         # Should NOT normalize apostrophes (present in source) but SHOULD normalize quotes (not in source)
         assert result == "Matn \\'mavjud\\' va \"yangi\" qochishlar bilan"
 
@@ -483,20 +495,20 @@ class TestTranslator:
         mock_config.get_setting.return_value = False  # normalization disabled
         source_text = "More"
         translated_text = "Ko\\'proq"
-        result = translator.normalize_translation_string(source_text, translated_text)
+        result = translator.string_normalizer.normalize(source_text, translated_text)
         assert result == "Ko\\'proq"  # Should remain unchanged
 
         # Test 6: Test newlines and tabs (should be preserved as actual characters)
         mock_config.get_setting.return_value = True  # normalization enabled
         source_text = "Line one"
         translated_text = "Birinchi qator\\nIkkinchi qator"
-        result = translator.normalize_translation_string(source_text, translated_text)
+        result = translator.string_normalizer.normalize(source_text, translated_text)
         assert result == "Birinchi qator\nIkkinchi qator"
 
         # Test 7: Test backslash normalization
         source_text = "File path"
         translated_text = "Fayl yo\\\\li"
-        result = translator.normalize_translation_string(source_text, translated_text)
+        result = translator.string_normalizer.normalize(source_text, translated_text)
         assert result == "Fayl yo\\li"
 
     def test_retry_with_exponential_backoff_success(self, monkeypatch):
@@ -740,8 +752,10 @@ class TestTranslator:
         # Initialize Translator
         translator = Translator()
 
-        # Mock batch translation method
-        def mock_translate_batch(texts, source_lang, target_lang, ui_safe=False, glossary_id=""):
+        from algebras.services.batch_processor import BatchResult
+        
+        # Mock batch processor result
+        def mock_process(texts, source_lang, target_lang, ui_safe=False, glossary_id="", on_batch_complete=None, translate_text_func=None):
             # Should only receive non-empty strings
             assert "" not in texts
             translations = []
@@ -752,11 +766,23 @@ class TestTranslator:
                     translations.append("Monde")
                 else:
                     translations.append(text)
-            return translations
+            return BatchResult(
+                translations=translations,
+                error_stats={"5xx": [], "429": [], "other": []},
+                failed_batches=[],
+                successful_batches=1,
+                total_batches=1,
+            )
 
-        translator._translate_with_algebras_ai_batch = mock_translate_batch
+        # Mock the batch processor
+        mock_batch_processor = MagicMock()
+        mock_batch_processor.process = mock_process
+        translator._batch_processor = mock_batch_processor
 
-        # Test with empty strings
+        # Test with empty strings using flat dict strategy
+        from algebras.services.strategies.strategy_factory import TranslationStrategyFactory
+        strategy = TranslationStrategyFactory.get_flat_dict_strategy(translator)
+        
         data = {
             "greeting": "Hello",
             "empty1": "",
@@ -765,7 +791,7 @@ class TestTranslator:
             "empty3": "   "  # Whitespace only
         }
 
-        result = translator._translate_flat_dict(data, "en", "fr")
+        result = strategy.translate(data, "en", "fr")
 
         # Verify empty strings are preserved
         assert result["greeting"] == "Bonjour"
@@ -800,8 +826,10 @@ class TestTranslator:
         # Initialize Translator
         translator = Translator()
 
-        # Mock batch translation method
-        def mock_translate_batch(texts, source_lang, target_lang, ui_safe=False, glossary_id=""):
+        from algebras.services.batch_processor import BatchResult
+        
+        # Mock batch processor result
+        def mock_process(texts, source_lang, target_lang, ui_safe=False, glossary_id="", on_batch_complete=None, translate_text_func=None):
             # Should only receive non-empty strings
             assert "" not in texts
             translations = []
@@ -812,11 +840,23 @@ class TestTranslator:
                     translations.append("Monde")
                 else:
                     translations.append(text)
-            return translations
+            return BatchResult(
+                translations=translations,
+                error_stats={"5xx": [], "429": [], "other": []},
+                failed_batches=[],
+                successful_batches=1,
+                total_batches=1,
+            )
 
-        translator._translate_with_algebras_ai_batch = mock_translate_batch
+        # Mock the batch processor
+        mock_batch_processor = MagicMock()
+        mock_batch_processor.process = mock_process
+        translator._batch_processor = mock_batch_processor
 
-        # Test with empty strings in nested structure
+        # Test with empty strings in nested structure using nested dict strategy
+        from algebras.services.strategies.strategy_factory import TranslationStrategyFactory
+        strategy = TranslationStrategyFactory.get_nested_dict_strategy(translator)
+        
         data = {
             "greeting": "Hello",
             "empty": "",
@@ -826,7 +866,7 @@ class TestTranslator:
             }
         }
 
-        result = translator._translate_nested_dict(data, "en", "fr")
+        result = strategy.translate(data, "en", "fr")
 
         # Verify empty strings are preserved
         assert result["greeting"] == "Bonjour"

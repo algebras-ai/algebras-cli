@@ -78,35 +78,60 @@ def read_language_file(file_path: str, language: Optional[str] = None, config: O
 
 def extract_all_keys(data: Dict[str, Any], prefix: str = '') -> Set[str]:
     """
-    Extract all keys from a nested dictionary, including nested keys.
+    Extract all keys from a nested dictionary, including nested keys and array elements.
     
     Args:
         data: Dictionary to extract keys from
         prefix: Prefix for nested keys
         
     Returns:
-        Set of all keys in the dictionary, including nested keys
+        Set of all keys in the dictionary, including nested keys and array elements
     """
     keys = set()
-    for key, value in data.items():
-        full_key = f"{prefix}.{key}" if prefix else key
-        keys.add(full_key)
-        
-        # Recursively extract keys from nested dictionaries
+    
+    def _extract_recursive(value: Any, current_prefix: str) -> None:
+        """Recursively extract keys from any value type."""
         if isinstance(value, dict):
-            nested_keys = extract_all_keys(value, full_key)
-            keys.update(nested_keys)
+            for key, val in value.items():
+                full_key = f"{current_prefix}.{key}" if current_prefix else key
+                _extract_recursive(val, full_key)
+        elif isinstance(value, list):
+            # Process array elements
+            for index, item in enumerate(value):
+                array_key = f"{current_prefix}.{index}" if current_prefix else str(index)
+                # If item is a primitive, add the key
+                if not isinstance(item, (dict, list)):
+                    keys.add(array_key)
+                else:
+                    # If item is a dict or list, recursively extract
+                    _extract_recursive(item, array_key)
+        else:
+            # For strings, numbers, booleans, None - add as a key
+            # This handles leaf values (strings, numbers, etc.)
+            if current_prefix:
+                keys.add(current_prefix)
+    
+    # Start extraction from the root dictionary
+    if isinstance(data, dict):
+        for key, value in data.items():
+            full_key = f"{prefix}.{key}" if prefix else key
+            # If value is a primitive (string, number, bool, None), add the key directly
+            if not isinstance(value, (dict, list)):
+                keys.add(full_key)
+            else:
+                # For dicts and lists, recursively extract
+                _extract_recursive(value, full_key)
     
     return keys
 
 
 def get_key_value(data: Dict[str, Any], key: str) -> Any:
     """
-    Get the value of a key from a nested dictionary.
+    Get the value of a key from a nested dictionary or array.
     
     Args:
         data: Dictionary to get value from
-        key: Key to get value for (can be nested using dot notation)
+        key: Key to get value for (can be nested using dot notation, supports array indices)
         
     Returns:
         Value of the key or None if key doesn't exist
@@ -115,9 +140,28 @@ def get_key_value(data: Dict[str, Any], key: str) -> Any:
     current = data
     
     for part in parts:
-        if part not in current:
+        if current is None:
             return None
-        current = current[part]
+        
+        # Check if current is a list and part is a numeric index
+        if isinstance(current, list):
+            try:
+                index = int(part)
+                if 0 <= index < len(current):
+                    current = current[index]
+                else:
+                    return None
+            except ValueError:
+                # Part is not a number, can't access list with non-numeric key
+                return None
+        # Check if current is a dict
+        elif isinstance(current, dict):
+            if part not in current:
+                return None
+            current = current[part]
+        else:
+            # Current is neither dict nor list, can't traverse further
+            return None
         
     return current
 
