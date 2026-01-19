@@ -92,6 +92,9 @@ def extract_all_keys(data: Dict[str, Any], prefix: str = '') -> Set[str]:
     def _extract_recursive(value: Any, current_prefix: str) -> None:
         """Recursively extract keys from any value type."""
         if isinstance(value, dict):
+            # Add the intermediate key (the dict itself) if it has a prefix
+            if current_prefix:
+                keys.add(current_prefix)
             for key, val in value.items():
                 full_key = f"{current_prefix}.{key}" if current_prefix else key
                 _extract_recursive(val, full_key)
@@ -119,7 +122,8 @@ def extract_all_keys(data: Dict[str, Any], prefix: str = '') -> Set[str]:
             if not isinstance(value, (dict, list)):
                 keys.add(full_key)
             else:
-                # For dicts and lists, recursively extract
+                # For dicts and lists, add the intermediate key and recursively extract
+                keys.add(full_key)  # Add the intermediate key (e.g., "login", "errors")
                 _extract_recursive(value, full_key)
     
     return keys

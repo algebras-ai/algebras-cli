@@ -5,12 +5,66 @@ Translate your application
 import os
 import queue
 import threading
+import click
+import json
+import yaml
 from colorama import Fore
 from typing import Dict, Any, Optional, List, Tuple, Set
 
 from algebras.utils.ts_handler import (
     write_ts_translation_file_in_place,
+    convert_numeric_dicts_to_lists,
+    read_ts_translation_file,
+    write_ts_translation_file,
 )
+from algebras.utils.po_handler import (
+    read_po_file,
+    write_po_file,
+)
+from algebras.utils.android_xml_handler import (
+    read_android_xml_file,
+    write_android_xml_file,
+    write_android_xml_file_in_place,
+)
+from algebras.utils.ios_strings_handler import (
+    read_ios_strings_file,
+    write_ios_strings_file,
+)
+from algebras.utils.ios_stringsdict_handler import (
+    read_ios_stringsdict_file,
+    write_ios_stringsdict_file,
+    extract_translatable_strings,
+    update_translatable_strings,
+)
+from algebras.utils.html_handler import (
+    read_html_file,
+    write_html_file,
+)
+from algebras.utils.xliff_handler import (
+    read_xliff_file,
+    write_xliff_file,
+    extract_translatable_strings as extract_xliff_strings,
+    update_xliff_targets,
+)
+from algebras.utils.csv_handler import (
+    read_csv_file,
+    write_csv_file,
+    write_csv_file_in_place,
+    extract_translatable_strings as extract_csv_strings,
+)
+from algebras.utils.nested_structure_handler import (
+    get_nested_value,
+    set_nested_value,
+)
+from algebras.utils.lang_validator import (
+    validate_language_files,
+    extract_all_keys,
+)
+from algebras.config import Config
+from algebras.services.file_scanner import FileScanner
+from algebras.utils.path_utils import determine_target_path, resolve_destination_path
+from algebras.utils.git_utils import is_git_available
+from algebras.services.translator import Translator
 
 
 class IncrementalFileWriter:
@@ -621,6 +675,21 @@ def execute(
                                     allow_unicode=True,
                                 )
                         elif target_file.endswith(".xml"):
+                            # Translate modified keys
+                            if modified_keys and not only_missing:
+                                click.echo(
+                                    f"  {Fore.GREEN}Translating {len(modified_keys)} outdated keys...{Fore.RESET}"
+                                )
+                                target_content = (
+                                    translator.translate_outdated_keys_batch(
+                                        source_content,
+                                        target_content,
+                                        modified_keys,
+                                        target_lang,
+                                        ui_safe,
+                                        glossary_id,
+                                    )
+                                )
                             if use_in_place:
                                 write_android_xml_file_in_place(
                                     target_file, target_content, keys_to_update
@@ -628,12 +697,42 @@ def execute(
                             else:
                                 write_android_xml_file(target_file, target_content)
                         elif target_file.endswith(".strings"):
+                            # Translate modified keys
+                            if modified_keys and not only_missing:
+                                click.echo(
+                                    f"  {Fore.GREEN}Translating {len(modified_keys)} outdated keys...{Fore.RESET}"
+                                )
+                                target_content = (
+                                    translator.translate_outdated_keys_batch(
+                                        source_content,
+                                        target_content,
+                                        modified_keys,
+                                        target_lang,
+                                        ui_safe,
+                                        glossary_id,
+                                    )
+                                )
                             if use_in_place:
                                 click.echo(
                                     f"  {Fore.YELLOW}iOS Strings format does not support in-place updates yet, regenerating from scratch{Fore.RESET}"
                                 )
                             write_ios_strings_file(target_file, target_content)
                         elif target_file.endswith(".stringsdict"):
+                            # Translate modified keys
+                            if modified_keys and not only_missing:
+                                click.echo(
+                                    f"  {Fore.GREEN}Translating {len(modified_keys)} outdated keys...{Fore.RESET}"
+                                )
+                                target_content = (
+                                    translator.translate_outdated_keys_batch(
+                                        source_content,
+                                        target_content,
+                                        modified_keys,
+                                        target_lang,
+                                        ui_safe,
+                                        glossary_id,
+                                    )
+                                )
                             # For .stringsdict files, update the original structure with translations
                             updated_content = update_translatable_strings(
                                 target_content_raw, target_content
@@ -644,12 +743,42 @@ def execute(
                                 )
                             write_ios_stringsdict_file(target_file, updated_content)
                         elif target_file.endswith(".html"):
+                            # Translate modified keys
+                            if modified_keys and not only_missing:
+                                click.echo(
+                                    f"  {Fore.GREEN}Translating {len(modified_keys)} outdated keys...{Fore.RESET}"
+                                )
+                                target_content = (
+                                    translator.translate_outdated_keys_batch(
+                                        source_content,
+                                        target_content,
+                                        modified_keys,
+                                        target_lang,
+                                        ui_safe,
+                                        glossary_id,
+                                    )
+                                )
                             if use_in_place:
                                 click.echo(
                                     f"  {Fore.YELLOW}HTML format does not support in-place updates yet, regenerating from scratch{Fore.RESET}"
                                 )
                             write_html_file(target_file, source_file, target_content)
                         elif target_file.endswith((".xlf", ".xliff")):
+                            # Translate modified keys
+                            if modified_keys and not only_missing:
+                                click.echo(
+                                    f"  {Fore.GREEN}Translating {len(modified_keys)} outdated keys...{Fore.RESET}"
+                                )
+                                target_content = (
+                                    translator.translate_outdated_keys_batch(
+                                        source_content,
+                                        target_content,
+                                        modified_keys,
+                                        target_lang,
+                                        ui_safe,
+                                        glossary_id,
+                                    )
+                                )
                             if use_in_place:
                                 click.echo(
                                     f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}"
@@ -1147,6 +1276,16 @@ def execute(
                                         allow_unicode=True,
                                     )
                             elif target_file.endswith(".xml"):
+                                target_content = (
+                                    translator.translate_outdated_keys_batch(
+                                        source_content,
+                                        target_content,
+                                        list(outdated_keys),
+                                        target_lang,
+                                        ui_safe,
+                                        glossary_id,
+                                    )
+                                )
                                 if use_in_place:
                                     write_android_xml_file_in_place(
                                         target_file, target_content, keys_to_update
@@ -1154,12 +1293,32 @@ def execute(
                                 else:
                                     write_android_xml_file(target_file, target_content)
                             elif target_file.endswith(".strings"):
+                                target_content = (
+                                    translator.translate_outdated_keys_batch(
+                                        source_content,
+                                        target_content,
+                                        list(outdated_keys),
+                                        target_lang,
+                                        ui_safe,
+                                        glossary_id,
+                                    )
+                                )
                                 if use_in_place:
                                     click.echo(
                                         f"  {Fore.YELLOW}iOS Strings format does not support in-place updates yet, regenerating from scratch{Fore.RESET}"
                                     )
                                 write_ios_strings_file(target_file, target_content)
                             elif target_file.endswith(".stringsdict"):
+                                target_content = (
+                                    translator.translate_outdated_keys_batch(
+                                        source_content,
+                                        target_content,
+                                        list(outdated_keys),
+                                        target_lang,
+                                        ui_safe,
+                                        glossary_id,
+                                    )
+                                )
                                 updated_content = update_translatable_strings(
                                     target_content_raw, target_content
                                 )
@@ -1169,11 +1328,31 @@ def execute(
                                     )
                                 write_ios_stringsdict_file(target_file, updated_content)
                             elif target_file.endswith(".po"):
+                                target_content = (
+                                    translator.translate_outdated_keys_batch(
+                                        source_content,
+                                        target_content,
+                                        list(outdated_keys),
+                                        target_lang,
+                                        ui_safe,
+                                        glossary_id,
+                                    )
+                                )
                                 # PO files already support in-place updates via write_po_file
                                 write_po_file(
                                     target_file, target_content, po_mark_fuzzy
                                 )
                             elif target_file.endswith(".html"):
+                                target_content = (
+                                    translator.translate_outdated_keys_batch(
+                                        source_content,
+                                        target_content,
+                                        list(outdated_keys),
+                                        target_lang,
+                                        ui_safe,
+                                        glossary_id,
+                                    )
+                                )
                                 if use_in_place:
                                     click.echo(
                                         f"  {Fore.YELLOW}HTML format does not support in-place updates yet, regenerating from scratch{Fore.RESET}"
@@ -1626,6 +1805,17 @@ def execute(
                                     allow_unicode=True,
                                 )
                         elif source_file.endswith(".xml"):
+                            # Translate only the missing keys
+                            translated_content = (
+                                translator.translate_missing_keys_batch(
+                                    source_content,
+                                    target_content,
+                                    list(missing_keys),
+                                    target_lang,
+                                    ui_safe,
+                                    glossary_id,
+                                )
+                            )
                             if use_in_place:
                                 write_android_xml_file_in_place(
                                     target_file, translated_content, keys_to_update
@@ -1633,12 +1823,34 @@ def execute(
                             else:
                                 write_android_xml_file(target_file, translated_content)
                         elif source_file.endswith(".strings"):
+                            # Translate only the missing keys
+                            translated_content = (
+                                translator.translate_missing_keys_batch(
+                                    source_content,
+                                    target_content,
+                                    list(missing_keys),
+                                    target_lang,
+                                    ui_safe,
+                                    glossary_id,
+                                )
+                            )
                             if use_in_place:
                                 click.echo(
                                     f"  {Fore.YELLOW}iOS Strings format does not support in-place updates yet, regenerating from scratch{Fore.RESET}"
                                 )
                             write_ios_strings_file(target_file, translated_content)
                         elif source_file.endswith(".stringsdict"):
+                            # Translate only the missing keys
+                            translated_content = (
+                                translator.translate_missing_keys_batch(
+                                    source_content,
+                                    target_content,
+                                    list(missing_keys),
+                                    target_lang,
+                                    ui_safe,
+                                    glossary_id,
+                                )
+                            )
                             updated_content = update_translatable_strings(
                                 target_content_raw, translated_content
                             )
@@ -1648,11 +1860,33 @@ def execute(
                                 )
                             write_ios_stringsdict_file(target_file, updated_content)
                         elif source_file.endswith(".po"):
+                            # Translate only the missing keys
+                            translated_content = (
+                                translator.translate_missing_keys_batch(
+                                    source_content,
+                                    target_content,
+                                    list(missing_keys),
+                                    target_lang,
+                                    ui_safe,
+                                    glossary_id,
+                                )
+                            )
                             # PO files already support in-place updates via write_po_file
                             write_po_file(
                                 target_file, translated_content, po_mark_fuzzy
                             )
                         elif source_file.endswith(".html"):
+                            # Translate only the missing keys
+                            translated_content = (
+                                translator.translate_missing_keys_batch(
+                                    source_content,
+                                    target_content,
+                                    list(missing_keys),
+                                    target_lang,
+                                    ui_safe,
+                                    glossary_id,
+                                )
+                            )
                             if use_in_place:
                                 click.echo(
                                     f"  {Fore.YELLOW}HTML format does not support in-place updates yet, regenerating from scratch{Fore.RESET}"
@@ -1665,6 +1899,17 @@ def execute(
                                 click.echo(
                                     f"  {Fore.YELLOW}XLIFF format does not support in-place updates yet, regenerating from scratch{Fore.RESET}"
                                 )
+                            # Translate only the missing keys first
+                            translated_content = (
+                                translator.translate_missing_keys_batch(
+                                    source_content,
+                                    target_content,
+                                    list(missing_keys),
+                                    target_lang,
+                                    ui_safe,
+                                    glossary_id,
+                                )
+                            )
                             # Update the original XLIFF structure with translations, preserving source text
                             # Also add new units from source that don't exist in target
                             # Ensure version is set - prefer source file version, then target file version, then config
@@ -1826,10 +2071,21 @@ def execute(
                         source_content = extract_xliff_strings(source_content_raw)
 
                         # Translate the flat dictionary using strategy
-                        from algebras.services.strategies.strategy_factory import TranslationStrategyFactory
-                        flat_strategy = TranslationStrategyFactory.get_flat_dict_strategy(translator)
+                        from algebras.services.strategies.strategy_factory import (
+                            TranslationStrategyFactory,
+                        )
+
+                        flat_strategy = (
+                            TranslationStrategyFactory.get_flat_dict_strategy(
+                                translator
+                            )
+                        )
                         provider = translator.api_config.get("provider", "algebras-ai")
-                        translate_text_func = None if provider == "algebras-ai" else translator.translate_text
+                        translate_text_func = (
+                            None
+                            if provider == "algebras-ai"
+                            else translator.translate_text
+                        )
                         translated_content = flat_strategy.translate(
                             source_content,
                             source_language,
@@ -1901,10 +2157,21 @@ def execute(
                             incremental_writer.write_batch(batch_results, batch_index)
 
                         # Translate with callback using strategy
-                        from algebras.services.strategies.strategy_factory import TranslationStrategyFactory
-                        nested_strategy = TranslationStrategyFactory.get_nested_dict_strategy(translator)
+                        from algebras.services.strategies.strategy_factory import (
+                            TranslationStrategyFactory,
+                        )
+
+                        nested_strategy = (
+                            TranslationStrategyFactory.get_nested_dict_strategy(
+                                translator
+                            )
+                        )
                         provider = translator.api_config.get("provider", "algebras-ai")
-                        translate_text_func = None if provider == "algebras-ai" else translator.translate_text
+                        translate_text_func = (
+                            None
+                            if provider == "algebras-ai"
+                            else translator.translate_text
+                        )
                         translated_content = nested_strategy.translate(
                             source_content,
                             source_language,
@@ -1989,23 +2256,3 @@ def _should_use_in_place(target_file: str, regenerate_from_scratch: bool) -> boo
     if regenerate_from_scratch:
         return False
     return os.path.exists(target_file)
-
-
-def get_nested_value(data: Dict[str, Any], key_parts: List[str]) -> Any:
-    """
-    Get a value from a nested dictionary using a list of key parts.
-
-    Args:
-        data: Dictionary to get value from
-        key_parts: List of key parts representing a dot-notation path
-
-    Returns:
-        Value at the specified path
-    """
-    current = data
-    for part in key_parts:
-        if isinstance(current, dict) and part in current:
-            current = current[part]
-        else:
-            return None
-    return current

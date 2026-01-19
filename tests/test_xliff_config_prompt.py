@@ -211,7 +211,7 @@ class TestXLIFFConfigPrompt:
         mock_config.get_destination_locale_code.return_value = "fr"
         
         # Create real translator instance to test prompt propagation
-        with patch("algebras.services.translator.Config", return_value=mock_config), \
+        with patch("algebras.config.Config", return_value=mock_config), \
              patch.dict(os.environ, {"ALGEBRAS_API_KEY": "test-key"}):
             
             translator = Translator(config=mock_config)

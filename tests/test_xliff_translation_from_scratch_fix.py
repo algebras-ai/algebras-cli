@@ -267,8 +267,8 @@ class TestXLIFFTranslationFromScratchFix:
         
         # Mock environment
         with patch.dict(os.environ, {'ALGEBRAS_API_KEY': 'test-key'}):
-            # Call batch translation
-            result = translator._translate_with_algebras_ai_batch(
+            # Use api_client.translate_batch directly for testing
+            result = translator.api_client.translate_batch(
                 ['General'],
                 'en',
                 'ru',
