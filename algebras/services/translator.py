@@ -425,6 +425,7 @@ class Translator:
         target_lang: str,
         ui_safe: bool = False,
         glossary_id: Optional[str] = None,
+        source_file_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Translate only the missing keys in a target dictionary.
@@ -436,6 +437,7 @@ class Translator:
             target_lang: Target language code
             ui_safe: If True, ensure translations will not be longer than original text
             glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
+            source_file_path: Path to the source file (used to determine file format)
 
         Returns:
             Updated target content with translated missing keys
@@ -471,11 +473,27 @@ class Translator:
                     # Update the target content with the translated value (nested format)
                     set_nested_value(updated_content, key_parts, translated_value)
                 else:
-                    # For flat formats like .po, the key itself might BE the text to translate
-                    translated_value = self.translate_text(
-                        key_path, source_lang, target_lang, ui_safe, glossary_id
-                    )
-                    updated_content[key_path] = translated_value
+                    # Determine file format to decide how to handle missing keys
+                    is_flat_format = False
+                    if source_file_path:
+                        is_flat_format = source_file_path.endswith((".po", ".csv", ".tsv"))
+                    else:
+                        # Fallback: check structure of source_content
+                        is_flat_format = (
+                            isinstance(source_content, dict) and
+                            all(isinstance(v, str) for v in source_content.values()) and
+                            not any("." in k for k in source_content.keys())
+                        )
+                    
+                    if is_flat_format:
+                        # For flat formats like .po, the key itself might BE the text to translate
+                        translated_value = self.translate_text(
+                            key_path, source_lang, target_lang, ui_safe, glossary_id
+                        )
+                        updated_content[key_path] = translated_value
+                    else:
+                        # For nested formats, if key not found in source, set empty string
+                        set_nested_value(updated_content, key_parts, "")
 
         return updated_content
 
@@ -487,6 +505,7 @@ class Translator:
         target_lang: str,
         ui_safe: bool = False,
         glossary_id: Optional[str] = None,
+        source_file_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Translate only the outdated keys in a target dictionary.
@@ -498,6 +517,7 @@ class Translator:
             target_lang: Target language code
             ui_safe: If True, ensure translations will not be longer than original text
             glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
+            source_file_path: Path to the source file (used to determine file format)
 
         Returns:
             Updated target content with translated outdated keys
@@ -533,11 +553,27 @@ class Translator:
                     # Update the target content with the translated value (nested format)
                     set_nested_value(updated_content, key_parts, translated_value)
                 else:
-                    # For flat formats like .po, the key itself might BE the text to translate
-                    translated_value = self.translate_text(
-                        key_path, source_lang, target_lang, ui_safe, glossary_id
-                    )
-                    updated_content[key_path] = translated_value
+                    # Determine file format to decide how to handle missing keys
+                    is_flat_format = False
+                    if source_file_path:
+                        is_flat_format = source_file_path.endswith((".po", ".csv", ".tsv"))
+                    else:
+                        # Fallback: check structure of source_content
+                        is_flat_format = (
+                            isinstance(source_content, dict) and
+                            all(isinstance(v, str) for v in source_content.values()) and
+                            not any("." in k for k in source_content.keys())
+                        )
+                    
+                    if is_flat_format:
+                        # For flat formats like .po, the key itself might BE the text to translate
+                        translated_value = self.translate_text(
+                            key_path, source_lang, target_lang, ui_safe, glossary_id
+                        )
+                        updated_content[key_path] = translated_value
+                    else:
+                        # For nested formats, if key not found in source, set empty string
+                        set_nested_value(updated_content, key_parts, "")
 
         return updated_content
 
@@ -614,6 +650,7 @@ class Translator:
         ui_safe: bool = False,
         glossary_id: Optional[str] = None,
         on_batch_complete: Optional[Callable[[Dict[str, str], int], None]] = None,
+        source_file_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Translate missing keys in batches to avoid overloading the API.
@@ -625,6 +662,7 @@ class Translator:
             target_lang: Target language code
             ui_safe: If True, ensure translations will not be longer than original text
             glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
+            source_file_path: Path to the source file (used to determine file format)
 
         Returns:
             Updated target content with translated missing keys
@@ -683,17 +721,39 @@ class Translator:
                     print(
                         f"DEBUG: Source value for '{key_path}': {repr(source_value)} (type: {type(source_value)})"
                     )
-                    # For flat formats like .po, the key itself might BE the text to translate
-                    # This is common when msgid is used as the key
-                    # Filter empty strings
-                    if key_path.strip() == "":
-                        empty_key_paths.append((key_path, [key_path]))
+                    # Determine file format to decide how to handle missing keys
+                    is_flat_format = False
+                    if source_file_path:
+                        is_flat_format = source_file_path.endswith((".po", ".csv", ".tsv"))
                     else:
-                        texts_to_translate.append(key_path)
-                        key_paths_list.append(key_path)
-                        key_parts_list.append([key_path])
+                        # Fallback: check structure of source_content
+                        # If it's a flat dictionary (all values are strings, no nested dicts),
+                        # then it might be a flat format
+                        is_flat_format = (
+                            isinstance(source_content, dict) and
+                            all(isinstance(v, str) for v in source_content.values()) and
+                            not any("." in k for k in source_content.keys())
+                        )
+                    
+                    if is_flat_format:
+                        # For flat formats like .po, the key itself might BE the text to translate
+                        # This is common when msgid is used as the key
+                        # Filter empty strings
+                        if key_path.strip() == "":
+                            empty_key_paths.append((key_path, [key_path]))
+                        else:
+                            texts_to_translate.append(key_path)
+                            key_paths_list.append(key_path)
+                            key_parts_list.append([key_path])
+                            print(
+                                f"DEBUG: ✓ Added '{key_path}' to translation queue (flat format - key as text)"
+                            )
+                    else:
+                        # For nested formats (TypeScript, JSON, YAML), if key not found in source,
+                        # set empty string (key will be created in target file with empty value)
+                        empty_key_paths.append((key_path, key_parts))
                         print(
-                            f"DEBUG: ✓ Added '{key_path}' to translation queue (flat format - key as text)"
+                            f"DEBUG: ⚠ Key '{key_path}' not found in source, setting empty string (nested format)"
                         )
 
         # Set empty strings in the result
