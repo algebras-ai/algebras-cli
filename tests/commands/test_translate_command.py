@@ -505,7 +505,7 @@ class TestTranslateCommand:
             "algebras.commands.translate_command.Translator",
             return_value=mock_translator,
         ), patch(
-            "algebras.commands.translate_command.write_po_file"
+            "algebras.utils.file_format_handlers.po_handler.write_po_file"
         ) as mock_write_po, patch(
             "builtins.open", mock_open()
         ), patch(
@@ -589,7 +589,7 @@ class TestTranslateCommand:
             "algebras.commands.translate_command.Translator",
             return_value=mock_translator,
         ), patch(
-            "algebras.commands.translate_command.write_po_file"
+            "algebras.utils.file_format_handlers.po_handler.write_po_file"
         ) as mock_write_po, patch(
             "builtins.open", mock_open()
         ), patch(
@@ -627,7 +627,8 @@ class TestTranslateCommand:
             assert (
                 call_args is not None
             ), "write_po_file should have been called with arguments"
-            # Check that mark_fuzzy=False was passed (third argument)
+            # Check that mark_fuzzy=False was passed (third positional argument)
+            # Handler calls: write_po_file(file_path, content, po_mark_fuzzy)
             assert (
                 len(call_args[0]) >= 3
             ), "write_po_file should be called with at least 3 arguments"
