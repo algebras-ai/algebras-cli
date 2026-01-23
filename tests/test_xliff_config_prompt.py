@@ -42,8 +42,20 @@ class TestXLIFFConfigPrompt:
         mock_config.get_destination_locale_code.return_value = "fr"
         
         # Mock file scanner - create temp source file for scanner to find
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as source_f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False, encoding='utf-8') as source_f:
             source_file_path = source_f.name
+            # Write minimal valid XLIFF content
+            source_f.write('''<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file original="messages" source-language="en" target-language="fr" datatype="plaintext">
+    <body>
+      <trans-unit id="key1">
+        <source>Hello</source>
+        <target></target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>''')
         
         # Mock get_source_files to return the source file
         mock_config.get_source_files.return_value = {
@@ -60,19 +72,31 @@ class TestXLIFFConfigPrompt:
         mock_translator = MagicMock()
         mock_translator.translate_missing_keys_batch.return_value = {"key1": "Bonjour"}
         
-        # Create temp target file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False) as target_f:
+        # Create temp target file with valid XLIFF content
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xlf', delete=False, encoding='utf-8') as target_f:
             target_file = target_f.name
+            # Write minimal valid XLIFF content (empty target for missing key)
+            target_f.write('''<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file original="messages" source-language="en" target-language="fr" datatype="plaintext">
+    <body>
+      <trans-unit id="key1">
+        <source>Hello</source>
+        <target></target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>''')
         
         try:
             with patch("algebras.commands.translate_command.Config", return_value=mock_config), \
                  patch("algebras.commands.translate_command.FileScanner", return_value=mock_scanner), \
                  patch("algebras.commands.translate_command.Translator", return_value=mock_translator), \
                  patch("algebras.commands.translate_command.validate_language_files", return_value=(True, {"key1"})), \
-                 patch("algebras.commands.translate_command.read_xliff_file") as mock_read, \
-                 patch("algebras.commands.translate_command.extract_xliff_strings") as mock_extract, \
-                 patch("algebras.commands.translate_command.update_xliff_targets") as mock_update, \
-                 patch("algebras.commands.translate_command.write_xliff_file") as mock_write, \
+                 patch("algebras.utils.xliff_handler.read_xliff_file") as mock_read, \
+                 patch("algebras.utils.xliff_handler.extract_translatable_strings") as mock_extract, \
+                 patch("algebras.utils.xliff_handler.update_xliff_targets") as mock_update, \
+                 patch("algebras.utils.xliff_handler.write_xliff_file") as mock_write, \
                  patch("os.path.exists", return_value=True), \
                  patch("os.makedirs"), \
                  patch("algebras.commands.translate_command.resolve_destination_path", return_value=target_file), \
@@ -143,10 +167,10 @@ class TestXLIFFConfigPrompt:
                  patch("algebras.commands.translate_command.FileScanner", return_value=mock_scanner), \
                  patch("algebras.commands.translate_command.Translator", return_value=mock_translator), \
                  patch("algebras.commands.translate_command.validate_language_files", return_value=(True, {"key1"})), \
-                 patch("algebras.commands.translate_command.read_xliff_file") as mock_read, \
-                 patch("algebras.commands.translate_command.extract_xliff_strings") as mock_extract, \
-                 patch("algebras.commands.translate_command.update_xliff_targets") as mock_update, \
-                 patch("algebras.commands.translate_command.write_xliff_file") as mock_write, \
+                 patch("algebras.utils.xliff_handler.read_xliff_file") as mock_read, \
+                 patch("algebras.utils.xliff_handler.extract_translatable_strings") as mock_extract, \
+                 patch("algebras.utils.xliff_handler.update_xliff_targets") as mock_update, \
+                 patch("algebras.utils.xliff_handler.write_xliff_file") as mock_write, \
                  patch("os.path.exists", return_value=True), \
                  patch("os.makedirs"):
                 
