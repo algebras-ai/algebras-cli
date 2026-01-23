@@ -5,56 +5,67 @@ from typing import Dict, Any, Set, List, Tuple, Optional
 from tqdm import tqdm
 from datetime import datetime
 from algebras.utils.git_utils import (
-    is_git_available, 
-    is_git_repository, 
-    get_key_last_modification, 
+    is_git_available,
+    is_git_repository,
+    get_key_last_modification,
     compare_key_modifications,
-    get_keys_last_modifications_batch
+    get_keys_last_modifications_batch,
 )
 from algebras.utils.ts_handler import read_ts_translation_file
 from algebras.utils.android_xml_handler import read_android_xml_file
 from algebras.utils.ios_strings_handler import read_ios_strings_file
-from algebras.utils.ios_stringsdict_handler import read_ios_stringsdict_file, extract_translatable_strings
+from algebras.utils.ios_stringsdict_handler import (
+    read_ios_stringsdict_file,
+    extract_translatable_strings,
+)
 from algebras.utils.po_handler import read_po_file
-from algebras.utils.xliff_handler import read_xliff_file, extract_translatable_strings as extract_xliff_strings
-from algebras.utils.csv_handler import read_csv_file, extract_translatable_strings as extract_csv_strings
+from algebras.utils.xliff_handler import (
+    read_xliff_file,
+    extract_translatable_strings as extract_xliff_strings,
+)
+from algebras.utils.csv_handler import (
+    read_csv_file,
+    extract_translatable_strings as extract_csv_strings,
+)
 
 
-def read_language_file(file_path: str, language: Optional[str] = None, config: Optional[Any] = None) -> Dict[str, Any]:
+def read_language_file(
+    file_path: str, language: Optional[str] = None, config: Optional[Any] = None
+) -> Dict[str, Any]:
     """
     Read a language file and return its contents as a dictionary.
-    
+
     Args:
         file_path: Path to the language file
         language: Optional language code for CSV files (to extract specific language column)
         config: Optional Config object for locale mapping (used for CSV files)
-        
+
     Returns:
         Dictionary containing the file contents
     """
-    if file_path.endswith('.json'):
-        with open(file_path, 'r', encoding='utf-8') as f:
+    if file_path.endswith(".json"):
+        with open(file_path, "r", encoding="utf-8") as f:
             return json.load(f)
-    elif file_path.endswith(('.yaml', '.yml')):
-        with open(file_path, 'r', encoding='utf-8') as f:
+    elif file_path.endswith((".yaml", ".yml")):
+        with open(file_path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
-    elif file_path.endswith('.ts'):
+    elif file_path.endswith(".ts"):
         return read_ts_translation_file(file_path)
-    elif file_path.endswith('.xml'):
+    elif file_path.endswith(".xml"):
         return read_android_xml_file(file_path)
-    elif file_path.endswith('.strings'):
+    elif file_path.endswith(".strings"):
         return read_ios_strings_file(file_path)
-    elif file_path.endswith('.stringsdict'):
+    elif file_path.endswith(".stringsdict"):
         # For .stringsdict files, extract translatable strings to get a flat dictionary
         content = read_ios_stringsdict_file(file_path)
         return extract_translatable_strings(content)
-    elif file_path.endswith('.po'):
+    elif file_path.endswith(".po"):
         return read_po_file(file_path)
-    elif file_path.endswith(('.xlf', '.xliff')):
+    elif file_path.endswith((".xlf", ".xliff")):
         # For XLIFF files, extract translatable strings to get a flat dictionary
         content = read_xliff_file(file_path)
         return extract_xliff_strings(content)
-    elif file_path.endswith(('.csv', '.tsv')):
+    elif file_path.endswith((".csv", ".tsv")):
         # For CSV/TSV files, extract a specific language column
         csv_content = read_csv_file(file_path)
         if language:
@@ -68,7 +79,7 @@ def read_language_file(file_path: str, language: Optional[str] = None, config: O
         else:
             # If no language specified, return all translations (for backward compatibility)
             # Extract the first language found, or return empty dict
-            languages = csv_content.get('languages', [])
+            languages = csv_content.get("languages", [])
             if languages:
                 return extract_csv_strings(csv_content, languages[0])
             return {}
@@ -76,91 +87,159 @@ def read_language_file(file_path: str, language: Optional[str] = None, config: O
         raise ValueError(f"Unsupported file format: {file_path}")
 
 
-def extract_all_keys(data: Dict[str, Any], prefix: str = '') -> Set[str]:
+def extract_all_keys(data: Dict[str, Any], prefix: str = "") -> Set[str]:
     """
-    Extract all keys from a nested dictionary, including nested keys.
-    
+    Extract all keys from a nested dictionary, including nested keys and array elements.
+
     Args:
         data: Dictionary to extract keys from
         prefix: Prefix for nested keys
-        
+
     Returns:
-        Set of all keys in the dictionary, including nested keys
+        Set of all keys in the dictionary, including nested keys and array elements
     """
     keys = set()
-    for key, value in data.items():
-        full_key = f"{prefix}.{key}" if prefix else key
-        keys.add(full_key)
-        
-        # Recursively extract keys from nested dictionaries
+
+    def _extract_recursive(value: Any, current_prefix: str) -> None:
+        """Recursively extract keys from any value type."""
         if isinstance(value, dict):
-            nested_keys = extract_all_keys(value, full_key)
-            keys.update(nested_keys)
-    
+            # Add the intermediate key (the dict itself) if it has a prefix
+            if current_prefix:
+                keys.add(current_prefix)
+            for key, val in value.items():
+                full_key = f"{current_prefix}.{key}" if current_prefix else key
+                _extract_recursive(val, full_key)
+        elif isinstance(value, list):
+            # Process array elements
+            for index, item in enumerate(value):
+                array_key = (
+                    f"{current_prefix}.{index}" if current_prefix else str(index)
+                )
+                # If item is a primitive, add the key
+                if not isinstance(item, (dict, list)):
+                    keys.add(array_key)
+                else:
+                    # If item is a dict or list, recursively extract
+                    _extract_recursive(item, array_key)
+        else:
+            # For strings, numbers, booleans, None - add as a key
+            # This handles leaf values (strings, numbers, etc.)
+            if current_prefix:
+                keys.add(current_prefix)
+
+    # Start extraction from the root dictionary
+    if isinstance(data, dict):
+        for key, value in data.items():
+            full_key = f"{prefix}.{key}" if prefix else key
+            # If value is a primitive (string, number, bool, None), add the key directly
+            if not isinstance(value, (dict, list)):
+                keys.add(full_key)
+            elif isinstance(value, list):
+                # For lists, don't add the intermediate key - only add array element keys
+                # Recursively extract keys from array elements
+                _extract_recursive(value, full_key)
+            else:
+                # For dicts, add the intermediate key and recursively extract
+                keys.add(full_key)  # Add the intermediate key (e.g., "login", "errors")
+                _extract_recursive(value, full_key)
+
     return keys
 
 
 def get_key_value(data: Dict[str, Any], key: str) -> Any:
     """
-    Get the value of a key from a nested dictionary.
-    
+    Get the value of a key from a nested dictionary or array.
+
     Args:
         data: Dictionary to get value from
-        key: Key to get value for (can be nested using dot notation)
-        
+        key: Key to get value for (can be nested using dot notation, supports array indices)
+
     Returns:
         Value of the key or None if key doesn't exist
     """
-    parts = key.split('.')
+    parts = key.split(".")
     current = data
-    
+
     for part in parts:
-        if part not in current:
+        if current is None:
             return None
-        current = current[part]
-        
+
+        # Check if current is a list and part is a numeric index
+        if isinstance(current, list):
+            try:
+                index = int(part)
+                if 0 <= index < len(current):
+                    current = current[index]
+                else:
+                    return None
+            except ValueError:
+                # Part is not a number, can't access list with non-numeric key
+                return None
+        # Check if current is a dict
+        elif isinstance(current, dict):
+            if part not in current:
+                return None
+            current = current[part]
+        else:
+            # Current is neither dict nor list, can't traverse further
+            return None
+
     return current
 
 
-def validate_language_files(source_file: str, target_file: str, 
-                            source_language: Optional[str] = None,
-                            target_language: Optional[str] = None,
-                            config: Optional[Any] = None) -> Tuple[bool, Set[str]]:
+def validate_language_files(
+    source_file: str,
+    target_file: str,
+    source_language: Optional[str] = None,
+    target_language: Optional[str] = None,
+    config: Optional[Any] = None,
+) -> Tuple[bool, Set[str]]:
     """
     Validate if a target language file contains all keys from the source language file.
     Keys with empty string values are considered missing.
-    
+
     Args:
         source_file: Path to the source language file
         target_file: Path to the target language file
         source_language: Optional language code for CSV files (to extract specific language column from source)
         target_language: Optional language code for CSV files (to extract specific language column from target)
         config: Optional Config object for locale mapping (used for CSV files)
-        
+
     Returns:
         Tuple of (is_valid, missing_keys)
     """
     try:
         # For CSV/TSV files, pass language parameters to read_language_file
-        if source_file.endswith(('.csv', '.tsv')):
+        if source_file.endswith((".csv", ".tsv")):
             source_data = read_language_file(source_file, source_language, config)
         else:
             source_data = read_language_file(source_file)
-        
-        if target_file.endswith(('.csv', '.tsv')):
+
+        if target_file.endswith((".csv", ".tsv")):
             target_data = read_language_file(target_file, target_language, config)
         else:
             target_data = read_language_file(target_file)
-        
-        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff, .csv, .tsv) 
+
+        # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff, .csv, .tsv)
         # These formats return flat key-value dictionaries rather than nested structures
-        if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv')):
+        if target_file.endswith(
+            (
+                ".po",
+                ".xml",
+                ".strings",
+                ".stringsdict",
+                ".xlf",
+                ".xliff",
+                ".csv",
+                ".tsv",
+            )
+        ):
             source_keys = set(source_data.keys())
             target_keys = set(target_data.keys())
-            
+
             # Find keys that don't exist at all in target
             missing_keys = source_keys - target_keys
-            
+
             # Find keys that exist in target but have empty string values
             common_keys = source_keys & target_keys
             for key in common_keys:
@@ -172,10 +251,10 @@ def validate_language_files(source_file: str, target_file: str,
             # Handle nested formats (JSON, YAML, TS)
             source_keys = extract_all_keys(source_data)
             target_keys = extract_all_keys(target_data)
-            
+
             # Find keys that don't exist at all in target
             missing_keys = source_keys - target_keys
-            
+
             # Find keys that exist in target but have empty string values
             common_keys = source_keys & target_keys
             for key in common_keys:
@@ -183,7 +262,7 @@ def validate_language_files(source_file: str, target_file: str,
                 # Treat empty string values as missing keys
                 if target_value == "":
                     missing_keys.add(key)
-        
+
         return len(missing_keys) == 0, missing_keys
     except Exception as e:
         print(f"Error validating language files: {str(e)}")
@@ -194,11 +273,11 @@ def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[st
     """
     Find keys that exist in both source and target files but might be outdated.
     This checks if the value is different and if the source key was modified more recently than the target.
-    
+
     Args:
         source_file: Path to the source language file
         target_file: Path to the target language file
-        
+
     Returns:
         Tuple of (has_outdated_keys, outdated_keys)
     """
@@ -207,52 +286,60 @@ def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[st
         if not is_git_available() or not is_git_repository(source_file):
             # Skip git-based validation if not available
             return False, set()
-            
+
         source_data = read_language_file(source_file)
         target_data = read_language_file(target_file)
-        
+
         source_keys = extract_all_keys(source_data)
         target_keys = extract_all_keys(target_data)
-        
+
         # Get keys that exist in both files
         common_keys = source_keys.intersection(target_keys)
-        
+
         # Filter keys that have different values first (potential candidates for being outdated)
         different_value_keys = []
         for key in common_keys:
             source_value = get_key_value(source_data, key)
             target_value = get_key_value(target_data, key)
-            
+
             # Only consider keys with different values
             if source_value != target_value:
                 different_value_keys.append(key)
-        
+
         # If there are no keys with different values, we're done
         if not different_value_keys:
             return False, set()
-        
+
         outdated_keys = set()
-        
+
         # Use batch git operations for O(1) performance - single operation for all keys
         print(f"Checking {len(different_value_keys)} keys for outdated status...")
-        
+
         # Get last modification dates for all keys in a single batch operation
-        source_dates = get_keys_last_modifications_batch(source_file, different_value_keys)
-        target_dates = get_keys_last_modifications_batch(target_file, different_value_keys)
-        
+        source_dates = get_keys_last_modifications_batch(
+            source_file, different_value_keys
+        )
+        target_dates = get_keys_last_modifications_batch(
+            target_file, different_value_keys
+        )
+
         # Compare the dates for each key - this is O(n) but very fast since it's just dict lookups
         for key in different_value_keys:
             source_date = source_dates.get(key)
             target_date = target_dates.get(key)
-            
+
             # If both dates are available, compare them
             if source_date and target_date:
                 # Parse dates for comparison
                 try:
                     # Handle different date formats that might come from git
-                    source_dt = datetime.fromisoformat(source_date.replace('Z', '+00:00'))
-                    target_dt = datetime.fromisoformat(target_date.replace('Z', '+00:00'))
-                    
+                    source_dt = datetime.fromisoformat(
+                        source_date.replace("Z", "+00:00")
+                    )
+                    target_dt = datetime.fromisoformat(
+                        target_date.replace("Z", "+00:00")
+                    )
+
                     if source_dt > target_dt:
                         outdated_keys.add(key)
                 except (ValueError, AttributeError):
@@ -260,7 +347,7 @@ def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[st
                     continue
             # If either date is missing, we can't determine if it's outdated
             # Skip rather than falling back to slow serial processing
-                    
+
         return len(outdated_keys) > 0, outdated_keys
     except Exception as e:
         print(f"Error finding outdated keys: {str(e)}")
@@ -271,21 +358,21 @@ def map_language_code(lang_code: str) -> str:
     """
     Map a language code to its ISO 2-letter format.
     For example: 'pt-BR' -> 'pt', 'en-US' -> 'en'
-    
+
     Args:
         lang_code: Language code to map
-        
+
     Returns:
         ISO 2-letter language code
     """
     # If the code is already 2 letters, return it as is
     if len(lang_code) == 2:
         return lang_code.lower()
-    
+
     # Split by common separators and take the first part
-    for separator in ['-', '_']:
+    for separator in ["-", "_"]:
         if separator in lang_code:
             return lang_code.split(separator)[0].lower()
-    
+
     # If no separator found, return the first two characters
-    return lang_code[:2].lower() 
+    return lang_code[:2].lower()

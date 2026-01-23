@@ -8,55 +8,73 @@ import yaml
 import requests
 import hashlib
 import pickle
-import asyncio
 import concurrent.futures
-import threading
-import random
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Set
+from typing import Dict, Any, List, Optional, Callable
 
 from algebras.config import Config as ConfigClass
-from functools import lru_cache
 import re
 import time
 
-import click
 from colorama import Fore
 
-from algebras.config import Config
 from algebras.utils.lang_validator import map_language_code
 from algebras.utils.ts_handler import read_ts_translation_file
 from algebras.utils.android_xml_handler import read_android_xml_file
 from algebras.utils.ios_strings_handler import read_ios_strings_file
-from algebras.utils.ios_stringsdict_handler import read_ios_stringsdict_file, extract_translatable_strings
+from algebras.utils.ios_stringsdict_handler import (
+    read_ios_stringsdict_file,
+    extract_translatable_strings,
+)
 from algebras.utils.po_handler import read_po_file
 from algebras.utils.html_handler import read_html_file
-from algebras.utils.arb_handler import read_arb_file, extract_translatable_strings as extract_arb_strings
-from algebras.utils.xliff_handler import read_xliff_file, extract_translatable_strings as extract_xliff_strings
+from algebras.utils.arb_handler import (
+    read_arb_file,
+    extract_translatable_strings as extract_arb_strings,
+)
+from algebras.utils.xliff_handler import (
+    read_xliff_file,
+    extract_translatable_strings as extract_xliff_strings,
+)
 from algebras.utils.properties_handler import read_properties_file
-from algebras.utils.csv_handler import read_csv_file, extract_translatable_strings as extract_csv_strings, is_glossary_csv
-from algebras.utils.xlsx_handler import read_xlsx_file, extract_translatable_strings as extract_xlsx_strings, is_glossary_xlsx
+from algebras.utils.csv_handler import (
+    read_csv_file,
+    is_glossary_csv,
+)
+from algebras.utils.xlsx_handler import (
+    read_xlsx_file,
+    is_glossary_xlsx,
+)
+from algebras.utils.nested_structure_handler import (
+    get_nested_value,
+    set_nested_value,
+)
+from algebras.services.rate_limiter import RateLimiter
+from algebras.services.retry_handler import RetryHandler
+from algebras.services.api_client import AlgebrasAIClient
+from algebras.services.batch_processor import BatchProcessor, BatchResult
+from algebras.services.string_normalizer import StringNormalizer
+from algebras.services.strategies.strategy_factory import TranslationStrategyFactory
 
 
 class TranslationCache:
     """Cache for storing translations to avoid duplicate API calls."""
-    
+
     _instance = None
     _cache = {}
     _max_size = 4096 * 100  # Approximately 10MB
     _cache_file = os.path.join(os.path.expanduser("~"), ".algebras.cache")
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(TranslationCache, cls).__new__(cls)
             cls._instance._load_cache()
         return cls._instance
-    
+
     def _load_cache(self):
         """Load cache from disk if it exists."""
         if os.path.exists(self._cache_file):
             try:
-                with open(self._cache_file, 'rb') as f:
+                with open(self._cache_file, "rb") as f:
                     self._cache = pickle.load(f)
                 print(f"Loaded {len(self._cache)} translations from cache file")
             except (pickle.PickleError, EOFError, Exception) as e:
@@ -65,22 +83,22 @@ class TranslationCache:
         else:
             print(f"No cache file found at {self._cache_file}, creating new cache")
             self._cache = {}
-    
+
     def _save_cache(self):
         """Save cache to disk."""
         try:
             cache_dir = os.path.dirname(self._cache_file)
             os.makedirs(cache_dir, exist_ok=True)
-            
-            with open(self._cache_file, 'wb') as f:
+
+            with open(self._cache_file, "wb") as f:
                 pickle.dump(self._cache, f)
         except Exception as e:
             print(f"Failed to save translation cache: {str(e)}")
-    
+
     def get(self, key):
         """Get a value from the cache."""
         return self._cache.get(key)
-    
+
     def set(self, key, value):
         """Set a value in the cache and persist to disk."""
         # If cache is at max size, remove oldest item
@@ -88,10 +106,10 @@ class TranslationCache:
             # Remove a random item as a simple strategy
             if self._cache:
                 self._cache.pop(next(iter(self._cache)))
-        
+
         self._cache[key] = value
         self._save_cache()
-    
+
     def get_cache_key(self, text, source_lang, target_lang, ui_safe, prompt=""):
         """Generate a unique cache key for the translation parameters."""
         if prompt:
@@ -99,397 +117,201 @@ class TranslationCache:
             return f"{text}|{source_lang}|{target_lang}|{ui_safe}|{prompt_hash}"
         else:
             return f"{text}|{source_lang}|{target_lang}|{ui_safe}"
-    
+
     def clear(self):
         """Clear the cache."""
         self._cache = {}
         self._save_cache()
-        
+
     def info(self):
         """Return information about the cache."""
         return {
             "entries": len(self._cache),
             "max_size": self._max_size,
-            "cache_file": self._cache_file
+            "cache_file": self._cache_file,
         }
 
 
 class Translator:
     """AI-powered translation service."""
-    
+
     def __init__(self, config: Optional[ConfigClass] = None):
         """
         Initialize Translator with optional Config instance.
-        
+
         Args:
             config: Optional Config instance. If None, creates a new Config with default path.
         """
         if config is None:
             from algebras.config import Config
+
             config = Config()
-        
+
         self.config = config
         if not self.config.exists():
-            raise FileNotFoundError("No Algebras configuration found. Run 'algebras init' first.")
-        
+            raise FileNotFoundError(
+                "No Algebras configuration found. Run 'algebras init' first."
+            )
+
         self.config.load()
         self.api_config = self.config.get_api_config()
-        
+
         # Get batch size from environment or config, default to 20
         self.batch_size = int(os.environ.get("ALGEBRAS_BATCH_SIZE", 20))
         if self.config.has_setting("batch_size"):
             self.batch_size = int(self.config.get_setting("batch_size"))
-        
+
         # Get max parallel batches from config, default to 5
-        self.max_parallel_batches = int(os.environ.get("ALGEBRAS_MAX_PARALLEL_BATCHES", 5))
+        self.max_parallel_batches = int(
+            os.environ.get("ALGEBRAS_MAX_PARALLEL_BATCHES", 5)
+        )
         if self.config.has_setting("max_parallel_batches"):
-            self.max_parallel_batches = int(self.config.get_setting("max_parallel_batches"))
-            
+            self.max_parallel_batches = int(
+                self.config.get_setting("max_parallel_batches")
+            )
+
         # Initialize the translation cache
         self.cache = TranslationCache()
-        
+
+        # Initialize string normalizer
+        self.string_normalizer = StringNormalizer(self.config)
+
         # Initialize custom prompt
         self.custom_prompt = ""
-        
+
         # Initialize verbose flag
         self.verbose = False
-        
-        # Shared rate limiting state for coordinating retries across parallel batches
-        self._rate_limit_lock = threading.Lock()
-        self._rate_limit_backoff_until = 0.0  # Timestamp until which we should back off
-        self._consecutive_429_count = 0  # Track consecutive 429 errors across all batches
-        self._last_429_time = 0.0  # Timestamp of last 429 error
-        
-        # Rate limiter: 25 requests per minute (server limit is 30, we use 25 for safety margin)
-        self._max_requests_per_minute = 30
-        self._request_timestamps = []  # Track request timestamps for sliding window
-        
+
+        # Initialize rate limiter and retry handler
+        # Rate limiter: 30 requests per minute (server limit is 30)
+        self._rate_limiter = RateLimiter(max_requests_per_minute=30)
+        self._retry_handler = RetryHandler(
+            rate_limiter=self._rate_limiter, max_retries=5, initial_wait=1.0
+        )
+
+        # Initialize API client
+        self.api_client = AlgebrasAIClient(
+            config=self.config,
+            retry_handler=self._retry_handler,
+            verbose=self.verbose,
+            custom_prompt=self.custom_prompt,
+        )
+
+        # BatchProcessor will be created lazily when needed
+        self._batch_processor = None
+
+    def _get_batch_processor(self) -> BatchProcessor:
+        """Get or create BatchProcessor instance."""
+        if self._batch_processor is None:
+            provider = self.api_config.get("provider", "algebras-ai")
+            self._batch_processor = BatchProcessor(
+                api_client=self.api_client,
+                batch_size=self.batch_size,
+                max_parallel_batches=self.max_parallel_batches,
+                provider=provider,
+                verbose=self.verbose,
+            )
+        return self._batch_processor
+
     def set_custom_prompt(self, prompt: str) -> None:
         """
         Set a custom prompt to be used for translations.
-        
+
         Args:
             prompt: Custom prompt text to use for translation
         """
         self.custom_prompt = prompt
-    
+        self.api_client.set_custom_prompt(prompt)
+
     def set_verbose(self, verbose: bool) -> None:
         """
         Set verbose mode for detailed logging.
-        
+
         Args:
             verbose: Whether to enable verbose logging
         """
         self.verbose = verbose
-    
-    def _wait_for_rate_limit(self):
-        """
-        Wait if necessary to respect the rate limit of 25 requests per minute.
-        Uses a sliding window approach to track requests in the last 60 seconds.
-        """
-        with self._rate_limit_lock:
-            current_time = time.time()
-            
-            # Remove timestamps older than 60 seconds
-            self._request_timestamps = [
-                ts for ts in self._request_timestamps 
-                if current_time - ts < 60.0
-            ]
-            
-            # If we're at the limit, wait until the oldest request is more than 60 seconds old
-            if len(self._request_timestamps) >= self._max_requests_per_minute:
-                oldest_timestamp = min(self._request_timestamps)
-                wait_time = 60.0 - (current_time - oldest_timestamp) + 0.1  # Add 0.1s buffer
-                if wait_time > 0:
-                    print(f"  ⚠ Rate limit: {len(self._request_timestamps)}/{self._max_requests_per_minute} requests in last minute. Waiting {wait_time:.1f} seconds...")
-                    time.sleep(wait_time)
-                    # Update current time after waiting
-                    current_time = time.time()
-                    # Clean up old timestamps again
-                    self._request_timestamps = [
-                        ts for ts in self._request_timestamps 
-                        if current_time - ts < 60.0
-                    ]
-            
-            # Record this request timestamp
-            self._request_timestamps.append(current_time)
-        
-    def _retry_with_exponential_backoff(self, api_call_func, max_retries: int = 5, initial_wait: float = 1.0):
-        """
-        Retry an API call with exponential backoff on 429 errors.
-        Uses shared rate limiting state to coordinate retries across parallel batches.
-        
-        Args:
-            api_call_func: Callable that makes the API request and returns a response
-            max_retries: Maximum number of retry attempts (default: 5)
-            initial_wait: Initial wait time in seconds (default: 1.0)
-            
-        Returns:
-            Response object from the API call
-            
-        Raises:
-            Exception: If all retries are exhausted or non-429 error occurs
-        """
-        wait_time = initial_wait
-        
-        for attempt in range(max_retries + 1):
-            try:
-                # Check shared rate limit state and wait if needed
-                with self._rate_limit_lock:
-                    current_time = time.time()
-                    if self._rate_limit_backoff_until > current_time:
-                        wait_needed = self._rate_limit_backoff_until - current_time
-                        print(f"  ⚠ Waiting for shared rate limit backoff: {wait_needed:.1f} seconds...")
-                        time.sleep(wait_needed)
-                
-                # Enforce rate limit: 25 requests per minute
-                self._wait_for_rate_limit()
-                
-                response = api_call_func()
-                
-                # If successful or non-429 error, reset consecutive 429 counter and return immediately
-                if response.status_code != 429:
-                    # Reset consecutive 429 count on successful request
-                    with self._rate_limit_lock:
-                        if response.status_code == 200:
-                            self._consecutive_429_count = 0
-                    return response
-                
-                # If 429 and we have retries left, coordinate backoff with other batches
-                if attempt < max_retries:
-                    # Update shared backoff state
-                    with self._rate_limit_lock:
-                        current_time = time.time()
-                        
-                        # Track consecutive 429 errors (reset if more than 60 seconds since last 429)
-                        if current_time - self._last_429_time > 60:
-                            self._consecutive_429_count = 0
-                        self._consecutive_429_count += 1
-                        self._last_429_time = current_time
-                        
-                        # Increase backoff more aggressively when we see multiple consecutive 429s
-                        # Multiply wait time by a factor based on consecutive 429 count
-                        # This helps when multiple batches hit 429 simultaneously
-                        if self._consecutive_429_count > 1:
-                            # Add extra backoff: 0.5s per consecutive 429 (capped at 5s extra)
-                            extra_backoff = min(self._consecutive_429_count * 0.5, 5.0)
-                            wait_time = wait_time + extra_backoff
-                        
-                        # Add jitter to prevent thundering herd (0-20% of wait time)
-                        jitter = random.uniform(0, wait_time * 0.2)
-                        actual_wait = wait_time + jitter
-                        
-                        # Set shared backoff to the maximum of current backoff or our wait time
-                        # Use a slightly longer backoff to give the API more time to recover
-                        self._rate_limit_backoff_until = max(
-                            self._rate_limit_backoff_until,
-                            current_time + actual_wait
-                        )
-                    
-                    # Wait for our backoff period (with jitter)
-                    print(f"  ⚠ Rate limited (429). Retrying in {actual_wait:.1f} seconds... (attempt {attempt + 1}/{max_retries})")
-                    time.sleep(actual_wait)
-                    wait_time *= 2  # Exponential backoff
-                else:
-                    # Last attempt failed with 429
-                    error_msg = f"Error from Algebras AI API: 429 Too Many Requests - {response.text}"
-                    raise Exception(error_msg)
-                    
-            except requests.exceptions.RequestException as e:
-                # Network errors or other request exceptions - re-raise immediately
-                # These are not retryable 429 errors
-                raise Exception(f"Request failed: {str(e)}")
-            except Exception as e:
-                # For other exceptions, check if it's a 429 error with response
-                if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
-                    if e.response.status_code == 429 and attempt < max_retries:
-                        # Update shared backoff state
-                        with self._rate_limit_lock:
-                            current_time = time.time()
-                            
-                            # Track consecutive 429 errors (reset if more than 60 seconds since last 429)
-                            if current_time - self._last_429_time > 60:
-                                self._consecutive_429_count = 0
-                            self._consecutive_429_count += 1
-                            self._last_429_time = current_time
-                            
-                            # Increase backoff more aggressively when we see multiple consecutive 429s
-                            if self._consecutive_429_count > 1:
-                                extra_backoff = min(self._consecutive_429_count * 0.5, 5.0)
-                                wait_time = wait_time + extra_backoff
-                            
-                            # Add jitter to prevent thundering herd
-                            jitter = random.uniform(0, wait_time * 0.2)
-                            actual_wait = wait_time + jitter
-                            self._rate_limit_backoff_until = max(
-                                self._rate_limit_backoff_until,
-                                current_time + actual_wait
-                            )
-                        # Retry on 429
-                        print(f"  ⚠ Rate limited (429). Retrying in {actual_wait:.1f} seconds... (attempt {attempt + 1}/{max_retries})")
-                        time.sleep(actual_wait)
-                        wait_time *= 2
-                        continue
-                # For all other cases, re-raise
-                raise
-        
-        # Should not reach here, but just in case
-        raise Exception("Failed to get response after all retries")
-    
-    def normalize_translation_string(self, source_text: str, translated_text: str) -> str:
-        """
-        Normalize a translated string by removing escaped characters if they weren't
-        present in the source text.
-        
-        Args:
-            source_text: The original source text
-            translated_text: The translated text from the API
-            
-        Returns:
-            Normalized translated text
-        """
-        # Check if normalization is enabled
-        if not self.config.get_setting("api.normalize_strings", True):
-            return translated_text
-        
-        # Common escaped characters to normalize
-        escape_mappings = {
-            "\\'": "'",   # Escaped apostrophe
-            '\\"': '"',   # Escaped quote
-            "\\\\": "\\", # Escaped backslash
-            "\\n": "\n",  # Escaped newline (keep as actual newline)
-            "\\t": "\t",  # Escaped tab (keep as actual tab)
-            "\\r": "\r",  # Escaped carriage return (keep as actual carriage return)
-        }
-        
-        # Only normalize if the source text doesn't contain these escaped characters
-        normalized_text = translated_text
-        for escaped_char, unescaped_char in escape_mappings.items():
-            # Only normalize if the source text doesn't contain the escaped version
-            if escaped_char not in source_text and escaped_char in normalized_text:
-                normalized_text = normalized_text.replace(escaped_char, unescaped_char)
-        
-        return normalized_text
-        
-    def translate_text(self, text: str, source_lang: str, target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> str:
+        self.api_client.set_verbose(verbose)
+
+    def translate_text(
+        self,
+        text: str,
+        source_lang: str,
+        target_lang: str,
+        ui_safe: bool = False,
+        glossary_id: Optional[str] = None,
+    ) -> str:
         """
         Translate a text from source language to target language.
-        
+
         Args:
             text: Text to translate
             source_lang: Source language code
             target_lang: Target language code
             ui_safe: If True, ensure translation will not be longer than the original text
             glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
-            
+
         Returns:
             Translated text
         """
         # Resolve glossary_id from config if not provided
         if glossary_id is None:
             glossary_id = self.config.get_setting("api.glossary_id", "")
-        
+
         # Map language codes to ISO 2-letter format
         source_lang = map_language_code(source_lang)
         target_lang = map_language_code(target_lang)
-        
+
         # Check cache first
-        cache_key = self.cache.get_cache_key(text, source_lang, target_lang, ui_safe, self.custom_prompt)
+        cache_key = self.cache.get_cache_key(
+            text, source_lang, target_lang, ui_safe, self.custom_prompt
+        )
         cached_translation = self.cache.get(cache_key)
         if cached_translation:
-            print(f"Cache hit: Using cached translation for '{text[:30]}...' ({source_lang} → {target_lang})")
+            print(
+                f"Cache hit: Using cached translation for '{text[:30]}...' ({source_lang} → {target_lang})"
+            )
             return cached_translation
-        
-        print(f"Cache miss: Translating '{text[:30]}...' ({source_lang} → {target_lang})")
+
+        print(
+            f"Cache miss: Translating '{text[:30]}...' ({source_lang} → {target_lang})"
+        )
         provider = self.api_config.get("provider", "algebras-ai")
-        
+
         if provider == "algebras-ai":
-            translation = self._translate_with_algebras_ai(text, source_lang, target_lang, ui_safe, glossary_id)
+            translation = self.api_client.translate(
+                text, source_lang, target_lang, ui_safe, glossary_id
+            )
         else:
             raise ValueError(f"Unsupported provider: {provider}")
-        
+
         # Apply normalization to the translation
-        translation = self.normalize_translation_string(text, translation)
-        
+        translation = self.string_normalizer.normalize(text, translation)
+
         # Update cache with new translation
         self.cache.set(cache_key, translation)
-        print(f"Added translation to cache: '{text[:30]}...' ({source_lang} → {target_lang})")
-        
+        print(
+            f"Added translation to cache: '{text[:30]}...' ({source_lang} → {target_lang})"
+        )
+
         return translation
-    
-    
-    def _translate_with_algebras_ai(self, text: str, source_lang: str, target_lang: str, ui_safe: bool = False, glossary_id: str = "") -> str:
-        """
-        Translate text using Algebras AI API.
-        
-        Args:
-            text: Text to translate
-            source_lang: Source language code (already mapped to ISO 2-letter format, use 'auto' for automatic detection)
-            target_lang: Target language code (already mapped to ISO 2-letter format)
-            ui_safe: If True, ensures translation will be no more characters than original text
-            glossary_id: Glossary ID to use for translation
-            
-        Returns:
-            Translated text
-        """
-        api_key = os.environ.get("ALGEBRAS_API_KEY")
-        if not api_key:
-            raise ValueError("Algebras API key not found. Set the ALGEBRAS_API_KEY environment variable.")
-        
-        base_url = self.config.get_base_url()
-        url = f"{base_url}/api/v1/translation/translate"
-        headers = {
-            "accept": "application/json",
-            "X-Api-Key": api_key
-        }
-        
-        # Use 'auto' if source_lang is not specified or is 'auto'
-        source_lang_value = source_lang if source_lang and source_lang != "auto" else "auto"
-        
-        data = {
-            "sourceLanguage": source_lang_value,
-            "targetLanguage": target_lang,
-            "textContent": text,
-            "fileContent": "",
-            "glossaryId": glossary_id,
-            "prompt": self.custom_prompt,
-            "flag": "true" if ui_safe else "false"
-        }
-        
-        try:
-            # Use retry helper for 429 errors
-            def make_api_call():
-                return requests.post(url, headers=headers, files={
-                    "sourceLanguage": (None, data["sourceLanguage"]),
-                    "targetLanguage": (None, data["targetLanguage"]),
-                    "textContent": (None, data["textContent"]),
-                    "fileContent": (None, data["fileContent"]),
-                    "glossaryId": (None, data["glossaryId"]),
-                    "prompt": (None, data["prompt"]),
-                    "flag": (None, data["flag"])
-                })
-            
-            response = self._retry_with_exponential_backoff(make_api_call)
-            
-            if response.status_code == 200:
-                result = response.json()
-                return result.get("data", "")
-            else:
-                error_msg = f"Error from Algebras AI API: {response.status_code} - {response.text}"
-                raise Exception(error_msg)
-        except Exception as e:
-            raise Exception(f"Failed to translate with Algebras AI: {str(e)}")
-    
-    def translate_file(self, file_path: str, target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
+
+    def translate_file(
+        self,
+        file_path: str,
+        target_lang: str,
+        ui_safe: bool = False,
+        glossary_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Translate a localization file to the target language.
-        
+
         Args:
             file_path: Path to the localization file
             target_lang: Target language code
             ui_safe: If True, ensure translations will not be longer than original text
             glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
-            
+
         Returns:
             Translated content as a dictionary
         """
@@ -523,169 +345,91 @@ class Translator:
         elif file_path.endswith((".csv", ".tsv")):
             # Check if it's a glossary CSV/TSV or translation CSV/TSV
             if is_glossary_csv(file_path):
-                raise ValueError(f"CSV/TSV file {file_path} appears to be a glossary file, not a translation file")
+                raise ValueError(
+                    f"CSV/TSV file {file_path} appears to be a glossary file, not a translation file"
+                )
             content = read_csv_file(file_path)
         elif file_path.endswith((".xlsx", ".xls")):
             # Check if it's a glossary XLSX or translation XLSX
             if is_glossary_xlsx(file_path):
-                raise ValueError(f"XLSX file {file_path} appears to be a glossary file, not a translation file")
+                raise ValueError(
+                    f"XLSX file {file_path} appears to be a glossary file, not a translation file"
+                )
             content = read_xlsx_file(file_path)
         else:
             raise ValueError(f"Unsupported file format: {file_path}")
-        
+
         # Assume the source language is the first language in the config
         source_lang = self.config.get_languages()[0]
-        
-        # Translate the content
-        if file_path.endswith(".html"):
-            # HTML files are already flat dictionaries, translate directly
-            translated = self._translate_flat_dict(content, source_lang, target_lang, ui_safe, glossary_id)
-        elif file_path.endswith(".arb"):
+
+        # Get appropriate strategy for this file format
+        strategy = TranslationStrategyFactory.get_strategy(file_path, self)
+
+        # Determine translate_text_func for non-algebras-ai providers
+        provider = self.api_config.get("provider", "algebras-ai")
+        translate_text_func = None if provider == "algebras-ai" else self.translate_text
+
+        # Handle special cases that need preprocessing
+        if file_path.endswith(".arb"):
             # ARB files need special handling to extract translatable strings
             translatable_strings = extract_arb_strings(content)
-            translated_strings = self._translate_flat_dict(translatable_strings, source_lang, target_lang, ui_safe, glossary_id)
+            # Use flat dict strategy for ARB
+            flat_strategy = TranslationStrategyFactory.get_flat_dict_strategy(self)
+            translated_strings = flat_strategy.translate(
+                translatable_strings,
+                source_lang,
+                target_lang,
+                ui_safe,
+                glossary_id,
+                None,
+                translate_text_func,
+            )
             # Merge back with original content, preserving metadata
             translated = content.copy()
             translated.update(translated_strings)
         elif file_path.endswith((".xlf", ".xliff")):
             # XLIFF files need special handling to extract translatable strings
             translatable_strings = extract_xliff_strings(content)
-            translated_strings = self._translate_flat_dict(translatable_strings, source_lang, target_lang, ui_safe, glossary_id)
+            # Use flat dict strategy for XLIFF
+            flat_strategy = TranslationStrategyFactory.get_flat_dict_strategy(self)
+            translated_strings = flat_strategy.translate(
+                translatable_strings,
+                source_lang,
+                target_lang,
+                ui_safe,
+                glossary_id,
+                None,
+                translate_text_func,
+            )
             # For XLIFF, we need to update the target elements
             translated = self._update_xliff_targets(content, translated_strings)
-        elif file_path.endswith(".properties"):
-            # Properties files are flat dictionaries, translate directly
-            translated = self._translate_flat_dict(content, source_lang, target_lang, ui_safe, glossary_id)
-        elif file_path.endswith((".csv", ".tsv")):
-            # CSV/TSV files need special handling for multi-language structure
-            translated = self._translate_csv_content(content, source_lang, target_lang, ui_safe, glossary_id)
-        elif file_path.endswith((".xlsx", ".xls")):
-            # XLSX files need special handling for multi-language structure
-            translated = self._translate_xlsx_content(content, source_lang, target_lang, ui_safe, glossary_id)
         else:
-            translated = self._translate_nested_dict(content, source_lang, target_lang, ui_safe, glossary_id)
-        
+            # Use the strategy for translation
+            translated = strategy.translate(
+                content,
+                source_lang,
+                target_lang,
+                ui_safe,
+                glossary_id,
+                None,
+                translate_text_func,
+            )
+
         return translated
-    
-    def _translate_flat_dict(self, data: Dict[str, str], source_lang: str, target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, str]:
-        """
-        Translate a flat dictionary (key-value pairs where values are strings).
-        
-        Args:
-            data: Dictionary to translate (flat, string values only)
-            source_lang: Source language code
-            target_lang: Target language code
-            ui_safe: If True, ensures translation will be no more characters than original text
-            glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
-            
-        Returns:
-            Translated dictionary
-        """
-        # Resolve glossary_id from config if not provided
-        if glossary_id is None:
-            glossary_id = self.config.get_setting("api.glossary_id", "")
-        
-        # Get string items and keys, filter out empty strings
-        string_items = list(data.values())
-        keys = list(data.keys())
-        
-        # Filter empty strings and maintain mapping
-        non_empty_items = []
-        non_empty_keys = []
-        empty_key_mapping = {}  # Map empty keys to empty string
-        
-        for key, value in zip(keys, string_items):
-            if isinstance(value, str) and value.strip() == "":
-                empty_key_mapping[key] = ""  # Preserve empty string
-            else:
-                non_empty_items.append(value)
-                non_empty_keys.append(key)
-        
-        # Initialize result with empty strings
-        translated_values = empty_key_mapping.copy()
-        
-        # If all strings are empty, return early
-        if not non_empty_items:
-            return translated_values
-        
-        # Split into batches
-        total_strings = len(non_empty_items)
-        num_batches = (total_strings + self.batch_size - 1) // self.batch_size
-        
-        print(f"Processing {total_strings} text items in {num_batches} batches (batch size: {self.batch_size})")
-        
-        # Translate in batches
-        provider = self.api_config.get("provider", "algebras-ai")
-        
-        if provider == "algebras-ai":
-            # Use parallel batch processing for Algebras AI
-            print(f"Using parallel batch processing with {self.max_parallel_batches} concurrent batches")
-            
-            # Split into batches
-            batches = []
-            batch_keys = []
-            for i in range(0, total_strings, self.batch_size):
-                batch_strings = non_empty_items[i:i + self.batch_size]
-                batch_key_list = non_empty_keys[i:i + self.batch_size]
-                batches.append(batch_strings)
-                batch_keys.append(batch_key_list)
-            
-            # Process batches in parallel with limited concurrency
-            def process_batch_range(start_idx, end_idx):
-                batch_results = {}
-                for batch_idx in range(start_idx, min(end_idx, len(batches))):
-                    batch_strings = batches[batch_idx]
-                    batch_key_list = batch_keys[batch_idx]
-                    
-                    print(f"Processing batch {batch_idx + 1}/{len(batches)} ({len(batch_strings)} items)")
-                    batch_translations = self._translate_with_algebras_ai_batch(
-                        batch_strings, source_lang, target_lang, ui_safe, glossary_id
-                    )
-                    
-                    # Map back to keys
-                    for key, translation in zip(batch_key_list, batch_translations):
-                        batch_results[key] = translation
-                        
-                return batch_results
-            
-            # Process batches in groups to limit concurrency
-            all_results = {}
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_parallel_batches) as executor:
-                futures = []
-                
-                # Submit batch ranges
-                for i in range(0, len(batches), self.max_parallel_batches):
-                    end_idx = min(i + self.max_parallel_batches, len(batches))
-                    future = executor.submit(process_batch_range, i, end_idx)
-                    futures.append(future)
-                
-                # Collect results
-                for future in concurrent.futures.as_completed(futures):
-                    batch_result = future.result()
-                    all_results.update(batch_result)
-            
-            translated_values.update(all_results)
-        else:
-            # Single threaded processing for other providers
-            for i in range(0, total_strings, self.batch_size):
-                batch_strings = non_empty_items[i:i + self.batch_size]
-                batch_key_list = non_empty_keys[i:i + self.batch_size]
-                
-                print(f"Processing batch {i // self.batch_size + 1}/{num_batches} ({len(batch_strings)} items)")
-                
-                # Translate each string individually for non-Algebras AI providers
-                for j, text in enumerate(batch_strings):
-                    key = batch_key_list[j]
-                    translated_text = self.translate_text(text, source_lang, target_lang, ui_safe, glossary_id)
-                    translated_values[key] = translated_text
-        
-        return translated_values
-    
-    def translate_missing_keys(self, source_content: Dict[str, Any], target_content: Dict[str, Any], 
-                              missing_keys: List[str], target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
+
+    def translate_missing_keys(
+        self,
+        source_content: Dict[str, Any],
+        target_content: Dict[str, Any],
+        missing_keys: List[str],
+        target_lang: str,
+        ui_safe: bool = False,
+        glossary_id: Optional[str] = None,
+        source_file_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Translate only the missing keys in a target dictionary.
-        
+
         Args:
             source_content: Source language content as a dictionary
             target_content: Target language content as a dictionary (with missing keys)
@@ -693,16 +437,17 @@ class Translator:
             target_lang: Target language code
             ui_safe: If True, ensure translations will not be longer than original text
             glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
-            
+            source_file_path: Path to the source file (used to determine file format)
+
         Returns:
             Updated target content with translated missing keys
         """
         # Make a deep copy of the target content to avoid modifying it directly
         updated_content = target_content.copy()
-        
+
         # Get source language
         source_lang = self.config.get_source_language()
-        
+
         # Translate each missing key and update the target content
         for key_path in missing_keys:
             # First, check if this is a direct key in source_content (flat format)
@@ -710,31 +455,61 @@ class Translator:
                 source_value = source_content[key_path]
                 if isinstance(source_value, str):
                     # Translate the value
-                    translated_value = self.translate_text(source_value, source_lang, target_lang, ui_safe, glossary_id)
+                    translated_value = self.translate_text(
+                        source_value, source_lang, target_lang, ui_safe, glossary_id
+                    )
                     # Update target content directly (flat format)
                     updated_content[key_path] = translated_value
             else:
                 # Try to treat it as a dot-notation path (nested format)
-                key_parts = key_path.split('.')
-                source_value = self._get_nested_value(source_content, key_parts)
-                
+                key_parts = key_path.split(".")
+                source_value = get_nested_value(source_content, key_parts)
+
                 if isinstance(source_value, str):
                     # Translate the value
-                    translated_value = self.translate_text(source_value, source_lang, target_lang, ui_safe, glossary_id)
+                    translated_value = self.translate_text(
+                        source_value, source_lang, target_lang, ui_safe, glossary_id
+                    )
                     # Update the target content with the translated value (nested format)
-                    self._set_nested_value(updated_content, key_parts, translated_value)
+                    set_nested_value(updated_content, key_parts, translated_value)
                 else:
-                    # For flat formats like .po, the key itself might BE the text to translate
-                    translated_value = self.translate_text(key_path, source_lang, target_lang, ui_safe, glossary_id)
-                    updated_content[key_path] = translated_value
-        
+                    # Determine file format to decide how to handle missing keys
+                    is_flat_format = False
+                    if source_file_path:
+                        is_flat_format = source_file_path.endswith((".po", ".csv", ".tsv"))
+                    else:
+                        # Fallback: check structure of source_content
+                        is_flat_format = (
+                            isinstance(source_content, dict) and
+                            all(isinstance(v, str) for v in source_content.values()) and
+                            not any("." in k for k in source_content.keys())
+                        )
+                    
+                    if is_flat_format:
+                        # For flat formats like .po, the key itself might BE the text to translate
+                        translated_value = self.translate_text(
+                            key_path, source_lang, target_lang, ui_safe, glossary_id
+                        )
+                        updated_content[key_path] = translated_value
+                    else:
+                        # For nested formats, if key not found in source, set empty string
+                        set_nested_value(updated_content, key_parts, "")
+
         return updated_content
-    
-    def translate_outdated_keys(self, source_content: Dict[str, Any], target_content: Dict[str, Any],
-                               outdated_keys: List[str], target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
+
+    def translate_outdated_keys(
+        self,
+        source_content: Dict[str, Any],
+        target_content: Dict[str, Any],
+        outdated_keys: List[str],
+        target_lang: str,
+        ui_safe: bool = False,
+        glossary_id: Optional[str] = None,
+        source_file_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Translate only the outdated keys in a target dictionary.
-        
+
         Args:
             source_content: Source language content as a dictionary
             target_content: Target language content as a dictionary
@@ -742,16 +517,17 @@ class Translator:
             target_lang: Target language code
             ui_safe: If True, ensure translations will not be longer than original text
             glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
-            
+            source_file_path: Path to the source file (used to determine file format)
+
         Returns:
             Updated target content with translated outdated keys
         """
         # Make a deep copy of the target content to avoid modifying it directly
         updated_content = target_content.copy()
-        
+
         # Get source language
         source_lang = self.config.get_source_language()
-        
+
         # Translate each outdated key and update the target content
         for key_path in outdated_keys:
             # First, check if this is a direct key in source_content (flat format)
@@ -759,401 +535,56 @@ class Translator:
                 source_value = source_content[key_path]
                 if isinstance(source_value, str):
                     # Translate the value
-                    translated_value = self.translate_text(source_value, source_lang, target_lang, ui_safe, glossary_id)
+                    translated_value = self.translate_text(
+                        source_value, source_lang, target_lang, ui_safe, glossary_id
+                    )
                     # Update target content directly (flat format)
                     updated_content[key_path] = translated_value
             else:
                 # Try to treat it as a dot-notation path (nested format)
-                key_parts = key_path.split('.')
-                source_value = self._get_nested_value(source_content, key_parts)
-                
+                key_parts = key_path.split(".")
+                source_value = get_nested_value(source_content, key_parts)
+
                 if isinstance(source_value, str):
                     # Translate the value
-                    translated_value = self.translate_text(source_value, source_lang, target_lang, ui_safe, glossary_id)
-                    # Update the target content with the translated value (nested format)
-                    self._set_nested_value(updated_content, key_parts, translated_value)
-                else:
-                    # For flat formats like .po, the key itself might BE the text to translate
-                    translated_value = self.translate_text(key_path, source_lang, target_lang, ui_safe, glossary_id)
-                    updated_content[key_path] = translated_value
-        
-        return updated_content
-    
-    def _get_nested_value(self, data: Dict[str, Any], key_parts: List[str]) -> Any:
-        """
-        Get a value from a nested dictionary using a list of key parts.
-        
-        Args:
-            data: Dictionary to get value from
-            key_parts: List of key parts representing a dot-notation path
-            
-        Returns:
-            Value at the specified path
-        """
-        current = data
-        for part in key_parts:
-            if isinstance(current, dict) and part in current:
-                current = current[part]
-            else:
-                return None
-        return current
-    
-    def _set_nested_value(self, data: Dict[str, Any], key_parts: List[str], value: Any) -> None:
-        """
-        Set a value in a nested dictionary using a list of key parts.
-        Will create intermediate dictionaries if they don't exist.
-        
-        Args:
-            data: Dictionary to update
-            key_parts: List of key parts representing a dot-notation path
-            value: Value to set
-        """
-        current = data
-        for i, part in enumerate(key_parts):
-            if i == len(key_parts) - 1:
-                # Last part, set the value
-                current[part] = value
-            else:
-                # Intermediate part, create dict if needed
-                if part not in current or not isinstance(current[part], dict):
-                    current[part] = {}
-                current = current[part]
-    
-    def _translate_with_algebras_ai_batch(self, texts: List[str], source_lang: str, target_lang: str, ui_safe: bool = False, glossary_id: str = "") -> List[str]:
-        """
-        Translate multiple texts using Algebras AI batch API.
-        
-        Args:
-            texts: List of texts to translate
-            source_lang: Source language code (already mapped to ISO 2-letter format, use 'auto' for automatic detection)
-            target_lang: Target language code (already mapped to ISO 2-letter format)
-            ui_safe: If True, ensures translation will be no more characters than original text
-            glossary_id: Glossary ID to use for translation
-            
-        Returns:
-            List of translated texts
-        """
-        api_key = os.environ.get("ALGEBRAS_API_KEY")
-        if not api_key:
-            raise ValueError("Algebras API key not found. Set the ALGEBRAS_API_KEY environment variable.")
-        
-        base_url = self.config.get_base_url()
-        url = f"{base_url}/api/v1/translation/translate-batch"
-        headers = {
-            "accept": "application/json",
-            "Content-Type": "application/json",
-            "X-Api-Key": api_key
-        }
-        
-        # Use 'auto' if source_lang is not specified or is 'auto'
-        source_lang_value = source_lang if source_lang and source_lang != "auto" else "auto"
-        
-        # Filter out empty strings (after strip) - maintain mapping to preserve order
-        non_empty_texts = []
-        empty_indices = []  # Track which indices were empty
-        index_mapping = []  # Maps original index to non-empty index
-        
-        for i, text in enumerate(texts):
-            if isinstance(text, str) and text.strip() == "":
-                empty_indices.append(i)
-                index_mapping.append(None)  # Mark as empty
-            else:
-                index_mapping.append(len(non_empty_texts))
-                non_empty_texts.append(text)
-        
-        # If all texts are empty, return empty strings
-        if not non_empty_texts:
-            return [""] * len(texts)
-        
-        data = {
-            "texts": non_empty_texts,
-            "sourceLanguage": source_lang_value,
-            "targetLanguage": target_lang,
-            "prompt": self.custom_prompt,
-            "flag": ui_safe
-        }
-        
-        if self.verbose:
-            print(f"  {Fore.CYAN}[API Request] Translating {len(non_empty_texts)} texts from {source_lang_value} to {target_lang}{Fore.RESET}")
-            if len(non_empty_texts) > 0:
-                print(f"  {Fore.CYAN}[API Request] Sample input: '{non_empty_texts[0][:50]}...'{Fore.RESET}")
-        
-        try:
-            # Use retry helper for 429 errors
-            def make_api_call():
-                return requests.post(url, headers=headers, json=data)
-            
-            response = self._retry_with_exponential_backoff(make_api_call)
-            
-            if response.status_code == 200:
-                result = response.json()
-                
-                if self.verbose:
-                    print(f"  {Fore.CYAN}[API Response] Status: {response.status_code}{Fore.RESET}")
-                
-                # Handle the correct API response format
-                if "data" in result and "translations" in result["data"]:
-                    # Extract translations from the nested structure
-                    translation_items = result["data"]["translations"]
-                    # Sort by index to maintain order and extract content
-                    translation_items.sort(key=lambda x: x.get("index", 0))
-                    translations = [item.get("content", "") for item in translation_items]
-                else:
-                    # Fallback to old format if structure is different
-                    translations = result.get("data", [])
-                
-                if self.verbose and len(translations) > 0:
-                    print(f"  {Fore.CYAN}[API Response] Sample output: '{translations[0][:50]}...'{Fore.RESET}")
-                    # Check if translation matches source (potential issue)
-                    if len(translations) > 0 and len(non_empty_texts) > 0:
-                        matches_source = sum(1 for i, trans in enumerate(translations) if trans == non_empty_texts[i])
-                        if matches_source > len(translations) * 0.5:
-                            print(f"  {Fore.YELLOW}[WARNING] {matches_source}/{len(translations)} translations match source text - API may not be translating{Fore.RESET}")
-                
-                # Ensure we have the same number of translations as non-empty input texts
-                if len(translations) != len(non_empty_texts):
-                    raise Exception(f"Expected {len(non_empty_texts)} translations, but got {len(translations)}")
-                
-                # Apply normalization to each translation and validate
-                normalized_translations = []
-                empty_translation_count = 0
-                for i, translation in enumerate(translations):
-                    normalized_translation = self.normalize_translation_string(non_empty_texts[i], translation)
-                    normalized_translations.append(normalized_translation)
-                    
-                    # Check for empty or missing translations
-                    if not normalized_translation or normalized_translation.strip() == "":
-                        empty_translation_count += 1
-                        if self.verbose:
-                            print(f"  {Fore.YELLOW}[WARNING] Empty translation for: '{non_empty_texts[i][:50]}...'{Fore.RESET}")
-                
-                # Warn if many translations are empty
-                if empty_translation_count > 0:
-                    if self.verbose:
-                        print(f"  {Fore.YELLOW}[WARNING] {empty_translation_count}/{len(translations)} translations are empty{Fore.RESET}")
-                
-                # Reconstruct full result list with empty strings in correct positions
-                full_translations = []
-                for i in range(len(texts)):
-                    if i in empty_indices:
-                        # Preserve empty string
-                        full_translations.append("")
-                    else:
-                        # Get translation from non-empty list
-                        non_empty_idx = index_mapping[i]
-                        full_translations.append(normalized_translations[non_empty_idx])
-                
-                return full_translations
-            else:
-                error_msg = f"Error from Algebras AI batch API: {response.status_code} - {response.text}"
-                raise Exception(error_msg)
-        except Exception as e:
-            raise Exception(f"Failed to translate batch with Algebras AI: {str(e)}")
-    
-    def _translate_nested_dict(self, data: Dict[str, Any], source_lang: str, target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Recursively translate a nested dictionary.
-        
-        Args:
-            data: Dictionary to translate
-            source_lang: Source language code
-            target_lang: Target language code
-            ui_safe: If True, ensures translation will be no more characters than original text
-            glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
-            
-        Returns:
-            Translated dictionary
-        """
-        # Resolve glossary_id from config if not provided
-        if glossary_id is None:
-            glossary_id = self.config.get_setting("api.glossary_id", "")
-        
-        # Collect all string values that need translation, filter empty strings
-        string_items = []
-        paths = []
-        empty_paths = []  # Track paths with empty strings
-        
-        def collect_strings(current_data, current_path=None):
-            if current_path is None:
-                current_path = []
-                
-            for key, value in current_data.items():
-                path = current_path + [key]
-                if isinstance(value, dict):
-                    collect_strings(value, path)
-                elif isinstance(value, str):
-                    # Filter empty strings - preserve them but don't send to API
-                    if value.strip() == "":
-                        empty_paths.append(path)
-                    else:
-                        string_items.append(value)
-                        paths.append(path)
-        
-        # Collect all strings that need translation
-        collect_strings(data)
-        
-        # Initialize translated_values with empty strings
-        translated_values = {}
-        for empty_path in empty_paths:
-            path_key = tuple(empty_path)
-            translated_values[path_key] = ""  # Preserve empty string
-        
-        # If all strings are empty, return early
-        if not string_items:
-            # Build result with empty strings only
-            result = {}
-            def build_result(src_data, dest_data, current_path=None):
-                if current_path is None:
-                    current_path = []
-                for key, value in src_data.items():
-                    path = current_path + [key]
-                    if isinstance(value, dict):
-                        if key not in dest_data:
-                            dest_data[key] = {}
-                        build_result(value, dest_data[key], path)
-                    elif isinstance(value, str):
-                        path_key = tuple(path)
-                        if path_key in translated_values:
-                            dest_data[key] = translated_values[path_key]
-                        else:
-                            dest_data[key] = value
-                    else:
-                        dest_data[key] = value
-            build_result(data, result)
-            return result
-        
-        # Split into batches
-        total_strings = len(string_items)
-        num_batches = (total_strings + self.batch_size - 1) // self.batch_size
-        
-        print(f"Processing {total_strings} text items in {num_batches} batches (batch size: {self.batch_size})")
-        
-        # Translate in batches
-        provider = self.api_config.get("provider", "algebras-ai")
-        
-        if provider == "algebras-ai":
-            # Use parallel batch processing for Algebras AI
-            print(f"Using parallel batch processing with {self.max_parallel_batches} concurrent batches")
-            
-            # Create batch data
-            batches = []
-            for i in range(0, total_strings, self.batch_size):
-                batch = string_items[i:i + self.batch_size]
-                batch_paths = paths[i:i + self.batch_size]
-                batch_idx = i // self.batch_size + 1
-                batches.append((batch, batch_paths, batch_idx))
-            
-            # Process batches in parallel using ThreadPoolExecutor
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_parallel_batches) as executor:
-                # Submit all batch translation tasks
-                future_to_batch = {}
-                for batch, batch_paths, batch_idx in batches:
-                    future = executor.submit(
-                        self._translate_with_algebras_ai_batch,
-                        batch, source_lang, target_lang, ui_safe, glossary_id
+                    translated_value = self.translate_text(
+                        source_value, source_lang, target_lang, ui_safe, glossary_id
                     )
-                    future_to_batch[future] = (batch, batch_paths, batch_idx)
-                
-                # Collect results as they complete
-                completed_batches = 0
-                for future in concurrent.futures.as_completed(future_to_batch):
-                    batch, batch_paths, batch_idx = future_to_batch[future]
-                    completed_batches += 1
-                    
-                    try:
-                        translated_batch = future.result()
-                        
-                        # Store results with their paths
-                        for j, translated_text in enumerate(translated_batch):
-                            path_key = tuple(batch_paths[j])  # Convert list to tuple for dict key
-                            translated_values[path_key] = translated_text
-                        
-                        print(f"Completed batch {batch_idx}/{num_batches} ({completed_batches}/{num_batches} total completed)")
-                        for j in range(len(batch)):
-                            print(f"  ✓ Translated: {'.'.join(str(p) for p in batch_paths[j])}")
-                    
-                    except Exception as e:
-                        print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
-                        # Re-raise the exception instead of falling back to individual translations
-                        raise e
-        else:
-            # Use sequential batch processing for other providers
-            for i in range(0, total_strings, self.batch_size):
-                batch = string_items[i:i + self.batch_size]
-                batch_paths = paths[i:i + self.batch_size]
-                batch_idx = i // self.batch_size + 1
-                
-                print(f"Processing batch {batch_idx}/{num_batches} ({len(batch)} items)")
-                
-                try:
-                    # Use individual translations for other providers
-                    # Use ThreadPoolExecutor for parallel processing within the batch
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=self.batch_size) as executor:
-                        # Create translation tasks
-                        futures = {}
-                        for j, text in enumerate(batch):
-                            future = executor.submit(
-                                self.translate_text,
-                                text,
-                                source_lang,
-                                target_lang,
-                                ui_safe,
-                                glossary_id
-                            )
-                            futures[j] = future
-                        
-                        # Collect results
-                        for j, future in futures.items():
-                            try:
-                                translated_text = future.result()
-                                path_key = tuple(batch_paths[j])  # Convert list to tuple for dict key
-                                translated_values[path_key] = translated_text
-                                print(f"  ✓ Translated: {'.'.join(str(p) for p in batch_paths[j])}")
-                            except Exception as e:
-                                print(f"  ✗ Error translating {batch[j]}: {str(e)}")
-                    
-                    print(f"Completed batch {batch_idx}/{num_batches}")
-                except Exception as e:
-                    print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
-                    # Re-raise the exception instead of falling back to individual translations
-                    raise e
-        
-        # Build the result dictionary with translations
-        result = {}
-        
-        def build_result(src_data, dest_data, current_path=None):
-            if current_path is None:
-                current_path = []
-                
-            for key, value in src_data.items():
-                path = current_path + [key]
-                if isinstance(value, dict):
-                    if key not in dest_data:
-                        dest_data[key] = {}
-                    build_result(value, dest_data[key], path)
-                elif isinstance(value, str):
-                    path_key = tuple(path)
-                    if path_key in translated_values:
-                        dest_data[key] = translated_values[path_key]
-                    else:
-                        # Fallback to direct translation if not in batch results
-                        dest_data[key] = self.translate_text(value, source_lang, target_lang, ui_safe, glossary_id)
+                    # Update the target content with the translated value (nested format)
+                    set_nested_value(updated_content, key_parts, translated_value)
                 else:
-                    dest_data[key] = value
-        
-        # Build the translated dictionary
-        build_result(data, result)
-        
-        return result
-    
+                    # Determine file format to decide how to handle missing keys
+                    is_flat_format = False
+                    if source_file_path:
+                        is_flat_format = source_file_path.endswith((".po", ".csv", ".tsv"))
+                    else:
+                        # Fallback: check structure of source_content
+                        is_flat_format = (
+                            isinstance(source_content, dict) and
+                            all(isinstance(v, str) for v in source_content.values()) and
+                            not any("." in k for k in source_content.keys())
+                        )
+                    
+                    if is_flat_format:
+                        # For flat formats like .po, the key itself might BE the text to translate
+                        translated_value = self.translate_text(
+                            key_path, source_lang, target_lang, ui_safe, glossary_id
+                        )
+                        updated_content[key_path] = translated_value
+                    else:
+                        # For nested formats, if key not found in source, set empty string
+                        set_nested_value(updated_content, key_parts, "")
+
+        return updated_content
+
     def preload_translations(self, file_path: str) -> int:
         """
         Preload all text values from a localization file into the cache.
         This can be useful to ensure all subsequent translations use the cache.
-        
+
         Args:
             file_path: Path to the localization file
-            
+
         Returns:
             Number of items loaded into cache
         """
@@ -1178,38 +609,52 @@ class Translator:
             content = read_po_file(file_path)
         else:
             raise ValueError(f"Unsupported file format: {file_path}")
-        
+
         # Extract all string values from the nested dict
         all_strings = []
+
         def extract_strings(data):
             if isinstance(data, dict):
                 for value in data.values():
                     extract_strings(value)
             elif isinstance(data, str):
                 all_strings.append(data)
-        
+
         extract_strings(content)
         print(f"Found {len(all_strings)} text items in {file_path}")
-        
+
         # Get source language
         source_lang = self.config.get_source_language()
-        
+
         # Load translations into cache
         loaded_count = 0
         for text in all_strings:
-            cache_key = self.cache.get_cache_key(text, source_lang, source_lang, False, "")
+            cache_key = self.cache.get_cache_key(
+                text, source_lang, source_lang, False, ""
+            )
             if not self.cache.get(cache_key):
-                self.cache.set(cache_key, text)  # Set identity translation (same language)
+                self.cache.set(
+                    cache_key, text
+                )  # Set identity translation (same language)
                 loaded_count += 1
-        
+
         print(f"Preloaded {loaded_count} items into translation cache")
         return loaded_count
-    
-    def translate_missing_keys_batch(self, source_content: Dict[str, Any], target_content: Dict[str, Any],
-                                    missing_keys: List[str], target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
+
+    def translate_missing_keys_batch(
+        self,
+        source_content: Dict[str, Any],
+        target_content: Dict[str, Any],
+        missing_keys: List[str],
+        target_lang: str,
+        ui_safe: bool = False,
+        glossary_id: Optional[str] = None,
+        on_batch_complete: Optional[Callable[[Dict[str, str], int], None]] = None,
+        source_file_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Translate missing keys in batches to avoid overloading the API.
-        
+
         Args:
             source_content: Source language content as a dictionary
             target_content: Target language content as a dictionary (with missing keys)
@@ -1217,27 +662,28 @@ class Translator:
             target_lang: Target language code
             ui_safe: If True, ensure translations will not be longer than original text
             glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
-            
+            source_file_path: Path to the source file (used to determine file format)
+
         Returns:
             Updated target content with translated missing keys
         """
         # Resolve glossary_id from config if not provided
         if glossary_id is None:
             glossary_id = self.config.get_setting("api.glossary_id", "")
-        
+
         # Make a deep copy of the target content to avoid modifying it directly
         updated_content = target_content.copy()
-        
+
         # Get source language
         source_lang = self.config.get_source_language()
-        
+
         # Collect texts and their corresponding key paths, filter empty strings
         texts_to_translate = []
         key_paths_list = []
         key_parts_list = []
         empty_key_paths = []  # Track keys with empty strings
-        
-        for key_path in missing_keys:            
+
+        for key_path in missing_keys:
             # First, check if this is a direct key in source_content (flat format)
             if isinstance(source_content, dict) and key_path in source_content:
                 source_value = source_content[key_path]
@@ -1251,12 +697,14 @@ class Translator:
                         key_parts_list.append([key_path])  # Treat as single-level key
             else:
                 # Try to treat it as a dot-notation path (nested format)
-                key_parts = key_path.split('.')
+                key_parts = key_path.split(".")
                 print(f"DEBUG: Trying as nested path -> key_parts: {key_parts}")
-                
-                source_value = self._get_nested_value(source_content, key_parts)
-                print(f"DEBUG: Source value for nested '{key_path}': {repr(source_value)} (type: {type(source_value)})")
-                
+
+                source_value = get_nested_value(source_content, key_parts)
+                print(
+                    f"DEBUG: Source value for nested '{key_path}': {repr(source_value)} (type: {type(source_value)})"
+                )
+
                 if isinstance(source_value, str):
                     # Filter empty strings - preserve them but don't send to API
                     if source_value.strip() == "":
@@ -1266,147 +714,169 @@ class Translator:
                         texts_to_translate.append(source_value)
                         key_paths_list.append(key_path)
                         key_parts_list.append(key_parts)
-                        print(f"DEBUG: ✓ Added '{key_path}' to translation queue (nested format)")
+                        print(
+                            f"DEBUG: ✓ Added '{key_path}' to translation queue (nested format)"
+                        )
                 else:
-                    print(f"DEBUG: Source value for '{key_path}': {repr(source_value)} (type: {type(source_value)})")
-                    # For flat formats like .po, the key itself might BE the text to translate
-                    # This is common when msgid is used as the key
-                    # Filter empty strings
-                    if key_path.strip() == "":
-                        empty_key_paths.append((key_path, [key_path]))
+                    print(
+                        f"DEBUG: Source value for '{key_path}': {repr(source_value)} (type: {type(source_value)})"
+                    )
+                    # Determine file format to decide how to handle missing keys
+                    is_flat_format = False
+                    if source_file_path:
+                        is_flat_format = source_file_path.endswith((".po", ".csv", ".tsv"))
                     else:
-                        texts_to_translate.append(key_path)
-                        key_paths_list.append(key_path)
-                        key_parts_list.append([key_path])
-                        print(f"DEBUG: ✓ Added '{key_path}' to translation queue (flat format - key as text)")
-        
+                        # Fallback: check structure of source_content
+                        # If it's a flat dictionary (all values are strings, no nested dicts),
+                        # then it might be a flat format
+                        is_flat_format = (
+                            isinstance(source_content, dict) and
+                            all(isinstance(v, str) for v in source_content.values()) and
+                            not any("." in k for k in source_content.keys())
+                        )
+                    
+                    if is_flat_format:
+                        # For flat formats like .po, the key itself might BE the text to translate
+                        # This is common when msgid is used as the key
+                        # Filter empty strings
+                        if key_path.strip() == "":
+                            empty_key_paths.append((key_path, [key_path]))
+                        else:
+                            texts_to_translate.append(key_path)
+                            key_paths_list.append(key_path)
+                            key_parts_list.append([key_path])
+                            print(
+                                f"DEBUG: ✓ Added '{key_path}' to translation queue (flat format - key as text)"
+                            )
+                    else:
+                        # For nested formats (TypeScript, JSON, YAML), if key not found in source,
+                        # set empty string (key will be created in target file with empty value)
+                        empty_key_paths.append((key_path, key_parts))
+                        print(
+                            f"DEBUG: ⚠ Key '{key_path}' not found in source, setting empty string (nested format)"
+                        )
+
         # Set empty strings in the result
         for key_path, key_parts in empty_key_paths:
             if len(key_parts) == 1:
                 updated_content[key_parts[0]] = ""
             else:
-                self._set_nested_value(updated_content, key_parts, "")
-        
+                set_nested_value(updated_content, key_parts, "")
+
         print(f"DEBUG: Final translation queue size: {len(texts_to_translate)}")
-        
+
         if not texts_to_translate:
             print("DEBUG: No texts to translate, returning original target content")
             return updated_content
-        
-        # Split into batches
-        total_keys = len(texts_to_translate)
-        num_batches = (total_keys + self.batch_size - 1) // self.batch_size
-        
-        print(f"Processing {total_keys} missing keys in {num_batches} batches (batch size: {self.batch_size})")
 
+        # Use BatchProcessor for batch translation
+        batch_processor = self._get_batch_processor()
+
+        # Process batches
         provider = self.api_config.get("provider", "algebras-ai")
-        
-        if provider == "algebras-ai":
-            # Use parallel batch processing for Algebras AI
-            print(f"Using parallel batch processing with {self.max_parallel_batches} concurrent batches")
-            
-            # Create batch data
-            batches = []
-            for i in range(0, total_keys, self.batch_size):
-                batch_texts = texts_to_translate[i:i + self.batch_size]
-                batch_key_paths = key_paths_list[i:i + self.batch_size]
-                batch_key_parts = key_parts_list[i:i + self.batch_size]
-                batch_idx = i // self.batch_size + 1
-                batches.append((batch_texts, batch_key_paths, batch_key_parts, batch_idx))
-            
-            # Process batches in parallel using ThreadPoolExecutor
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_parallel_batches) as executor:
-                # Submit all batch translation tasks
-                future_to_batch = {}
-                for batch_texts, batch_key_paths, batch_key_parts, batch_idx in batches:
-                    future = executor.submit(
-                        self._translate_with_algebras_ai_batch,
-                        batch_texts, source_lang, target_lang, ui_safe, glossary_id
+        translate_text_func = None if provider == "algebras-ai" else self.translate_text
+
+        result = batch_processor.process(
+            texts=texts_to_translate,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            ui_safe=ui_safe,
+            glossary_id=glossary_id,
+            on_batch_complete=None,  # We'll handle callback after mapping to keys
+            translate_text_func=translate_text_func,
+        )
+
+        # Map translations back to key paths and update content
+        # Also handle callbacks
+        num_batches = (len(texts_to_translate) + self.batch_size - 1) // self.batch_size
+        failed_indices = set()
+        for batch_idx in result.failed_batches:
+            batch_start_idx = (batch_idx - 1) * self.batch_size
+            batch_end_idx = min(
+                batch_start_idx + self.batch_size, len(texts_to_translate)
+            )
+            for idx in range(batch_start_idx, batch_end_idx):
+                failed_indices.add(idx)
+
+        for batch_idx in range(1, num_batches + 1):
+            batch_start_idx = (batch_idx - 1) * self.batch_size
+            batch_end_idx = min(
+                batch_start_idx + self.batch_size, len(texts_to_translate)
+            )
+
+            batch_dict = {}
+            for i in range(batch_start_idx, batch_end_idx):
+                if i < len(result.translations) and i < len(key_parts_list):
+                    source_text = texts_to_translate[i]
+                    raw_translation = result.translations[i]
+                    key_parts = key_parts_list[i]
+                    key_path = key_paths_list[i]
+
+                    # Skip failed translations
+                    if i in failed_indices:
+                        continue
+
+                    # Apply normalization
+                    normalized = self.string_normalizer.normalize(
+                        source_text, raw_translation
                     )
-                    future_to_batch[future] = (batch_texts, batch_key_paths, batch_key_parts, batch_idx)
-                
-                # Collect results as they complete
-                completed_batches = 0
-                for future in concurrent.futures.as_completed(future_to_batch):
-                    batch_texts, batch_key_paths, batch_key_parts, batch_idx = future_to_batch[future]
-                    completed_batches += 1
-                    
-                    try:
-                        translated_batch = future.result()
-                        
-                        # Update content with translated values
-                        for j, translated_value in enumerate(translated_batch):
-                            key_parts = batch_key_parts[j]
-                            if len(key_parts) == 1:
-                                # Flat format - set directly
-                                updated_content[key_parts[0]] = translated_value
-                            else:
-                                # Nested format - use nested value setter
-                                self._set_nested_value(updated_content, key_parts, translated_value)
-                        
-                        print(f"Completed batch {batch_idx}/{num_batches} ({completed_batches}/{num_batches} total completed)")
-                        for j in range(len(batch_texts)):
-                            print(f"  ✓ Translated: {batch_key_paths[j]}")
-                    
-                    except Exception as e:
-                        print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
-                        # Re-raise the exception instead of falling back to individual translations
-                        raise e
-        else:
-            # Use sequential batch processing for other providers
-            for i in range(0, total_keys, self.batch_size):
-                batch_texts = texts_to_translate[i:i + self.batch_size]
-                batch_key_paths = key_paths_list[i:i + self.batch_size]
-                batch_key_parts = key_parts_list[i:i + self.batch_size]
-                batch_idx = i // self.batch_size + 1
-                
-                print(f"Processing batch {batch_idx}/{num_batches} ({len(batch_texts)} keys)")
-                
+
+                    # Update content with translated values
+                    if len(key_parts) == 1:
+                        # Flat format - set directly
+                        updated_content[key_parts[0]] = normalized
+                    else:
+                        # Nested format - use nested value setter
+                        set_nested_value(updated_content, key_parts, normalized)
+                    batch_dict[key_path] = normalized
+                    print(f"  ✓ Translated: {key_path}")
+
+            # Call callback if provided
+            if on_batch_complete and batch_dict:
                 try:
-                    # Use individual translations for other providers
-                    # Use ThreadPoolExecutor for parallel processing within each batch
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=self.batch_size) as executor:
-                        # Create tasks for each key in the batch
-                        futures = {}
-                        for j, text in enumerate(batch_texts):
-                            future = executor.submit(
-                                self.translate_text,
-                                text,
-                                source_lang,
-                                target_lang,
-                                ui_safe,
-                                glossary_id
-                            )
-                            futures[j] = future
-                        
-                        # Collect results and update content
-                        for j, future in futures.items():
-                            try:
-                                translated_value = future.result()
-                                key_parts = batch_key_parts[j]
-                                if len(key_parts) == 1:
-                                    # Flat format - set directly
-                                    updated_content[key_parts[0]] = translated_value
-                                else:
-                                    # Nested format - use nested value setter
-                                    self._set_nested_value(updated_content, key_parts, translated_value)
-                                print(f"  ✓ Translated: {batch_key_paths[j]}")
-                            except Exception as e:
-                                print(f"  ✗ Error translating {batch_key_paths[j]}: {str(e)}")
-                    
-                    print(f"Completed batch {batch_idx}/{num_batches}")
+                    on_batch_complete(batch_dict, batch_idx)
                 except Exception as e:
-                    print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
-                    # Re-raise the exception instead of falling back to individual translations
-                    raise e
-        
+                    print(f"  ⚠ Error in batch complete callback: {str(e)}")
+
+        # Print summary if there were failures
+        if result.failed_batches:
+            print(f"\n  Summary:")
+            print(f"    Total batches: {result.total_batches}")
+            print(
+                f"    Successful: {result.successful_batches} ({result.successful_batches / result.total_batches * 100:.1f}%)"
+            )
+            print(
+                f"    Failed: {len(result.failed_batches)} ({len(result.failed_batches) / result.total_batches * 100:.1f}%)"
+            )
+            if result.error_stats["5xx"]:
+                print(
+                    f"      - 5xx errors: {len(result.error_stats['5xx'])} batches ({', '.join(map(str, result.error_stats['5xx']))})"
+                )
+            if result.error_stats["429"]:
+                print(
+                    f"      - 429 errors: {len(result.error_stats['429'])} batches ({', '.join(map(str, result.error_stats['429']))})"
+                )
+            if result.error_stats["other"]:
+                print(
+                    f"      - Other errors: {len(result.error_stats['other'])} batches ({', '.join(map(str, result.error_stats['other']))})"
+                )
+            print(f"    Failed batches will keep existing values (or remain missing)")
+
         return updated_content
-    
-    def translate_outdated_keys_batch(self, source_content: Dict[str, Any], target_content: Dict[str, Any],
-                                     outdated_keys: List[str], target_lang: str, ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
+
+    def translate_outdated_keys_batch(
+        self,
+        source_content: Dict[str, Any],
+        target_content: Dict[str, Any],
+        outdated_keys: List[str],
+        target_lang: str,
+        ui_safe: bool = False,
+        glossary_id: Optional[str] = None,
+        on_batch_complete: Optional[Callable[[Dict[str, str], int], None]] = None,
+    ) -> Dict[str, Any]:
         """
         Translate outdated keys in batches to avoid overloading the API.
-        
+
         Args:
             source_content: Source language content as a dictionary
             target_content: Target language content as a dictionary
@@ -1414,30 +884,30 @@ class Translator:
             target_lang: Target language code
             ui_safe: If True, ensure translations will not be longer than original text
             glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
-            
+
         Returns:
             Updated target content with translated outdated keys
         """
         # Resolve glossary_id from config if not provided
         if glossary_id is None:
             glossary_id = self.config.get_setting("api.glossary_id", "")
-        
+
         # Make a deep copy of the target content to avoid modifying it directly
         updated_content = target_content.copy()
-        
+
         # Get source language
         source_lang = self.config.get_source_language()
-        
+
         # Collect texts and their corresponding key paths, filter empty strings
         texts_to_translate = []
         key_paths_list = []
         key_parts_list = []
         empty_key_paths = []  # Track keys with empty strings
-        
+
         for key_path in outdated_keys:
-            key_parts = key_path.split('.')
-            source_value = self._get_nested_value(source_content, key_parts)
-            
+            key_parts = key_path.split(".")
+            source_value = get_nested_value(source_content, key_parts)
+
             if isinstance(source_value, str):
                 # Filter empty strings - preserve them but don't send to API
                 if source_value.strip() == "":
@@ -1446,219 +916,132 @@ class Translator:
                     texts_to_translate.append(source_value)
                     key_paths_list.append(key_path)
                     key_parts_list.append(key_parts)
-        
+
         # Set empty strings in the result
         for key_path, key_parts in empty_key_paths:
             if len(key_parts) == 1:
                 updated_content[key_parts[0]] = ""
             else:
-                self._set_nested_value(updated_content, key_parts, "")
-        
+                set_nested_value(updated_content, key_parts, "")
+
         if not texts_to_translate:
             return updated_content
-        
-        # Split into batches
-        total_keys = len(texts_to_translate)
-        num_batches = (total_keys + self.batch_size - 1) // self.batch_size
-        
-        print(f"Processing {total_keys} outdated keys in {num_batches} batches (batch size: {self.batch_size})")
-        
+
+        # Use BatchProcessor for batch translation
+        batch_processor = self._get_batch_processor()
+
+        # Process batches
         provider = self.api_config.get("provider", "algebras-ai")
-        
-        if provider == "algebras-ai":
-            # Use parallel batch processing for Algebras AI
-            print(f"Using parallel batch processing with {self.max_parallel_batches} concurrent batches")
-            
-            # Create batch data
-            batches = []
-            for i in range(0, total_keys, self.batch_size):
-                batch_texts = texts_to_translate[i:i + self.batch_size]
-                batch_key_paths = key_paths_list[i:i + self.batch_size]
-                batch_key_parts = key_parts_list[i:i + self.batch_size]
-                batch_idx = i // self.batch_size + 1
-                batches.append((batch_texts, batch_key_paths, batch_key_parts, batch_idx))
-            
-            # Process batches in parallel using ThreadPoolExecutor
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_parallel_batches) as executor:
-                # Submit all batch translation tasks
-                future_to_batch = {}
-                for batch_texts, batch_key_paths, batch_key_parts, batch_idx in batches:
-                    future = executor.submit(
-                        self._translate_with_algebras_ai_batch,
-                        batch_texts, source_lang, target_lang, ui_safe, glossary_id
+        translate_text_func = None if provider == "algebras-ai" else self.translate_text
+
+        result = batch_processor.process(
+            texts=texts_to_translate,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            ui_safe=ui_safe,
+            glossary_id=glossary_id,
+            on_batch_complete=None,  # We'll handle callback after mapping to keys
+            translate_text_func=translate_text_func,
+        )
+
+        # Map translations back to key paths and update content
+        # Also handle callbacks
+        num_batches = (len(texts_to_translate) + self.batch_size - 1) // self.batch_size
+        failed_indices = set()
+        for batch_idx in result.failed_batches:
+            batch_start_idx = (batch_idx - 1) * self.batch_size
+            batch_end_idx = min(
+                batch_start_idx + self.batch_size, len(texts_to_translate)
+            )
+            for idx in range(batch_start_idx, batch_end_idx):
+                failed_indices.add(idx)
+
+        for batch_idx in range(1, num_batches + 1):
+            batch_start_idx = (batch_idx - 1) * self.batch_size
+            batch_end_idx = min(
+                batch_start_idx + self.batch_size, len(texts_to_translate)
+            )
+
+            batch_dict = {}
+            for i in range(batch_start_idx, batch_end_idx):
+                if i < len(result.translations) and i < len(key_parts_list):
+                    source_text = texts_to_translate[i]
+                    raw_translation = result.translations[i]
+                    key_parts = key_parts_list[i]
+                    key_path = key_paths_list[i]
+
+                    # Skip failed translations
+                    if i in failed_indices:
+                        continue
+
+                    # Apply normalization
+                    normalized = self.string_normalizer.normalize(
+                        source_text, raw_translation
                     )
-                    future_to_batch[future] = (batch_texts, batch_key_paths, batch_key_parts, batch_idx)
-                
-                # Collect results as they complete
-                completed_batches = 0
-                for future in concurrent.futures.as_completed(future_to_batch):
-                    batch_texts, batch_key_paths, batch_key_parts, batch_idx = future_to_batch[future]
-                    completed_batches += 1
-                    
-                    try:
-                        translated_batch = future.result()
-                        
-                        # Update content with translated values
-                        for j, translated_value in enumerate(translated_batch):
-                            key_parts = batch_key_parts[j]
-                            if len(key_parts) == 1:
-                                # Flat format - set directly
-                                updated_content[key_parts[0]] = translated_value
-                            else:
-                                # Nested format - use nested value setter
-                                self._set_nested_value(updated_content, key_parts, translated_value)
-                        
-                        print(f"Completed batch {batch_idx}/{num_batches} ({completed_batches}/{num_batches} total completed)")
-                        for j in range(len(batch_texts)):
-                            print(f"  ✓ Translated: {batch_key_paths[j]}")
-                    
-                    except Exception as e:
-                        print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
-                        # Re-raise the exception instead of falling back to individual translations
-                        raise e
-        else:
-            # Use sequential batch processing for other providers
-            for i in range(0, total_keys, self.batch_size):
-                batch_texts = texts_to_translate[i:i + self.batch_size]
-                batch_key_paths = key_paths_list[i:i + self.batch_size]
-                batch_key_parts = key_parts_list[i:i + self.batch_size]
-                batch_idx = i // self.batch_size + 1
-                
-                print(f"Processing batch {batch_idx}/{num_batches} ({len(batch_texts)} keys)")
-                
+
+                    # Update content with translated values
+                    if len(key_parts) == 1:
+                        # Flat format - set directly
+                        updated_content[key_parts[0]] = normalized
+                    else:
+                        # Nested format - use nested value setter
+                        set_nested_value(updated_content, key_parts, normalized)
+                    batch_dict[key_path] = normalized
+                    print(f"  ✓ Translated: {key_path}")
+
+            # Call callback if provided
+            if on_batch_complete and batch_dict:
                 try:
-                    # Use individual translations for other providers
-                    # Use ThreadPoolExecutor for parallel processing within each batch
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=self.batch_size) as executor:
-                        # Create tasks for each key in the batch
-                        futures = {}
-                        for j, text in enumerate(batch_texts):
-                            future = executor.submit(
-                                self.translate_text,
-                                text,
-                                source_lang,
-                                target_lang,
-                                ui_safe,
-                                glossary_id
-                            )
-                            futures[j] = future
-                        
-                        # Collect results and update content
-                        for j, future in futures.items():
-                            try:
-                                translated_value = future.result()
-                                key_parts = batch_key_parts[j]
-                                if len(key_parts) == 1:
-                                    # Flat format - set directly
-                                    updated_content[key_parts[0]] = translated_value
-                                else:
-                                    # Nested format - use nested value setter
-                                    self._set_nested_value(updated_content, key_parts, translated_value)
-                                print(f"  ✓ Translated: {batch_key_paths[j]}")
-                            except Exception as e:
-                                print(f"  ✗ Error translating {batch_key_paths[j]}: {str(e)}")
-                    
-                    print(f"Completed batch {batch_idx}/{num_batches}")
+                    on_batch_complete(batch_dict, batch_idx)
                 except Exception as e:
-                    print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
-                    # Re-raise the exception instead of falling back to individual translations
-                    raise e
-        
+                    print(f"  ⚠ Error in batch complete callback: {str(e)}")
+
+        # Print summary if there were failures
+        if result.failed_batches:
+            print(f"\n  Summary:")
+            print(f"    Total batches: {result.total_batches}")
+            print(
+                f"    Successful: {result.successful_batches} ({result.successful_batches / result.total_batches * 100:.1f}%)"
+            )
+            print(
+                f"    Failed: {len(result.failed_batches)} ({len(result.failed_batches) / result.total_batches * 100:.1f}%)"
+            )
+            if result.error_stats["5xx"]:
+                print(
+                    f"      - 5xx errors: {len(result.error_stats['5xx'])} batches ({', '.join(map(str, result.error_stats['5xx']))})"
+                )
+            if result.error_stats["429"]:
+                print(
+                    f"      - 429 errors: {len(result.error_stats['429'])} batches ({', '.join(map(str, result.error_stats['429']))})"
+                )
+            if result.error_stats["other"]:
+                print(
+                    f"      - Other errors: {len(result.error_stats['other'])} batches ({', '.join(map(str, result.error_stats['other']))})"
+                )
+            print(f"    Failed batches will keep existing values")
+
         return updated_content
-    
-    
-    def _update_xliff_targets(self, xliff_content: Dict[str, Any], translated_strings: Dict[str, str]) -> Dict[str, Any]:
+
+    def _update_xliff_targets(
+        self, xliff_content: Dict[str, Any], translated_strings: Dict[str, str]
+    ) -> Dict[str, Any]:
         """
         Update XLIFF target elements with translated strings.
-        
+
         Args:
             xliff_content: Original XLIFF content
             translated_strings: Dictionary of translated strings
-            
+
         Returns:
             Updated XLIFF content with target elements
         """
         updated_content = xliff_content.copy()
-        
-        if 'files' in updated_content:
-            for file_data in updated_content['files']:
-                if 'trans-units' in file_data:
-                    for unit in file_data['trans-units']:
-                        if 'id' in unit and unit['id'] in translated_strings:
-                            unit['target'] = translated_strings[unit['id']]
-        
-        return updated_content
-    
-    def _translate_csv_content(self, csv_content: Dict[str, Any], source_lang: str, target_lang: str, 
-                              ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Translate CSV content for a specific target language.
-        
-        Args:
-            csv_content: CSV content dictionary
-            source_lang: Source language code
-            target_lang: Target language code
-            ui_safe: If True, ensure translations will not be longer than original text
-            glossary_id: Glossary ID to use for translation
-            
-        Returns:
-            Updated CSV content with translated strings
-        """
-        if 'translations' not in csv_content:
-            return csv_content
-        
-        # Extract source language strings
-        source_strings = {}
-        for key, lang_translations in csv_content['translations'].items():
-            if isinstance(lang_translations, dict) and source_lang in lang_translations:
-                source_strings[key] = lang_translations[source_lang]
-        
-        # Translate the strings
-        translated_strings = self._translate_flat_dict(source_strings, source_lang, target_lang, ui_safe, glossary_id)
-        
-        # Update the CSV content
-        updated_content = csv_content.copy()
-        for key, translated_value in translated_strings.items():
-            if key in updated_content['translations']:
-                if target_lang not in updated_content['translations'][key]:
-                    updated_content['translations'][key] = updated_content['translations'][key].copy()
-                updated_content['translations'][key][target_lang] = translated_value
-        
-        return updated_content
-    
-    def _translate_xlsx_content(self, xlsx_content: Dict[str, Any], source_lang: str, target_lang: str, 
-                               ui_safe: bool = False, glossary_id: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Translate XLSX content for a specific target language.
-        
-        Args:
-            xlsx_content: XLSX content dictionary
-            source_lang: Source language code
-            target_lang: Target language code
-            ui_safe: If True, ensure translations will not be longer than original text
-            glossary_id: Glossary ID to use for translation
-            
-        Returns:
-            Updated XLSX content with translated strings
-        """
-        if 'translations' not in xlsx_content:
-            return xlsx_content
-        
-        # Extract source language strings
-        source_strings = {}
-        for key, lang_translations in xlsx_content['translations'].items():
-            if isinstance(lang_translations, dict) and source_lang in lang_translations:
-                source_strings[key] = lang_translations[source_lang]
-        
-        # Translate the strings
-        translated_strings = self._translate_flat_dict(source_strings, source_lang, target_lang, ui_safe, glossary_id)
-        
-        # Update the XLSX content
-        updated_content = xlsx_content.copy()
-        for key, translated_value in translated_strings.items():
-            if key in updated_content['translations']:
-                if target_lang not in updated_content['translations'][key]:
-                    updated_content['translations'][key] = updated_content['translations'][key].copy()
-                updated_content['translations'][key][target_lang] = translated_value
-        
+
+        if "files" in updated_content:
+            for file_data in updated_content["files"]:
+                if "trans-units" in file_data:
+                    for unit in file_data["trans-units"]:
+                        if "id" in unit and unit["id"] in translated_strings:
+                            unit["target"] = translated_strings[unit["id"]]
+
         return updated_content

@@ -198,9 +198,19 @@ class TestTranslator:
             return translations
         
         with patch("builtins.open", m):
+            from algebras.services.batch_processor import BatchResult
+            
             translator = Translator()
-            # Mock the batch translation method
-            translator._translate_with_algebras_ai_batch = mock_translate_batch
+            # Mock the batch processor
+            mock_batch_processor = MagicMock()
+            mock_batch_processor.process.return_value = BatchResult(
+                translations=["Bienvenue dans notre application!", "Connexion", "Se connecter"],
+                error_stats={"5xx": [], "429": [], "other": []},
+                failed_batches=[],
+                successful_batches=1,
+                total_batches=1,
+            )
+            translator._batch_processor = mock_batch_processor
             result = translator.translate_file("messages.en.json", "fr")
             
             # Verify the translation
@@ -277,9 +287,19 @@ class TestTranslator:
             return translations
         
         with patch("builtins.open", m):
+            from algebras.services.batch_processor import BatchResult
+            
             translator = Translator()
-            # Mock the batch translation method
-            translator._translate_with_algebras_ai_batch = mock_translate_batch
+            # Mock the batch processor
+            mock_batch_processor = MagicMock()
+            mock_batch_processor.process.return_value = BatchResult(
+                translations=["Bienvenue dans notre application!", "Connexion", "Se connecter"],
+                error_stats={"5xx": [], "429": [], "other": []},
+                failed_batches=[],
+                successful_batches=1,
+                total_batches=1,
+            )
+            translator._batch_processor = mock_batch_processor
             result = translator.translate_file("messages.en.yaml", "fr")
             
             # Verify the translation
@@ -317,7 +337,7 @@ class TestTranslator:
             translator.translate_file("messages.en.txt", "fr")
 
     def test_translate_nested_dict(self, monkeypatch):
-        """Test _translate_nested_dict method"""
+        """Test nested dict translation using strategy"""
         # Sample nested dictionary
         nested_dict = {
             "welcome": "Welcome to our application!",
@@ -359,8 +379,10 @@ class TestTranslator:
         # Mock environment variable
         monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
 
-        # Mock batch translation method
-        def mock_translate_batch(texts, source_lang, target_lang, ui_safe=False, glossary_id=""):
+        from algebras.services.batch_processor import BatchResult
+        
+        # Mock batch processor result
+        def mock_process(texts, source_lang, target_lang, ui_safe=False, glossary_id="", on_batch_complete=None, translate_text_func=None):
             translations = []
             for text in texts:
                 if text == "Welcome to our application!":
@@ -371,14 +393,24 @@ class TestTranslator:
                     translations.append("Se connecter")
                 else:
                     translations.append(text)
-            return translations
+            return BatchResult(
+                translations=translations,
+                error_stats={"5xx": [], "429": [], "other": []},
+                failed_batches=[],
+                successful_batches=1,
+                total_batches=1,
+            )
         
         translator = Translator()
-        # Mock the batch translation method
-        translator._translate_with_algebras_ai_batch = mock_translate_batch
+        # Mock the batch processor
+        mock_batch_processor = MagicMock()
+        mock_batch_processor.process = mock_process
+        translator._batch_processor = mock_batch_processor
         
-        # Test _translate_nested_dict
-        result = translator._translate_nested_dict(nested_dict, "en", "fr")
+        # Test using nested dict strategy
+        from algebras.services.strategies.strategy_factory import TranslationStrategyFactory
+        strategy = TranslationStrategyFactory.get_nested_dict_strategy(translator)
+        result = strategy.translate(nested_dict, "en", "fr")
         
         # Verify the translation
         assert result == expected_translation
@@ -457,25 +489,25 @@ class TestTranslator:
         # Test 1: Normal case - should normalize escaped apostrophe
         source_text = "More"
         translated_text = "Ko\\'proq"
-        result = translator.normalize_translation_string(source_text, translated_text)
+        result = translator.string_normalizer.normalize(source_text, translated_text)
         assert result == "Ko'proq"
 
         # Test 2: Source has escaped character - should NOT normalize
         source_text = "Say \\'hello\\'"
         translated_text = "Salom \\'aytish\\'"
-        result = translator.normalize_translation_string(source_text, translated_text)
+        result = translator.string_normalizer.normalize(source_text, translated_text)
         assert result == "Salom \\'aytish\\'"  # Should remain escaped
 
         # Test 3: Multiple escaped characters
         source_text = "Hello world"
         translated_text = "Salom \\'dunyo\\' va \\\"odam\\\""
-        result = translator.normalize_translation_string(source_text, translated_text)
+        result = translator.string_normalizer.normalize(source_text, translated_text)
         assert result == "Salom 'dunyo' va \"odam\""
 
         # Test 4: Mixed case - some should normalize, some shouldn't
         source_text = "Text with \\'existing\\' escapes"
         translated_text = "Matn \\'mavjud\\' va \\\"yangi\\\" qochishlar bilan"
-        result = translator.normalize_translation_string(source_text, translated_text)
+        result = translator.string_normalizer.normalize(source_text, translated_text)
         # Should NOT normalize apostrophes (present in source) but SHOULD normalize quotes (not in source)
         assert result == "Matn \\'mavjud\\' va \"yangi\" qochishlar bilan"
 
@@ -483,38 +515,30 @@ class TestTranslator:
         mock_config.get_setting.return_value = False  # normalization disabled
         source_text = "More"
         translated_text = "Ko\\'proq"
-        result = translator.normalize_translation_string(source_text, translated_text)
+        result = translator.string_normalizer.normalize(source_text, translated_text)
         assert result == "Ko\\'proq"  # Should remain unchanged
 
         # Test 6: Test newlines and tabs (should be preserved as actual characters)
         mock_config.get_setting.return_value = True  # normalization enabled
         source_text = "Line one"
         translated_text = "Birinchi qator\\nIkkinchi qator"
-        result = translator.normalize_translation_string(source_text, translated_text)
+        result = translator.string_normalizer.normalize(source_text, translated_text)
         assert result == "Birinchi qator\nIkkinchi qator"
 
         # Test 7: Test backslash normalization
         source_text = "File path"
         translated_text = "Fayl yo\\\\li"
-        result = translator.normalize_translation_string(source_text, translated_text)
+        result = translator.string_normalizer.normalize(source_text, translated_text)
         assert result == "Fayl yo\\li"
 
     def test_retry_with_exponential_backoff_success(self, monkeypatch):
         """Test retry helper with successful response"""
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
 
-        # Patch Config class
-        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
-
-        # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Initialize Translator
-        translator = Translator()
+        # Create RateLimiter and RetryHandler directly
+        rate_limiter = RateLimiter(max_requests_per_minute=30)
+        retry_handler = RetryHandler(rate_limiter=rate_limiter, max_retries=5, initial_wait=1.0)
 
         # Mock successful response
         mock_response = MagicMock()
@@ -524,28 +548,19 @@ class TestTranslator:
         def api_call():
             return mock_response
 
-        result = translator._retry_with_exponential_backoff(api_call)
+        result = retry_handler.execute_with_retry(api_call)
         assert result.status_code == 200
 
     def test_retry_with_exponential_backoff_429_retry_success(self, monkeypatch):
         """Test retry helper with 429 error that succeeds on retry"""
         import time
         from unittest.mock import patch
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
 
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
-
-        # Patch Config class
-        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
-
-        # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Initialize Translator
-        translator = Translator()
+        # Create RateLimiter and RetryHandler directly
+        rate_limiter = RateLimiter(max_requests_per_minute=30)
+        retry_handler = RetryHandler(rate_limiter=rate_limiter, max_retries=3, initial_wait=0.1)
 
         # Mock responses: first 429, then success
         mock_response_429 = MagicMock()
@@ -565,7 +580,7 @@ class TestTranslator:
 
         # Mock time.sleep to avoid actual delays in tests
         with patch('time.sleep'):
-            result = translator._retry_with_exponential_backoff(api_call, max_retries=3, initial_wait=0.1)
+            result = retry_handler.execute_with_retry(api_call)
 
         assert result.status_code == 200
         assert call_count[0] == 2  # Should have retried once
@@ -574,21 +589,12 @@ class TestTranslator:
         """Test retry helper with 429 error that exhausts all retries"""
         import time
         from unittest.mock import patch
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
 
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
-
-        # Patch Config class
-        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
-
-        # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Initialize Translator
-        translator = Translator()
+        # Create RateLimiter and RetryHandler directly
+        rate_limiter = RateLimiter(max_requests_per_minute=30)
+        retry_handler = RetryHandler(rate_limiter=rate_limiter, max_retries=2, initial_wait=0.1)
 
         # Mock 429 response
         mock_response_429 = MagicMock()
@@ -601,24 +607,16 @@ class TestTranslator:
         # Mock time.sleep to avoid actual delays in tests
         with patch('time.sleep'):
             with pytest.raises(Exception, match="429 Too Many Requests"):
-                translator._retry_with_exponential_backoff(api_call, max_retries=2, initial_wait=0.1)
+                retry_handler.execute_with_retry(api_call)
 
     def test_retry_with_exponential_backoff_non_429_error(self, monkeypatch):
         """Test retry helper with non-429 error (should not retry)"""
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
 
-        # Patch Config class
-        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
-
-        # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Initialize Translator
-        translator = Translator()
+        # Create RateLimiter and RetryHandler directly
+        rate_limiter = RateLimiter(max_requests_per_minute=30)
+        retry_handler = RetryHandler(rate_limiter=rate_limiter, max_retries=5, initial_wait=1.0)
 
         # Mock 500 error response
         mock_response_500 = MagicMock()
@@ -631,9 +629,9 @@ class TestTranslator:
             call_count[0] += 1
             return mock_response_500
 
-        # Should not retry on non-429 errors
-        result = translator._retry_with_exponential_backoff(api_call)
-        assert result.status_code == 500
+        # Should not retry on non-429 errors (5xx errors are immediately raised)
+        with pytest.raises(Exception, match="Error from Algebras AI API"):
+            retry_handler.execute_with_retry(api_call)
         assert call_count[0] == 1  # Should not have retried
 
     def test_translate_with_algebras_ai_batch_empty_strings(self, monkeypatch):
@@ -668,11 +666,19 @@ class TestTranslator:
         }
 
         mock_post = MagicMock(return_value=mock_response)
-        monkeypatch.setattr("algebras.services.translator.requests.post", mock_post)
+        monkeypatch.setattr("algebras.services.api_client.requests.post", mock_post)
 
         # Test with empty strings mixed in
+        from algebras.services.api_client import AlgebrasAIClient
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
+        
+        rate_limiter = RateLimiter()
+        retry_handler = RetryHandler(rate_limiter=rate_limiter)
+        api_client = AlgebrasAIClient(config=mock_config, retry_handler=retry_handler)
+        
         texts = ["Hello", "", "World", ""]
-        result = translator._translate_with_algebras_ai_batch(texts, "en", "fr")
+        result = api_client.translate_batch(texts, "en", "fr")
 
         # Verify empty strings are preserved in result
         assert len(result) == 4
@@ -703,12 +709,17 @@ class TestTranslator:
         # Mock environment variable
         monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
 
-        # Initialize Translator
-        translator = Translator()
-
         # Test with all empty strings
+        from algebras.services.api_client import AlgebrasAIClient
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
+        
+        rate_limiter = RateLimiter()
+        retry_handler = RetryHandler(rate_limiter=rate_limiter)
+        api_client = AlgebrasAIClient(config=mock_config, retry_handler=retry_handler)
+        
         texts = ["", "", ""]
-        result = translator._translate_with_algebras_ai_batch(texts, "en", "fr")
+        result = api_client.translate_batch(texts, "en", "fr")
 
         # Verify all empty strings are preserved
         assert len(result) == 3
@@ -740,8 +751,10 @@ class TestTranslator:
         # Initialize Translator
         translator = Translator()
 
-        # Mock batch translation method
-        def mock_translate_batch(texts, source_lang, target_lang, ui_safe=False, glossary_id=""):
+        from algebras.services.batch_processor import BatchResult
+        
+        # Mock batch processor result
+        def mock_process(texts, source_lang, target_lang, ui_safe=False, glossary_id="", on_batch_complete=None, translate_text_func=None):
             # Should only receive non-empty strings
             assert "" not in texts
             translations = []
@@ -752,11 +765,23 @@ class TestTranslator:
                     translations.append("Monde")
                 else:
                     translations.append(text)
-            return translations
+            return BatchResult(
+                translations=translations,
+                error_stats={"5xx": [], "429": [], "other": []},
+                failed_batches=[],
+                successful_batches=1,
+                total_batches=1,
+            )
 
-        translator._translate_with_algebras_ai_batch = mock_translate_batch
+        # Mock the batch processor
+        mock_batch_processor = MagicMock()
+        mock_batch_processor.process = mock_process
+        translator._batch_processor = mock_batch_processor
 
-        # Test with empty strings
+        # Test with empty strings using flat dict strategy
+        from algebras.services.strategies.strategy_factory import TranslationStrategyFactory
+        strategy = TranslationStrategyFactory.get_flat_dict_strategy(translator)
+        
         data = {
             "greeting": "Hello",
             "empty1": "",
@@ -765,7 +790,7 @@ class TestTranslator:
             "empty3": "   "  # Whitespace only
         }
 
-        result = translator._translate_flat_dict(data, "en", "fr")
+        result = strategy.translate(data, "en", "fr")
 
         # Verify empty strings are preserved
         assert result["greeting"] == "Bonjour"
@@ -800,8 +825,10 @@ class TestTranslator:
         # Initialize Translator
         translator = Translator()
 
-        # Mock batch translation method
-        def mock_translate_batch(texts, source_lang, target_lang, ui_safe=False, glossary_id=""):
+        from algebras.services.batch_processor import BatchResult
+        
+        # Mock batch processor result
+        def mock_process(texts, source_lang, target_lang, ui_safe=False, glossary_id="", on_batch_complete=None, translate_text_func=None):
             # Should only receive non-empty strings
             assert "" not in texts
             translations = []
@@ -812,11 +839,23 @@ class TestTranslator:
                     translations.append("Monde")
                 else:
                     translations.append(text)
-            return translations
+            return BatchResult(
+                translations=translations,
+                error_stats={"5xx": [], "429": [], "other": []},
+                failed_batches=[],
+                successful_batches=1,
+                total_batches=1,
+            )
 
-        translator._translate_with_algebras_ai_batch = mock_translate_batch
+        # Mock the batch processor
+        mock_batch_processor = MagicMock()
+        mock_batch_processor.process = mock_process
+        translator._batch_processor = mock_batch_processor
 
-        # Test with empty strings in nested structure
+        # Test with empty strings in nested structure using nested dict strategy
+        from algebras.services.strategies.strategy_factory import TranslationStrategyFactory
+        strategy = TranslationStrategyFactory.get_nested_dict_strategy(translator)
+        
         data = {
             "greeting": "Hello",
             "empty": "",
@@ -826,7 +865,7 @@ class TestTranslator:
             }
         }
 
-        result = translator._translate_nested_dict(data, "en", "fr")
+        result = strategy.translate(data, "en", "fr")
 
         # Verify empty strings are preserved
         assert result["greeting"] == "Bonjour"
@@ -875,7 +914,18 @@ class TestTranslator:
                     translations.append(text)
             return translations
 
-        translator._translate_with_algebras_ai_batch = mock_translate_batch
+        # Mock batch processor instead
+        from algebras.services.batch_processor import BatchResult
+        
+        mock_batch_processor = MagicMock()
+        mock_batch_processor.process.return_value = BatchResult(
+            translations=["Bonjour", "Monde"],
+            error_stats={"5xx": [], "429": [], "other": []},
+            failed_batches=[],
+            successful_batches=1,
+            total_batches=1,
+        )
+        translator._batch_processor = mock_batch_processor
 
         # Test with empty strings
         source_content = {
@@ -938,7 +988,18 @@ class TestTranslator:
                     translations.append(text)
             return translations
 
-        translator._translate_with_algebras_ai_batch = mock_translate_batch
+        # Mock batch processor instead
+        from algebras.services.batch_processor import BatchResult
+        
+        mock_batch_processor = MagicMock()
+        mock_batch_processor.process.return_value = BatchResult(
+            translations=["Bonjour", "Monde"],
+            error_stats={"5xx": [], "429": [], "other": []},
+            failed_batches=[],
+            successful_batches=1,
+            total_batches=1,
+        )
+        translator._batch_processor = mock_batch_processor
 
         # Test with empty strings
         source_content = {
@@ -1011,11 +1072,19 @@ class TestTranslator:
                 return mock_response_429
             return mock_response_200
 
-        monkeypatch.setattr("algebras.services.translator.requests.post", mock_post)
+        monkeypatch.setattr("algebras.services.api_client.requests.post", mock_post)
 
         # Mock time.sleep to avoid actual delays in tests
+        from algebras.services.api_client import AlgebrasAIClient
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
+        
+        rate_limiter = RateLimiter()
+        retry_handler = RetryHandler(rate_limiter=rate_limiter)
+        api_client = AlgebrasAIClient(config=mock_config, retry_handler=retry_handler)
+        
         with patch('time.sleep'):
-            result = translator._translate_with_algebras_ai("Hello", "en", "fr")
+            result = api_client.translate("Hello", "en", "fr")
 
         assert result == "Bonjour"
         assert call_count[0] == 2  # Should have retried once
@@ -1065,93 +1134,69 @@ class TestTranslator:
                 return mock_response_429
             return mock_response_200
 
-        monkeypatch.setattr("algebras.services.translator.requests.post", mock_post)
+        monkeypatch.setattr("algebras.services.api_client.requests.post", mock_post)
 
         # Mock time.sleep to avoid actual delays in tests
+        from algebras.services.api_client import AlgebrasAIClient
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
+        
+        rate_limiter = RateLimiter()
+        retry_handler = RetryHandler(rate_limiter=rate_limiter)
+        api_client = AlgebrasAIClient(config=mock_config, retry_handler=retry_handler)
+        
         with patch('time.sleep'):
-            result = translator._translate_with_algebras_ai_batch(["Hello"], "en", "fr")
+            result = api_client.translate_batch(["Hello"], "en", "fr")
 
         assert result == ["Bonjour"]
         assert call_count[0] == 2  # Should have retried once
 
     def test_wait_for_rate_limit_below_limit(self, monkeypatch):
         """Test rate limiter when below the limit"""
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        from algebras.services.rate_limiter import RateLimiter
 
-        # Patch Config class
-        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
-
-        # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Initialize Translator
-        translator = Translator()
+        # Create RateLimiter directly
+        rate_limiter = RateLimiter(max_requests_per_minute=30)
 
         # Make a few requests (below limit)
         for i in range(5):
-            translator._wait_for_rate_limit()
+            rate_limiter.wait_if_needed()
 
         # Should have 5 timestamps
-        assert len(translator._request_timestamps) == 5
+        assert len(rate_limiter._request_timestamps) == 5
 
     def test_wait_for_rate_limit_at_limit(self, monkeypatch):
         """Test rate limiter when at the limit - should wait"""
         import time
         from unittest.mock import patch
+        from algebras.services.rate_limiter import RateLimiter
 
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
-
-        # Patch Config class
-        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
-
-        # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Initialize Translator
-        translator = Translator()
+        # Create RateLimiter directly
+        rate_limiter = RateLimiter(max_requests_per_minute=30)
 
         # Fill up the rate limit (30 requests)
         current_time = time.time()
-        translator._request_timestamps = [current_time - i * 0.1 for i in range(30)]
+        rate_limiter._request_timestamps = [current_time - i * 0.1 for i in range(30)]
 
         # Mock time.sleep to verify it's called
         with patch('time.sleep') as mock_sleep:
-            translator._wait_for_rate_limit()
+            rate_limiter.wait_if_needed()
             # Should have waited
             assert mock_sleep.called
             # Should have 31 timestamps now (30 old + 1 new)
-            assert len(translator._request_timestamps) == 31
+            assert len(rate_limiter._request_timestamps) == 31
 
     def test_wait_for_rate_limit_old_timestamps_removed(self, monkeypatch):
         """Test that old timestamps (>60 seconds) are removed"""
         import time
+        from algebras.services.rate_limiter import RateLimiter
 
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
-
-        # Patch Config class
-        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
-
-        # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Initialize Translator
-        translator = Translator()
+        # Create RateLimiter directly
+        rate_limiter = RateLimiter(max_requests_per_minute=30)
 
         # Add old timestamps (>60 seconds old)
         current_time = time.time()
-        translator._request_timestamps = [
+        rate_limiter._request_timestamps = [
             current_time - 70,  # 70 seconds ago
             current_time - 65,  # 65 seconds ago
             current_time - 5,   # 5 seconds ago
@@ -1159,32 +1204,23 @@ class TestTranslator:
         ]
 
         # Call rate limiter
-        translator._wait_for_rate_limit()
+        rate_limiter.wait_if_needed()
 
         # Should only have timestamps from last 60 seconds
-        assert len(translator._request_timestamps) == 3  # 2 old + 1 new
-        for ts in translator._request_timestamps:
+        assert len(rate_limiter._request_timestamps) == 3  # 2 old + 1 new
+        for ts in rate_limiter._request_timestamps:
             assert current_time - ts < 60.0
 
     def test_retry_with_rate_limit_enforcement(self, monkeypatch):
         """Test that rate limiter is called before API calls"""
         import time
         from unittest.mock import patch
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
 
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
-
-        # Patch Config class
-        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
-
-        # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Initialize Translator
-        translator = Translator()
+        # Create RateLimiter and RetryHandler directly
+        rate_limiter = RateLimiter(max_requests_per_minute=30)
+        retry_handler = RetryHandler(rate_limiter=rate_limiter, max_retries=5, initial_wait=1.0)
 
         # Mock successful response
         mock_response = MagicMock()
@@ -1192,21 +1228,21 @@ class TestTranslator:
 
         # Track if rate limiter was called
         rate_limit_called = [False]
+        original_wait_if_needed = rate_limiter.wait_if_needed
 
-        def original_wait_for_rate_limit():
+        def wait_if_needed():
             rate_limit_called[0] = True
-            translator._request_timestamps.append(time.time())
+            original_wait_if_needed()
 
         # Replace the method temporarily
-        original_method = translator._wait_for_rate_limit
-        translator._wait_for_rate_limit = original_wait_for_rate_limit
+        rate_limiter.wait_if_needed = wait_if_needed
 
         def api_call():
             return mock_response
 
         # Mock time.sleep to avoid actual delays
         with patch('time.sleep'):
-            result = translator._retry_with_exponential_backoff(api_call)
+            result = retry_handler.execute_with_retry(api_call)
 
         # Verify rate limiter was called
         assert rate_limit_called[0]
@@ -1216,21 +1252,12 @@ class TestTranslator:
         """Test that consecutive 429 errors are tracked and increase backoff"""
         import time
         from unittest.mock import patch
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
 
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
-
-        # Patch Config class
-        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
-
-        # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Initialize Translator
-        translator = Translator()
+        # Create RateLimiter and RetryHandler directly
+        rate_limiter = RateLimiter(max_requests_per_minute=30)
+        retry_handler = RetryHandler(rate_limiter=rate_limiter, max_retries=5, initial_wait=1.0)
 
         # Mock 429 responses
         mock_response_429 = MagicMock()
@@ -1246,7 +1273,7 @@ class TestTranslator:
         def api_call():
             call_count[0] += 1
             # Track consecutive count before each retry
-            consecutive_counts.append(translator._consecutive_429_count)
+            consecutive_counts.append(retry_handler._consecutive_429_count)
             if call_count[0] <= 3:
                 return mock_response_429
             return mock_response_200
@@ -1259,7 +1286,7 @@ class TestTranslator:
 
         with patch('time.sleep', side_effect=mock_sleep):
             with patch('time.time', return_value=time.time()):
-                result = translator._retry_with_exponential_backoff(api_call, max_retries=5, initial_wait=1.0)
+                result = retry_handler.execute_with_retry(api_call)
 
         # Should have succeeded after retries
         assert result.status_code == 200
@@ -1273,24 +1300,15 @@ class TestTranslator:
         """Test that consecutive 429 counter resets on successful request"""
         import time
         from unittest.mock import patch
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
 
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
-
-        # Patch Config class
-        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
-
-        # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Initialize Translator
-        translator = Translator()
+        # Create RateLimiter and RetryHandler directly
+        rate_limiter = RateLimiter(max_requests_per_minute=30)
+        retry_handler = RetryHandler(rate_limiter=rate_limiter, max_retries=5, initial_wait=1.0)
 
         # Set consecutive 429 count
-        translator._consecutive_429_count = 5
+        retry_handler._consecutive_429_count = 5
 
         # Mock successful response
         mock_response = MagicMock()
@@ -1300,35 +1318,26 @@ class TestTranslator:
             return mock_response
 
         with patch('time.sleep'):
-            result = translator._retry_with_exponential_backoff(api_call)
+            result = retry_handler.execute_with_retry(api_call)
 
         # Consecutive 429 count should be reset
-        assert translator._consecutive_429_count == 0
+        assert retry_handler._consecutive_429_count == 0
         assert result.status_code == 200
 
     def test_consecutive_429_reset_after_60_seconds(self, monkeypatch):
         """Test that consecutive 429 counter resets after 60 seconds"""
         import time
         from unittest.mock import patch
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
 
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
-
-        # Patch Config class
-        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
-
-        # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Initialize Translator
-        translator = Translator()
+        # Create RateLimiter and RetryHandler directly
+        rate_limiter = RateLimiter(max_requests_per_minute=30)
+        retry_handler = RetryHandler(rate_limiter=rate_limiter, max_retries=1, initial_wait=0.1)
 
         # Set consecutive 429 count and last 429 time to 70 seconds ago
-        translator._consecutive_429_count = 5
-        translator._last_429_time = time.time() - 70
+        retry_handler._consecutive_429_count = 5
+        retry_handler._last_429_time = time.time() - 70
 
         # Mock 429 response
         mock_response_429 = MagicMock()
@@ -1342,36 +1351,27 @@ class TestTranslator:
         with patch('time.sleep'):
             with patch('time.time', return_value=time.time()):
                 try:
-                    translator._retry_with_exponential_backoff(api_call, max_retries=1, initial_wait=0.1)
+                    retry_handler.execute_with_retry(api_call)
                 except Exception:
                     pass  # Expected to fail after retries
 
         # Consecutive 429 count should be reset to 1 (not 6) because it was reset
-        assert translator._consecutive_429_count == 1
+        assert retry_handler._consecutive_429_count == 1
 
     def test_aggressive_backoff_with_multiple_429s(self, monkeypatch):
         """Test that backoff increases more aggressively with multiple consecutive 429s"""
         import time
         from unittest.mock import patch
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
 
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
-
-        # Patch Config class
-        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
-
-        # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Initialize Translator
-        translator = Translator()
+        # Create RateLimiter and RetryHandler directly
+        rate_limiter = RateLimiter(max_requests_per_minute=30)
+        retry_handler = RetryHandler(rate_limiter=rate_limiter, max_retries=3, initial_wait=1.0)
 
         # Set consecutive 429 count to simulate multiple batches hitting 429
-        translator._consecutive_429_count = 5
-        translator._last_429_time = time.time()
+        retry_handler._consecutive_429_count = 5
+        retry_handler._last_429_time = time.time()
 
         # Mock 429 response
         mock_response_429 = MagicMock()
@@ -1396,7 +1396,7 @@ class TestTranslator:
 
         with patch('time.sleep', side_effect=mock_sleep):
             with patch('time.time', return_value=time.time()):
-                result = translator._retry_with_exponential_backoff(api_call, max_retries=3, initial_wait=1.0)
+                result = retry_handler.execute_with_retry(api_call)
 
         # Should have succeeded
         assert result.status_code == 200
@@ -1410,24 +1410,15 @@ class TestTranslator:
         import time
         from unittest.mock import patch
         import threading
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
 
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
-
-        # Patch Config class
-        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
-
-        # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Initialize Translator
-        translator = Translator()
+        # Create RateLimiter and RetryHandler directly
+        rate_limiter = RateLimiter(max_requests_per_minute=30)
+        retry_handler = RetryHandler(rate_limiter=rate_limiter, max_retries=5, initial_wait=1.0)
 
         # Set shared backoff to 5 seconds in the future
-        translator._rate_limit_backoff_until = time.time() + 5.0
+        retry_handler._backoff_until = time.time() + 5.0
 
         # Mock successful response
         mock_response = MagicMock()
@@ -1443,7 +1434,7 @@ class TestTranslator:
 
         with patch('time.sleep', side_effect=mock_sleep):
             with patch('time.time', return_value=time.time()):
-                result = translator._retry_with_exponential_backoff(api_call)
+                result = retry_handler.execute_with_retry(api_call)
 
         # Should have waited for shared backoff
         assert len(wait_times) > 0
@@ -1456,21 +1447,12 @@ class TestTranslator:
         import time
         from unittest.mock import patch
         import concurrent.futures
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
 
-        # Mock Config
-        mock_config = MagicMock(spec=Config)
-        mock_config.exists.return_value = True
-        mock_config.load.return_value = {}
-        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
-
-        # Patch Config class
-        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
-
-        # Mock environment variable
-        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
-
-        # Initialize Translator
-        translator = Translator()
+        # Create RateLimiter and RetryHandler directly
+        rate_limiter = RateLimiter(max_requests_per_minute=30)
+        retry_handler = RetryHandler(rate_limiter=rate_limiter, max_retries=5, initial_wait=1.0)
 
         # Mock successful response
         mock_response = MagicMock()
@@ -1480,19 +1462,19 @@ class TestTranslator:
             return mock_response
 
         request_count = [0]
-        original_wait_for_rate_limit = translator._wait_for_rate_limit
+        original_wait_if_needed = rate_limiter.wait_if_needed
 
-        def wait_for_rate_limit():
-            original_wait_for_rate_limit()
+        def wait_if_needed():
+            original_wait_if_needed()
             request_count[0] += 1
 
         # Replace method to track calls
-        translator._wait_for_rate_limit = wait_for_rate_limit
+        rate_limiter.wait_if_needed = wait_if_needed
 
         # Simulate multiple parallel batches making requests
         with patch('time.sleep'):
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                futures = [executor.submit(translator._retry_with_exponential_backoff, api_call) for _ in range(10)]
+                futures = [executor.submit(retry_handler.execute_with_retry, api_call) for _ in range(10)]
                 results = [future.result() for future in concurrent.futures.as_completed(futures)]
 
         # All requests should have succeeded
