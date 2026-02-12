@@ -635,3 +635,311 @@ class TestTranslateCommand:
             assert (
                 call_args[0][2] == False
             ), "write_po_file should be called with mark_fuzzy=False"
+
+    def test_default_mode_translates_files_with_missing_keys_despite_newer_mtime(self):
+        """
+        Test that default mode (without --only-missing) checks for missing keys
+        even when target file has newer mtime than source.
+        
+        This is a regression test for the bug where files were skipped based solely
+        on modification time without checking for missing keys.
+        """
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.get_languages.return_value = ["en", "de"]
+        mock_config.get_source_language.return_value = "en"
+        mock_config.check_deprecated_format.return_value = False
+        mock_config.get_source_files.return_value = None
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        mock_config.has_setting.return_value = False
+        mock_config.get_setting.side_effect = lambda key, default: {
+            "xlf.default_target_state": "translated",
+            "xlf.version": "1.2",
+            "po.mark_fuzzy": False,
+            "api.prompt": "",
+        }.get(key, default)
+
+        # Set up paths
+        source_file = "strings/values/generic_strings_2.xml"
+        target_file = "strings/values-de/generic_strings_2.xml"
+        source_basename = "generic_strings_2.xml"
+
+        # Mock FileScanner
+        mock_scanner = MagicMock(spec=FileScanner)
+        mock_scanner.group_files_by_language.return_value = {
+            "en": [source_file],
+            "de": [target_file],
+        }
+
+        # Mock Translator
+        mock_translator = MagicMock(spec=Translator)
+        mock_translator.translate_file.return_value = {
+            "Quiz.timer_format.__plurals__": {"one": "%1$d Minute", "other": "%1$d Minuten"}
+        }
+        mock_translator.set_verbose.return_value = None
+
+        # Mock validate_language_files to return missing plural keys
+        missing_keys = {
+            "Quiz.timer_format.__plurals__",
+            "Quiz.passing_score_points_format.__plurals__",
+            "Quiz.question_score_format.__plurals__"
+        }
+
+        # Patch all dependencies
+        with patch(
+            "algebras.commands.translate_command.Config", return_value=mock_config
+        ), patch(
+            "algebras.commands.translate_command.FileScanner", return_value=mock_scanner
+        ), patch(
+            "algebras.commands.translate_command.Translator",
+            return_value=mock_translator,
+        ), patch(
+            "algebras.commands.translate_command.validate_language_files",
+            return_value=(False, missing_keys)
+        ) as mock_validate, patch(
+            "builtins.open", mock_open()
+        ), patch(
+            "os.path.exists", return_value=True
+        ), patch(
+            "os.path.getmtime", side_effect=[1000, 2000]  # source older, target newer
+        ), patch(
+            "os.makedirs", return_value=None
+        ), patch(
+            "os.path.dirname", return_value="strings/values-de"
+        ), patch(
+            "os.path.basename", return_value=source_basename
+        ), patch(
+            "os.path.getsize", return_value=1024
+        ), patch(
+            "os.path.relpath", return_value=source_file
+        ), patch(
+            "algebras.commands.translate_command.determine_target_path",
+            return_value=target_file,
+        ), patch(
+            "algebras.commands.translate_command.click.echo"
+        ) as mock_echo, patch(
+            "builtins.print"
+        ):
+
+            # Call execute in default mode (no force, no only_missing)
+            translate_command.execute(force=False, only_missing=False)
+
+            # Verify the file was NOT skipped (no "Skipping" message)
+            skip_messages = [
+                call for call in mock_echo.call_args_list
+                if len(call[0]) > 0 and "Skipping" in str(call[0][0])
+            ]
+            assert len(skip_messages) == 0, "File should NOT be skipped when missing keys exist"
+
+            # Verify validate_language_files was called to check for missing keys
+            assert mock_validate.called, "validate_language_files should be called in default mode"
+
+            # Verify translation was attempted
+            assert mock_translator.translate_file.called, "Translation should be attempted for missing keys"
+
+    def test_default_mode_skips_complete_files_with_newer_mtime(self):
+        """
+        Test that default mode still skips files with newer mtime when they have no missing keys.
+        
+        This ensures the mtime optimization still works for truly up-to-date files.
+        """
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.get_languages.return_value = ["en", "de"]
+        mock_config.get_source_language.return_value = "en"
+        mock_config.check_deprecated_format.return_value = False
+        mock_config.get_source_files.return_value = None
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        mock_config.has_setting.return_value = False
+        mock_config.get_setting.side_effect = lambda key, default: {
+            "xlf.default_target_state": "translated",
+            "xlf.version": "1.2",
+            "po.mark_fuzzy": False,
+            "api.prompt": "",
+        }.get(key, default)
+
+        # Set up paths
+        source_file = "strings/values/generic_strings.xml"
+        target_file = "strings/values-de/generic_strings.xml"
+        source_basename = "generic_strings.xml"
+
+        # Mock FileScanner
+        mock_scanner = MagicMock(spec=FileScanner)
+        mock_scanner.group_files_by_language.return_value = {
+            "en": [source_file],
+            "de": [target_file],
+        }
+
+        # Mock Translator
+        mock_translator = MagicMock(spec=Translator)
+        mock_translator.set_verbose.return_value = None
+
+        # Mock validate_language_files to return NO missing keys
+        with patch(
+            "algebras.commands.translate_command.Config", return_value=mock_config
+        ), patch(
+            "algebras.commands.translate_command.FileScanner", return_value=mock_scanner
+        ), patch(
+            "algebras.commands.translate_command.Translator",
+            return_value=mock_translator,
+        ), patch(
+            "algebras.commands.translate_command.validate_language_files",
+            return_value=(True, set())  # No missing keys
+        ) as mock_validate, patch(
+            "builtins.open", mock_open()
+        ), patch(
+            "os.path.exists", return_value=True
+        ), patch(
+            "os.path.getmtime", side_effect=[1000, 2000]  # source older, target newer
+        ), patch(
+            "os.makedirs", return_value=None
+        ), patch(
+            "os.path.dirname", return_value="strings/values-de"
+        ), patch(
+            "os.path.basename", return_value=source_basename
+        ), patch(
+            "os.path.getsize", return_value=1024
+        ), patch(
+            "os.path.relpath", return_value=source_file
+        ), patch(
+            "algebras.commands.translate_command.determine_target_path",
+            return_value=target_file,
+        ), patch(
+            "algebras.commands.translate_command.click.echo"
+        ) as mock_echo, patch(
+            "builtins.print"
+        ):
+
+            # Call execute in default mode
+            translate_command.execute(force=False, only_missing=False)
+
+            # Verify validate_language_files was called
+            assert mock_validate.called, "validate_language_files should be called"
+
+            # Verify the file WAS skipped (optimization works)
+            skip_messages = [
+                call for call in mock_echo.call_args_list
+                if len(call[0]) > 0 and "Skipping" in str(call[0][0])
+            ]
+            assert len(skip_messages) > 0, "File should be skipped when no missing keys and newer mtime"
+
+            # Verify translation was NOT attempted
+            assert not mock_translator.translate_file.called, "Translation should not be attempted for complete files"
+
+    def test_default_mode_with_xml_plural_keys_missing(self):
+        """
+        Integration test for Android XML plural scenario from bug report.
+        
+        Tests the exact scenario: source XML has plural keys, target is missing them
+        but has newer mtime. Default mode should detect and translate missing plurals.
+        """
+        # Mock Config
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.get_languages.return_value = ["en", "de"]
+        mock_config.get_source_language.return_value = "en"
+        mock_config.check_deprecated_format.return_value = False
+        mock_config.get_source_files.return_value = None
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        mock_config.has_setting.return_value = False
+        mock_config.get_setting.side_effect = lambda key, default: {
+            "xlf.default_target_state": "translated",
+            "xlf.version": "1.2",
+            "po.mark_fuzzy": False,
+            "api.prompt": "",
+        }.get(key, default)
+
+        # Set up paths
+        source_file = "strings/values/generic_strings_2.xml"
+        target_file = "strings/values-de/generic_strings_2.xml"
+        source_basename = "generic_strings_2.xml"
+
+        # Mock FileScanner
+        mock_scanner = MagicMock(spec=FileScanner)
+        mock_scanner.group_files_by_language.return_value = {
+            "en": [source_file],
+            "de": [target_file],
+        }
+
+        # Mock Translator to return German translations for plurals
+        mock_translator = MagicMock(spec=Translator)
+        mock_translator.set_verbose.return_value = None
+        mock_translator.translate_file.return_value = {
+            "Quiz.timer_format.__plurals__": {"one": "%1$d Minute", "other": "%1$d Minuten"},
+            "Quiz.passing_score_points_format.__plurals__": {"one": "%1$d Punkt", "other": "%1$d Punkte"},
+            "Quiz.question_score_format.__plurals__": {"one": "%1$d Punkt erzielt", "other": "%1$d Punkte erzielt"}
+        }
+
+        # Mock validate_language_files to return missing plural keys
+        missing_keys = {
+            "Quiz.timer_format.__plurals__",
+            "Quiz.passing_score_points_format.__plurals__",
+            "Quiz.question_score_format.__plurals__"
+        }
+
+        # Track whether translation was called
+        translation_attempted = []
+        
+        def track_translate(*args, **kwargs):
+            translation_attempted.append(True)
+            return mock_translator.translate_file.return_value
+        
+        mock_translator.translate_file.side_effect = track_translate
+
+        # Patch dependencies
+        with patch(
+            "algebras.commands.translate_command.Config", return_value=mock_config
+        ), patch(
+            "algebras.commands.translate_command.FileScanner", return_value=mock_scanner
+        ), patch(
+            "algebras.commands.translate_command.Translator",
+            return_value=mock_translator,
+        ), patch(
+            "algebras.commands.translate_command.validate_language_files",
+            return_value=(False, missing_keys)
+        ) as mock_validate, patch(
+            "builtins.open", mock_open()
+        ), patch(
+            "os.path.exists", return_value=True
+        ), patch(
+            "os.path.getmtime", side_effect=[1000, 2000]  # source older, target newer
+        ), patch(
+            "os.makedirs", return_value=None
+        ), patch(
+            "os.path.dirname", return_value="strings/values-de"
+        ), patch(
+            "os.path.basename", return_value=source_basename
+        ), patch(
+            "os.path.getsize", return_value=1024
+        ), patch(
+            "os.path.relpath", return_value=source_file
+        ), patch(
+            "algebras.commands.translate_command.determine_target_path",
+            return_value=target_file,
+        ), patch(
+            "algebras.commands.translate_command.click.echo"
+        ) as mock_echo, patch(
+            "builtins.print"
+        ), patch(
+            "json.dump"
+        ):
+
+            # Call execute in default mode
+            translate_command.execute(force=False, only_missing=False)
+
+            # Verify validate_language_files was called
+            assert mock_validate.called, "validate_language_files should be called"
+
+            # Verify the file was NOT skipped (translation was attempted)
+            assert len(translation_attempted) > 0, \
+                "Translation should be attempted for missing plural keys"
+
+            # Verify no skip message was logged
+            skip_messages = [
+                call for call in mock_echo.call_args_list
+                if len(call[0]) > 0 and "Skipping" in str(call[0][0])
+            ]
+            assert len(skip_messages) == 0, \
+                "File should NOT be skipped when plural keys are missing"
