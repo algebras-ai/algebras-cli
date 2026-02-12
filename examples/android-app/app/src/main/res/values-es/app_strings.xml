@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="error_generic">Algo salió mal</string>
+    <string name="error_network">Ocurrió un error de red</string>
+    <string name="loading_message">Cargando...</string>
+    <string name="no_data_message">No hay datos disponibles</string>
+    <string name="retry_button">Reintentar</string>
+</resources>
