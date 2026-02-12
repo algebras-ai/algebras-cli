@@ -1,0 +1,33 @@
+/* 
+  Localizable.strings
+  MyiOSApp (Spanish)
+*/
+
+/* App UI strings */
+"app_name" = "Mi aplicación iOS";
+"welcome_message" = "¡Bienvenido a nuestra aplicación!";
+"login_button" = "Iniciar sesión";
+"logout_button" = "Cerrar sesión";
+"settings_title" = "Ajustes";
+"profile_title" = "Perfil";
+"save_button" = "Guardar";
+"cancel_button" = "Cancelar";
+
+/* Notifications */
+"notifications_title" = "Notificaciones";
+"no_notifications" = "Sin notificaciones";
+"notification_received" = "Tienes una nueva notificación";
+
+/* Errors */
+"error_network" = "Error de conexión de red. Por favor, inténtalo de nuevo.";
+"error_authentication" = "Autenticación fallida";
+"error_generic" = "Ha ocurrido un error";
+
+/* Plurals - iOS uses stringsdict for plurals, but simple cases can be in .strings */
+"items_count_zero" = "No hay elementos";
+"items_count_one" = "Un elemento";
+"items_count_other" = "%d elementos";
+
+/* Formatted strings */
+"greeting_user" = "¡Hola, %@!";
+"items_selected" = "%d de %d elementos seleccionados";
