@@ -695,6 +695,17 @@ class Translator:
                         texts_to_translate.append(source_value)
                         key_paths_list.append(key_path)
                         key_parts_list.append([key_path])  # Treat as single-level key
+                elif isinstance(source_value, dict):
+                    # Handle plural/dict values (e.g., Android XML plurals)
+                    # Each plural form (one, other, etc.) needs to be translated separately
+                    for plural_key, plural_value in source_value.items():
+                        if isinstance(plural_value, str) and plural_value.strip():
+                            # Create a composite key for this plural form (e.g., "Plural.tasks.__plurals__.one")
+                            composite_key = f"{key_path}.{plural_key}"
+                            texts_to_translate.append(plural_value)
+                            key_paths_list.append(composite_key)
+                            key_parts_list.append([key_path, plural_key])  # Store as nested structure
+                            print(f"DEBUG: ✓ Added plural form '{composite_key}' to translation queue")
             else:
                 # Try to treat it as a dot-notation path (nested format)
                 key_parts = key_path.split(".")
@@ -825,11 +836,25 @@ class Translator:
                     if len(key_parts) == 1:
                         # Flat format - set directly
                         updated_content[key_parts[0]] = normalized
+                    elif len(key_parts) == 2 and key_parts[0].endswith('.__plurals__'):
+                        # Handle plurals - reconstruct dictionary structure
+                        plural_base_key = key_parts[0]  # e.g., "Quiz.timer_format.__plurals__"
+                        plural_form = key_parts[1]      # e.g., "one" or "other"
+                        
+                        # Initialize plural dict if it doesn't exist
+                        if plural_base_key not in updated_content:
+                            updated_content[plural_base_key] = {}
+                        elif not isinstance(updated_content[plural_base_key], dict):
+                            # Convert to dict if it wasn't one already
+                            updated_content[plural_base_key] = {}
+                        
+                        # Set the plural form
+                        updated_content[plural_base_key][plural_form] = normalized
+                        print(f"  ✓ Translated plural: {key_path}")
                     else:
                         # Nested format - use nested value setter
                         set_nested_value(updated_content, key_parts, normalized)
                     batch_dict[key_path] = normalized
-                    print(f"  ✓ Translated: {key_path}")
 
             # Call callback if provided
             if on_batch_complete and batch_dict:
@@ -983,11 +1008,25 @@ class Translator:
                     if len(key_parts) == 1:
                         # Flat format - set directly
                         updated_content[key_parts[0]] = normalized
+                    elif len(key_parts) == 2 and key_parts[0].endswith('.__plurals__'):
+                        # Handle plurals - reconstruct dictionary structure
+                        plural_base_key = key_parts[0]  # e.g., "Quiz.timer_format.__plurals__"
+                        plural_form = key_parts[1]      # e.g., "one" or "other"
+                        
+                        # Initialize plural dict if it doesn't exist
+                        if plural_base_key not in updated_content:
+                            updated_content[plural_base_key] = {}
+                        elif not isinstance(updated_content[plural_base_key], dict):
+                            # Convert to dict if it wasn't one already
+                            updated_content[plural_base_key] = {}
+                        
+                        # Set the plural form
+                        updated_content[plural_base_key][plural_form] = normalized
+                        print(f"  ✓ Translated plural: {key_path}")
                     else:
                         # Nested format - use nested value setter
                         set_nested_value(updated_content, key_parts, normalized)
                     batch_dict[key_path] = normalized
-                    print(f"  ✓ Translated: {key_path}")
 
             # Call callback if provided
             if on_batch_complete and batch_dict:
