@@ -582,10 +582,21 @@ def _process_all_files(
                     target_mtime = os.path.getmtime(target_file)
 
                     if target_mtime > source_mtime and not only_missing:
-                        click.echo(
-                            f"  {Fore.YELLOW}Skipping {target_basename} (already up to date)\x1b[0m"
+                        # Check for missing keys even in default mode to avoid skipping files with incomplete translations
+                        is_valid, missing_keys_check = validate_language_files(
+                            source_file,
+                            target_file,
+                            source_language=source_language,
+                            target_language=target_lang,
+                            config=config,
                         )
-                        continue
+                        
+                        if not missing_keys_check:
+                            click.echo(
+                                f"  {Fore.YELLOW}Skipping {target_basename} (already up to date)\x1b[0m"
+                            )
+                            continue
+                        # If there are missing keys, continue to translation below
 
                 # Handle the translation based on mode (full or missing keys only)
                 if only_missing and os.path.exists(target_file):
