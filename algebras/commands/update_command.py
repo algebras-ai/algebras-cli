@@ -171,6 +171,7 @@ def identify_translation_issues(
             
             # Check for missing keys
             if check_missing_keys:
+                # #endregion
                 is_valid, missing_keys = validate_language_files(src_file, tgt_file)
                 if not is_valid:
                     results["missing_keys"] = missing_keys

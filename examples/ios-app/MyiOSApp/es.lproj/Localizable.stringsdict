@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Items count with proper plural rules for Spanish -->
+    <key>items_count</key>
+    <dict>
+        <key>NSStringLocalizedFormatKey</key>
+        <string>%#@item_count@</string>
+        <key>item_count</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>d</string>
+            <key>zero</key>
+            <string>No hay elementos</string>
+            <key>one</key>
+            <string>Un elemento</string>
+            <key>other</key>
+            <string>%d elementos</string>
+        </dict>
+    </dict>
+    
+    <!-- Notifications count with proper plural rules for Spanish -->
+    <key>notifications_count</key>
+    <dict>
+        <key>NSStringLocalizedFormatKey</key>
+        <string>%#@notification_count@</string>
+        <key>notification_count</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>d</string>
+            <key>zero</key>
+            <string>Sin notificaciones</string>
+            <key>one</key>
+            <string>Una notificación</string>
+            <key>other</key>
+            <string>%d notificaciones</string>
+        </dict>
+    </dict>
+    
+    <!-- Days remaining -->
+    <key>days_remaining</key>
+    <dict>
+        <key>NSStringLocalizedFormatKey</key>
+        <string>%#@day_count@</string>
+        <key>day_count</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>d</string>
+            <key>zero</key>
+            <string>No quedan días</string>
+            <key>one</key>
+            <string>Queda un día</string>
+            <key>other</key>
+            <string>Quedan %d días</string>
+        </dict>
+    </dict>
+</dict>
+</plist>

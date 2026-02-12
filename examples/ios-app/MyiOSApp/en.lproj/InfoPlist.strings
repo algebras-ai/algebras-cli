@@ -1,0 +1,16 @@
+/* 
+  InfoPlist.strings
+  MyiOSApp (English)
+  
+  Localized values for Info.plist keys
+*/
+
+/* Display name of the app */
+CFBundleDisplayName = "My iOS App";
+CFBundleName = "MyiOSApp";
+
+/* Privacy permission descriptions */
+NSCameraUsageDescription = "This app needs access to your camera to take photos.";
+NSPhotoLibraryUsageDescription = "This app needs access to your photo library to select images.";
+NSLocationWhenInUseUsageDescription = "This app needs access to your location to show nearby places.";
+NSMicrophoneUsageDescription = "This app needs access to your microphone for voice recording.";
