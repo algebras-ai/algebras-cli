@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional, Callable, Any
 
 from algebras.services.api_client import AlgebrasAIClient
+from algebras.services.icu_message_service import ICUMessageService
 
 
 @dataclass
@@ -48,6 +49,7 @@ class BatchProcessor:
         self.max_parallel_batches = max_parallel_batches
         self.provider = provider
         self.verbose = verbose
+        self.icu_service = ICUMessageService()
 
     def process(
         self,
@@ -76,12 +78,16 @@ class BatchProcessor:
         Returns:
             BatchResult with translations and statistics
         """
+        # Flatten targeted ICU messages into literal segments first.
+        # This preserves syntax tokens while translating only literal text.
+        preprocessed_texts, icu_mapping = self.icu_service.preprocess_texts(texts)
+
         # Filter empty strings and maintain mapping
         non_empty_texts = []
         empty_indices = []  # Track which indices were empty
         index_mapping = []  # Maps original index to non-empty index
 
-        for i, text in enumerate(texts):
+        for i, text in enumerate(preprocessed_texts):
             if isinstance(text, str) and text.strip() == "":
                 empty_indices.append(i)
                 index_mapping.append(None)  # Mark as empty
@@ -91,13 +97,18 @@ class BatchProcessor:
 
         # If all texts are empty, return early
         if not non_empty_texts:
-            return BatchResult(
-                translations=[""] * len(texts),
+            empty_result = BatchResult(
+                translations=[""] * len(preprocessed_texts),
                 error_stats={"5xx": [], "429": [], "other": []},
                 failed_batches=[],
                 successful_batches=0,
                 total_batches=0,
             )
+            if icu_mapping:
+                empty_result.translations = self.icu_service.postprocess_translations(
+                    icu_mapping, empty_result.translations
+                )
+            return empty_result
 
         # Split into batches
         total_texts = len(non_empty_texts)
@@ -108,7 +119,7 @@ class BatchProcessor:
         )
 
         if self.provider == "algebras-ai":
-            return self._process_algebras_ai(
+            result = self._process_algebras_ai(
                 non_empty_texts,
                 source_lang,
                 target_lang,
@@ -118,10 +129,10 @@ class BatchProcessor:
                 on_batch_complete,
                 empty_indices,
                 index_mapping,
-                len(texts),
+                len(preprocessed_texts),
             )
         else:
-            return self._process_other_provider(
+            result = self._process_other_provider(
                 non_empty_texts,
                 source_lang,
                 target_lang,
@@ -132,8 +143,15 @@ class BatchProcessor:
                 translate_text_func,
                 empty_indices,
                 index_mapping,
-                len(texts),
+                len(preprocessed_texts),
             )
+
+        if icu_mapping:
+            result.translations = self.icu_service.postprocess_translations(
+                icu_mapping, result.translations
+            )
+
+        return result
 
     def _process_algebras_ai(
         self,
