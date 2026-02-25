@@ -52,6 +52,7 @@ from algebras.services.rate_limiter import RateLimiter
 from algebras.services.retry_handler import RetryHandler
 from algebras.services.api_client import AlgebrasAIClient
 from algebras.services.batch_processor import BatchProcessor, BatchResult
+from algebras.services.icu_message_service import ICUMessageService
 from algebras.services.string_normalizer import StringNormalizer
 from algebras.services.strategies.strategy_factory import TranslationStrategyFactory
 
@@ -175,6 +176,7 @@ class Translator:
 
         # Initialize string normalizer
         self.string_normalizer = StringNormalizer(self.config)
+        self.icu_service = ICUMessageService()
 
         # Initialize custom prompt
         self.custom_prompt = ""
@@ -276,17 +278,25 @@ class Translator:
         print(
             f"Cache miss: Translating '{text[:30]}...' ({source_lang} → {target_lang})"
         )
-        provider = self.api_config.get("provider", "algebras-ai")
-
-        if provider == "algebras-ai":
-            translation = self.api_client.translate(
+        # ICU MVP: protect plural/select/selectordinal syntax by translating
+        # only literal segments and rebuilding from parsed structure.
+        if self.icu_service.is_icu(text):
+            prepared = self.icu_service.prepare(text)
+            translated_segments = [
+                self._translate_non_icu_text(
+                    segment, source_lang, target_lang, ui_safe, glossary_id
+                )
+                for segment in prepared.translatable_segments
+            ]
+            translation = self.icu_service.rebuild(prepared, translated_segments)
+            if not self.icu_service.validate(translation):
+                print(
+                    "  ⚠ ICU validation failed in translate_text; keeping raw translated output."
+                )
+        else:
+            translation = self._translate_non_icu_text(
                 text, source_lang, target_lang, ui_safe, glossary_id
             )
-        else:
-            raise ValueError(f"Unsupported provider: {provider}")
-
-        # Apply normalization to the translation
-        translation = self.string_normalizer.normalize(text, translation)
 
         # Update cache with new translation
         self.cache.set(cache_key, translation)
@@ -295,6 +305,24 @@ class Translator:
         )
 
         return translation
+
+    def _translate_non_icu_text(
+        self,
+        text: str,
+        source_lang: str,
+        target_lang: str,
+        ui_safe: bool = False,
+        glossary_id: Optional[str] = None,
+    ) -> str:
+        """Translate plain text and normalize output."""
+        provider = self.api_config.get("provider", "algebras-ai")
+        if provider == "algebras-ai":
+            translation = self.api_client.translate(
+                text, source_lang, target_lang, ui_safe, glossary_id
+            )
+        else:
+            raise ValueError(f"Unsupported provider: {provider}")
+        return self.string_normalizer.normalize(text, translation)
 
     def translate_file(
         self,

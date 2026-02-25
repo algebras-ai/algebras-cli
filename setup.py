@@ -13,6 +13,7 @@ setup(
         "tqdm>=4.65.0",
         "beautifulsoup4>=4.12.0",
         "openpyxl>=3.0.0",
+        "pyicumessageformat>=1.0.0",
     ],
     entry_points={
         "console_scripts": [
