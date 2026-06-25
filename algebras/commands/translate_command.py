@@ -59,6 +59,7 @@ from algebras.utils.nested_structure_handler import (
 from algebras.utils.lang_validator import (
     validate_language_files,
     extract_all_keys,
+    get_key_value,
 )
 from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
@@ -78,7 +79,7 @@ from algebras.utils.file_format_detector import is_flat_format, detect_format
 
 def execute(
     language: Optional[str] = None,
-    force: bool = False,
+    force: Optional[str] = None,  # None=no force, "__all__"=force all, "key1,key2"=force specific keys
     only_missing: bool = False,
     outdated_files: List[Tuple[str, str]] = None,
     missing_keys_files: List[Tuple[str, Set[str], str]] = None,
@@ -284,12 +285,18 @@ def execute(
 
     # If no specific files were provided, scan and process all files
     if not outdated_files and not missing_keys_files and not outdated_keys_files:
+        force_bool = force == "__all__"
+        force_keys: Optional[Set[str]] = (
+            set(k.strip() for k in force.split(",") if k.strip())
+            if force and force != "__all__"
+            else None
+        )
         _process_all_files(
             config,
             source_language,
             target_languages,
             translator,
-            force,
+            force_bool,
             only_missing,
             ui_safe,
             glossary_id,
@@ -298,6 +305,7 @@ def execute(
             xlf_version,
             po_mark_fuzzy,
             verbose,
+            force_keys=force_keys,
         )
         return
 
@@ -370,6 +378,7 @@ def _process_all_files(
     xlf_version: str,
     po_mark_fuzzy: bool,
     verbose: bool,
+    force_keys: Optional[Set[str]] = None,
 ) -> None:
     """
     Scan and process all files for translation.
@@ -591,12 +600,94 @@ def _process_all_files(
                             config=config,
                         )
                         
-                        if not missing_keys_check:
+                        if not missing_keys_check and force_keys is None:
                             click.echo(
                                 f"  {Fore.YELLOW}Skipping {target_basename} (already up to date)\x1b[0m"
                             )
                             continue
-                        # If there are missing keys, continue to translation below
+                        # If there are missing keys (or force_keys is set), continue to translation below
+
+                # Handle --force "key1,key2" — retranslate only specific keys
+                if force_keys is not None and os.path.exists(target_file):
+                    click.echo(
+                        f"  {Fore.GREEN}Force-retranslating {len(force_keys)} specific key(s) in {target_basename}...\x1b[0m"
+                    )
+                    try:
+                        handler = get_handler(source_file, config)
+                        (
+                            source_content,
+                            target_content,
+                            source_raw_content,
+                            target_raw_content,
+                        ) = _load_file_contents(
+                            source_file,
+                            target_file,
+                            handler,
+                            source_language,
+                            target_lang,
+                            config,
+                            verbose,
+                            xlf_version,
+                        )
+                        use_in_place = _should_use_in_place(target_file, regenerate_from_scratch)
+                        keys_to_update = set(force_keys)
+
+                        if detect_format(source_file) == FileFormat.TS:
+                            basename = os.path.basename(target_file)
+                            export_name = basename.split(".")[0]
+                            incremental_writer = IncrementalFileWriter(target_file, "ts", export_name)
+
+                            def on_batch_complete(
+                                batch_results: Dict[str, str], batch_index: int
+                            ):
+                                incremental_writer.write_batch(batch_results, batch_index)
+
+                            translator.translate_missing_keys_batch(
+                                source_content,
+                                target_content,
+                                list(force_keys),
+                                target_lang,
+                                ui_safe,
+                                glossary_id,
+                                on_batch_complete=on_batch_complete,
+                                source_file_path=source_file,
+                            )
+                            incremental_writer.finish()
+                        else:
+                            translated_content = translator.translate_missing_keys_batch(
+                                source_content,
+                                target_content,
+                                list(force_keys),
+                                target_lang,
+                                ui_safe,
+                                glossary_id,
+                                source_file_path=source_file,
+                            )
+                            _write_translated_content(
+                                target_file,
+                                translated_content,
+                                handler,
+                                keys_to_update,
+                                use_in_place,
+                                source_file=source_file,
+                                source_language=source_language,
+                                target_language=target_lang,
+                                xlf_target_state=xlf_target_state,
+                                xlf_version=xlf_version,
+                                po_mark_fuzzy=po_mark_fuzzy,
+                                source_raw_content=source_raw_content,
+                                target_raw_content=target_raw_content,
+                                verbose=verbose,
+                            )
+
+                        click.echo(
+                            f"  {Fore.GREEN}✓ Force-updated {len(force_keys)} key(s) in {target_file}\x1b[0m"
+                        )
+                    except Exception as e:
+                        click.echo(
+                            f"  {Fore.RED}Error force-translating keys in {source_basename}: {str(e)}\x1b[0m"
+                        )
+                    continue
 
                 # Handle the translation based on mode (full or missing keys only)
                 if only_missing and os.path.exists(target_file):
@@ -1021,14 +1112,15 @@ def _process_outdated_files(
             # Find keys only in source (missing keys)
             missing_keys = source_keys - target_keys
 
-            # Also check for keys that exist in target but have empty values (for CSV/TSV and other flat formats)
-            if is_flat_format(detect_format(source_file)):
-                common_keys = source_keys & target_keys
-                for key in common_keys:
+            # Also check for keys that exist in target but have empty values (all formats)
+            common_keys_for_empty_check = source_keys & target_keys
+            for key in common_keys_for_empty_check:
+                if is_flat_format(detect_format(source_file)):
                     target_value = target_content.get(key)
-                    # Treat empty string values as missing keys
-                    if target_value == "" or target_value is None:
-                        missing_keys.add(key)
+                else:
+                    target_value = get_key_value(target_content, key)
+                if target_value == "" or target_value is None:
+                    missing_keys.add(key)
 
             # Report what we found
             if missing_keys:

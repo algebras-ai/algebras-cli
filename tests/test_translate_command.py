@@ -66,8 +66,8 @@ class TestTranslateCommand:
                 monkeypatch.setattr("algebras.utils.path_utils.determine_target_path", mock_determine_target_path)
                 
                 # Call the function
-                translate_command.execute(force=True)
-                
+                translate_command.execute(force="__all__")
+
                 # Files should preserve their original names since they're in language-specific directories
                 fr_target = os.path.join(fr_dir, "common.json")
                 es_target = os.path.join(es_dir, "common.json")
@@ -146,8 +146,8 @@ class TestTranslateCommand:
                 monkeypatch.setattr("algebras.utils.path_utils.determine_target_path", mock_determine_target_path)
                 
                 # Call the function
-                translate_command.execute(force=True)
-                
+                translate_command.execute(force="__all__")
+
                 # Check that files were created with correct names (no language suffixes)
                 android_target = os.path.join(android_ar_dir, "generic_strings.xml")  # NOT generic_strings.ar.xml
                 ios_target = os.path.join(ios_ar_dir, "Localizable.strings")  # NOT Localizable.ar.strings
