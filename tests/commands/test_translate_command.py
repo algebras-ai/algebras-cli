@@ -1012,7 +1012,7 @@ class TestTranslateCommand:
         ), patch(
             "os.path.getsize", return_value=1024
         ), patch(
-            "os.path.getmtime", side_effect=[2000, 1000]  # source newer → skip mtime block
+            "os.path.getmtime", side_effect=lambda p: 1000 if "fr" in p else 2000  # source newer → skip mtime block
         ), patch(
             "os.path.relpath", return_value=source_file
         ), patch(
