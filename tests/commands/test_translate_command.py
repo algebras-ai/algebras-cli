@@ -969,85 +969,33 @@ class TestTranslateCommand:
             )
 
     def test_execute_force_specific_keys(self):
-        """Test that execute(force="key1,key2") calls translate_missing_keys_batch with those keys only"""
+        """Test that execute(force="key1,key2") parses keys and passes force_keys to _process_all_files"""
         mock_config = MagicMock(spec=Config)
         mock_config.exists.return_value = True
         mock_config.get_languages.return_value = ["en", "fr"]
         mock_config.get_source_language.return_value = "en"
         mock_config.get_setting.side_effect = lambda key, default: default
-        mock_config.get_source_files.return_value = None
-
-        source_file = "locales/en/messages.json"
-        target_file = "locales/fr/messages.json"
-
-        mock_scanner = MagicMock(spec=FileScanner)
-        mock_scanner.group_files_by_language.return_value = {
-            "en": [source_file],
-            "fr": [target_file],
-        }
-
-        mock_translator = MagicMock(spec=Translator)
-        mock_translator.translate_missing_keys_batch.return_value = {
-            "login": {"title": "Connexion"},
-            "nav": {"home": "Accueil"},
-        }
-
-        source_content = {"login": {"title": "Login"}, "nav": {"home": "Home"}, "other": "Keep"}
-        target_content = {"login": {"title": "Old"}, "nav": {"home": "Old"}, "other": "Garder"}
 
         with patch(
             "algebras.commands.translate_command.Config", return_value=mock_config
         ), patch(
-            "algebras.commands.translate_command.FileScanner", return_value=mock_scanner
+            "algebras.commands.translate_command.Translator", return_value=MagicMock()
         ), patch(
-            "algebras.commands.translate_command.Translator", return_value=mock_translator
-        ), patch(
-            "os.path.exists", return_value=True
-        ), patch(
-            "os.makedirs", return_value=None
-        ), patch(
-            "os.path.dirname", side_effect=lambda p: p.rsplit("/", 1)[0]
-        ), patch(
-            "os.path.basename", side_effect=lambda p: p.rsplit("/", 1)[-1]
-        ), patch(
-            "os.path.getsize", return_value=1024
-        ), patch(
-            "os.path.getmtime", side_effect=lambda p: 1000 if "fr" in p else 2000  # source newer → skip mtime block
-        ), patch(
-            "os.path.relpath", return_value=source_file
-        ), patch(
-            "algebras.commands.translate_command.determine_target_path",
-            return_value=target_file,
-        ), patch(
-            "algebras.commands.translate_command._load_file_contents",
-            return_value=(source_content, target_content, None, None),
-        ), patch(
-            "algebras.commands.translate_command._should_use_in_place", return_value=False
-        ), patch(
-            "algebras.commands.translate_command._write_translated_content"
-        ), patch(
-            "algebras.commands.translate_command.detect_format", return_value=None
-        ), patch(
-            "algebras.commands.translate_command.get_handler", return_value=MagicMock()
-        ), patch(
+            "algebras.commands.translate_command._process_all_files"
+        ) as mock_process_all, patch(
             "algebras.commands.translate_command.click.echo"
-        ), patch(
-            "builtins.print"
         ):
             translate_command.execute(force="login.title,nav.home")
 
-            # translate_missing_keys_batch must be called with the two specified keys
-            assert mock_translator.translate_missing_keys_batch.called, \
-                "translate_missing_keys_batch should be called for --force key mode"
+            mock_process_all.assert_called_once()
+            call_kwargs = mock_process_all.call_args[1]
+            assert call_kwargs.get("force_keys") == {"login.title", "nav.home"}, \
+                f"Expected force_keys={{'login.title', 'nav.home'}}, got {call_kwargs.get('force_keys')}"
 
-            call_args = mock_translator.translate_missing_keys_batch.call_args
-            keys_arg = call_args[0][2]  # third positional: list of keys
-            assert set(keys_arg) == {"login.title", "nav.home"}, \
-                f"Expected force keys, got {keys_arg}"
-
-            # translate_file must NOT be called (full retranslation not triggered)
-            assert not mock_translator.translate_file.called, \
-                "translate_file should NOT be called when force keys are specified"
+            # force_bool (5th positional arg) must be False — not a full retranslation
+            force_bool_arg = mock_process_all.call_args[0][4]
+            assert force_bool_arg is False, \
+                f"force_bool should be False for key-specific force, got {force_bool_arg}"
 
     def test_empty_value_nested_format_triggers_translation_in_process_outdated_files(self):
         """
