@@ -369,8 +369,8 @@ class TestTranslateCommand:
             "builtins.print"
         ) as mock_print:
 
-            # Call execute with force=True
-            translate_command.execute(force=True)
+            # Call execute with force="__all__"
+            translate_command.execute(force="__all__")
 
             # Verify translation was attempted with force
             mock_echo.assert_any_call(
@@ -413,7 +413,7 @@ class TestTranslateCommand:
             # Verify execute was called with the right arguments (updated with new parameters)
             mock_execute.assert_called_once_with(
                 None,
-                False,
+                None,
                 False,
                 ui_safe=False,
                 verbose=False,
@@ -434,7 +434,7 @@ class TestTranslateCommand:
             # Verify execute was called with the right arguments
             mock_execute.assert_called_with(
                 "fr",
-                True,
+                "__all__",
                 False,
                 ui_safe=False,
                 verbose=False,
@@ -455,7 +455,7 @@ class TestTranslateCommand:
             # Verify execute was called with the right arguments
             mock_execute.assert_called_with(
                 None,
-                False,
+                None,
                 False,
                 ui_safe=True,
                 verbose=False,
@@ -943,3 +943,117 @@ class TestTranslateCommand:
             ]
             assert len(skip_messages) == 0, \
                 "File should NOT be skipped when plural keys are missing"
+
+    def test_force_key_cli_parsing(self):
+        """Test that --force "key1,key2" is passed as a string to execute()"""
+        runner = CliRunner()
+
+        with patch("algebras.commands.translate_command.execute") as mock_execute:
+            from algebras.cli import translate
+
+            result = runner.invoke(translate, ["--force", "login.title,nav.home"])
+
+            assert result.exit_code == 0
+            mock_execute.assert_called_once_with(
+                None,
+                "login.title,nav.home",
+                False,
+                ui_safe=False,
+                verbose=False,
+                batch_size=None,
+                max_parallel_batches=None,
+                glossary_id=None,
+                prompt_file=None,
+                regenerate_from_scratch=False,
+                config_file=None,
+            )
+
+    def test_execute_force_specific_keys(self):
+        """Test that execute(force="key1,key2") parses keys and passes force_keys to _process_all_files"""
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_source_language.return_value = "en"
+        mock_config.get_setting.side_effect = lambda key, default: default
+
+        with patch(
+            "algebras.commands.translate_command.Config", return_value=mock_config
+        ), patch(
+            "algebras.commands.translate_command.Translator", return_value=MagicMock()
+        ), patch(
+            "algebras.commands.translate_command._process_all_files"
+        ) as mock_process_all, patch(
+            "algebras.commands.translate_command.click.echo"
+        ):
+            translate_command.execute(force="login.title,nav.home")
+
+            mock_process_all.assert_called_once()
+            call_kwargs = mock_process_all.call_args[1]
+            assert call_kwargs.get("force_keys") == {"login.title", "nav.home"}, \
+                f"Expected force_keys={{'login.title', 'nav.home'}}, got {call_kwargs.get('force_keys')}"
+
+            # force_bool (5th positional arg) must be False — not a full retranslation
+            force_bool_arg = mock_process_all.call_args[0][4]
+            assert force_bool_arg is False, \
+                f"force_bool should be False for key-specific force, got {force_bool_arg}"
+
+    def test_empty_value_nested_format_triggers_translation_in_process_outdated_files(self):
+        """
+        Regression: keys with empty-string values in nested JSON target files should be
+        treated as missing in _process_outdated_files (previously only flat formats were handled).
+        """
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_source_language.return_value = "en"
+        mock_config.get_setting.side_effect = lambda key, default: default
+
+        source_file = "locales/en/messages.json"
+        target_file = "locales/fr/messages.json"
+
+        # Source has a key; target has the same key but with an empty string value
+        source_content = {"greeting": "Hello"}
+        target_content = {"greeting": ""}  # empty value — should trigger retranslation
+
+        mock_translator = MagicMock(spec=Translator)
+        mock_translator.translate_missing_keys_batch.return_value = {"greeting": "Bonjour"}
+
+        # handler.extract_keys returns {"greeting"} for both source and target
+        mock_handler = MagicMock()
+        mock_handler.extract_keys.return_value = {"greeting"}
+
+        with patch(
+            "algebras.commands.translate_command.Config", return_value=mock_config
+        ), patch(
+            "algebras.commands.translate_command.Translator", return_value=mock_translator
+        ), patch(
+            "algebras.commands.translate_command._load_file_contents",
+            return_value=(source_content, target_content, None, None),
+        ), patch(
+            "algebras.commands.translate_command.get_handler", return_value=mock_handler
+        ), patch(
+            "algebras.commands.translate_command.is_flat_format", return_value=False
+        ), patch(
+            "algebras.commands.translate_command.detect_format", return_value=None
+        ), patch(
+            "algebras.commands.translate_command._should_use_in_place", return_value=False
+        ), patch(
+            "algebras.commands.translate_command._write_translated_content"
+        ), patch(
+            "algebras.commands.translate_command.click.echo"
+        ), patch(
+            "builtins.print"
+        ):
+            # Pass pre-computed outdated_files list — routes to _process_outdated_files
+            translate_command.execute(
+                outdated_files=[(target_file, source_file)]
+            )
+
+            # translate_missing_keys_batch must be called because "greeting" has an empty value
+            assert mock_translator.translate_missing_keys_batch.called, \
+                "translate_missing_keys_batch should be called for empty-value keys in nested JSON"
+
+            call_args = mock_translator.translate_missing_keys_batch.call_args
+            keys_arg = call_args[0][2]  # third positional: list of keys
+            assert "greeting" in keys_arg, \
+                f"'greeting' should be treated as missing (empty value), got keys={keys_arg}"

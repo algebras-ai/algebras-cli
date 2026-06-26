@@ -52,7 +52,13 @@ def add(ctx, language):
 
 @cli.command("translate")
 @click.option("--language", "-l", help="Translate only the specified language.")
-@click.option("--force", is_flag=True, help="Force translation even if files are up to date.")
+@click.option(
+    "--force",
+    default=None,
+    is_flag=False,
+    flag_value="__all__",
+    help='Force translation even if files are up to date. Optionally pass comma-separated key names to force only specific keys (e.g. --force "key1,key2").',
+)
 @click.option("--only-missing", is_flag=True, help="Only translate keys that are missing in the target files.")
 @click.option("--ui-safe", is_flag=True, help="Ensure translations will not exceed the original text length.")
 @click.option("--verbose", is_flag=True, help="Show detailed logs of the translation process.")
