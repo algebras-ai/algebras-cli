@@ -12,6 +12,7 @@ from algebras.commands import init_command, add_command
 from algebras.commands import translate_command, update_command
 from algebras.commands import review_command, status_command
 from algebras.commands import configure_command, glossary_push_command
+from algebras.commands import glossary_download_command, glossary_list_command
 from algebras.commands import healthcheck_command
 
 # Initialize colorama
@@ -152,6 +153,31 @@ def configure(ctx, provider, model, path_rules, batch_size, max_parallel_batches
 def glossary():
     """Manage glossaries for translation."""
     pass
+
+
+@glossary.command("list")
+@click.option("--format", type=click.Choice(['console', 'json'], case_sensitive=False), default='console', help="Output format (console or json).")
+@click.option("--limit", default=100, type=int, help="Maximum number of glossaries to return (default: 100)")
+@click.option("--page", default=1, type=int, help="Page number (default: 1)")
+@click.option("--debug", is_flag=True, help="Enable debug mode to log requests")
+@click.pass_context
+def glossary_list(ctx, format, limit, page, debug):
+    """List glossaries available to your API key."""
+    config_file = ctx.obj.get('config_file') if ctx.obj else None
+    glossary_list_command.execute(output_format=format, limit=limit, page=page, debug=debug, config_file=config_file)
+
+
+@glossary.command("download")
+@click.argument("glossary_id")
+@click.option("--output", "-o", required=True, type=click.Path(), help="Path to write the downloaded glossary JSON")
+@click.option("--format", type=click.Choice(['console', 'json'], case_sensitive=False), default='console', help="Output format (console or json).")
+@click.option("--limit", default=100, type=int, help="Number of terms to fetch per page (default: 100)")
+@click.option("--debug", is_flag=True, help="Enable debug mode to log requests")
+@click.pass_context
+def glossary_download(ctx, glossary_id, output, format, limit, debug):
+    """Download a glossary and its terms as JSON."""
+    config_file = ctx.obj.get('config_file') if ctx.obj else None
+    glossary_download_command.execute(glossary_id, output, output_format=format, limit=limit, debug=debug, config_file=config_file)
 
 
 @glossary.command("push")
