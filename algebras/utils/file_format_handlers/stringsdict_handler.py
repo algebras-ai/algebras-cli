@@ -43,18 +43,25 @@ class StringsDictHandler(FileFormatHandler):
         # For StringsDict, content should be the translated flat dict
         # We need the raw structure to update it
         raw_content = kwargs.get("raw_content")
+        source_raw_content = kwargs.get("source_raw_content")
         if raw_content is None:
             # If no raw content provided, try to read existing file
             import os
             if os.path.exists(file_path):
                 raw_content = read_ios_stringsdict_file(file_path)
+            elif source_raw_content is not None:
+                # New target file: start empty, missing keys are filled in
+                # from source_raw_content below
+                raw_content = {}
             else:
-                # If file doesn't exist, we can't write without raw structure
+                # If file doesn't exist and there's no source structure to
+                # build from, we can't write without raw structure
                 raise ValueError(
                     "StringsDict write requires raw_content in kwargs. "
                     "Either provide raw_content or ensure target file exists."
                 )
-        
-        # Update the raw structure with translations
-        updated_content = update_translatable_strings(raw_content, content)
+
+        # Update the raw structure with translations, filling in any keys
+        # missing from raw_content using source_raw_content as a template
+        updated_content = update_translatable_strings(raw_content, content, source_raw_content)
         write_ios_stringsdict_file(file_path, updated_content)

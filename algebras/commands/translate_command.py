@@ -821,21 +821,25 @@ def _process_all_files(
                     )
                     # For .stringsdict files, we need to load the target file to get the structure
                     if source_file.endswith(".stringsdict"):
-                        # Load the target file if it exists to preserve structure
+                        # Load the source structure as a template for any key
+                        # missing from the target (new source keys, or the
+                        # target not existing yet)
+                        source_content_raw = read_ios_stringsdict_file(source_file)
                         if os.path.exists(target_file):
                             target_content_raw = read_ios_stringsdict_file(target_file)
                         else:
-                            # If target file doesn't exist, use source file as template
-                            target_content_raw = read_ios_stringsdict_file(source_file)
+                            target_content_raw = {}
 
                         # Translate the file
                         translated_content = translator.translate_file(
                             source_file, target_lang, ui_safe, glossary_id
                         )
 
-                        # Update the target structure with translations
+                        # Update the target structure with translations,
+                        # filling in any keys missing from the target using
+                        # source_content_raw as a template
                         updated_content = update_translatable_strings(
-                            target_content_raw, translated_content
+                            target_content_raw, translated_content, source_content_raw
                         )
                         write_ios_stringsdict_file(target_file, updated_content)
                     elif source_file.endswith((".csv", ".tsv")):
@@ -1733,6 +1737,7 @@ def _write_translated_content(
         )
     elif format_type == FileFormat.STRINGSDICT:
         kwargs["raw_content"] = target_raw_content
+        kwargs["source_raw_content"] = source_raw_content
     elif format_type == FileFormat.HTML:
         if source_file is None:
             raise ValueError("HTML write requires source_file")
