@@ -20,15 +20,14 @@ and use it as a structural template - update_translatable_strings now copies
 over any entry that exists in the source but not yet in the target before
 applying translations, so newly-translated keys actually get written.
 
-The fixture data below is derived from the real key/value pairs the
-reporter's app ships in `evolve_all_iOS (1).strings`, reshaped into
-.stringsdict pluralized entries so the test matches the real bug (a
-Localizable.stringsdict file, 54 missing keys, `az` target language).
+The fixture data below is a self-contained stand-in for the real
+Localizable.stringsdict shape the bug was reported against (61 source keys,
+54 missing from the target, `az` target language) - it doesn't depend on
+any external file.
 """
 
 import copy
 import os
-import re
 import tempfile
 
 import pytest
@@ -42,20 +41,74 @@ from algebras.utils.ios_stringsdict_handler import (
 from algebras.utils.file_format_handlers.stringsdict_handler import StringsDictHandler
 
 
-STRINGS_FIXTURE_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "evolve_all_iOS (1).strings"
-)
+_STRINGS_FIXTURE_KEYS = [
+    ("Auth.eula", "user agreement"),
+    ("Auth.privacy_policy", "privacy policy"),
+    ("Auth.sign_in_with", "Sign in with %1$s"),
+    ("Auth.user_agreement", "By registering, I agree to the terms"),
+    ("Auth.welcome_disclaimer", "Hi! Join us for free to get started"),
+    ("Chat.comment_hint", "Your comment..."),
+    ("Chat.empty_placeholder", "While there are no messages"),
+    ("Chat.publish", "Send"),
+    ("Chat.published", "Your comment has been published"),
+    ("Chat.publishing", "Publishing your comment"),
+    ("Chat.updated", "Your comment has been updated"),
+    ("Chat.updating", "Updating your comment"),
+    ("Chat.write_comment", "Write a comment..."),
+    ("Checklist.dropdown_hint", "Choose an option"),
+    ("Checklist.dropdown_title", "Your answer"),
+    ("Checklist.multiple_answers", "You can choose up to %1$d options"),
+    ("Checklist.single_answer", "You can choose 1 option"),
+    ("Common.and", "and"),
+    ("Common.cancel", "Cancel"),
+    ("Common.confirm_delete", "Yes, delete"),
+    ("Common.congrats", "Congratulate"),
+    ("Common.continue", "Continue"),
+    ("Common.course_completed", "Course is over"),
+    ("Common.delete", "Delete"),
+    ("Common.deleting", "Deleting"),
+    ("Common.dislike", "Dislike"),
+    ("Common.done", "Done"),
+    ("Common.edit", "Edit"),
+    ("Common.error", "Error"),
+    ("Common.error_title", "Something went wrong, please try again later"),
+    ("Common.file", "File"),
+    ("Common.icon", "icon"),
+    ("Common.like", "Like"),
+    ("Common.loading", "Loading"),
+    ("Common.media", "media"),
+    ("Common.more", "more"),
+    ("Common.not_now", "Not now"),
+    ("Common.ok", "OK"),
+    ("Common.photo", "Photo"),
+    ("Common.picker_select", "Select"),
+    ("Common.read_all", "Read all"),
+    ("Common.save", "Save"),
+    ("Common.send", "Send"),
+    ("Common.task", "Task"),
+    ("Common.try_again", "Try again"),
+    ("Common.untitled_file", "untitled"),
+    ("Common.update", "Update"),
+    ("Common.video", "Video"),
+    ("Course.all_information", "All course information"),
+    ("Course.all_information_title", "About course"),
+    ("Course.applicant_start", "Start"),
+    ("Course.buy_description", "Pay once, get unlimited access"),
+    ("Course.buy_for", "Buy here for %1$s"),
+    ("Course.chapter", "Chapter %1$d"),
+    ("Course.dates_current", "Finishes on %1$s"),
+    ("Course.dates_future", "Runs from %1$s to %2$s"),
+    ("Course.dates_past", "Took place from %1$s to %2$s"),
+    ("Course.day", "Day %1$d"),
+    ("Course.empty_days_description", "The course schedule is coming soon"),
+    ("Course.excluded", "You were excluded"),
+    ("Course.in_progress", "%1$s out of %2$s"),
+]
 
 
 def _load_strings_keys(limit=None):
-    """Parse `"Key" = "Value";` pairs out of the reporter's .strings file."""
-    pairs = []
-    with open(STRINGS_FIXTURE_PATH, encoding="utf-8") as f:
-        for line in f:
-            m = re.match(r'^\s*"([^"]+)"\s*=\s*"(.*)"\s*;\s*$', line)
-            if m:
-                pairs.append((m.group(1), m.group(2)))
-    return pairs[:limit] if limit else pairs
+    """Return the self-contained fixture key/value pairs."""
+    return _STRINGS_FIXTURE_KEYS[:limit] if limit else list(_STRINGS_FIXTURE_KEYS)
 
 
 def _build_stringsdict_source(keys):
