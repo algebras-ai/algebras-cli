@@ -249,40 +249,77 @@ def extract_translatable_strings(content: Dict[str, Any]) -> Dict[str, str]:
     return result
 
 
-def update_translatable_strings(content: Dict[str, Any], translations: Dict[str, str]) -> Dict[str, Any]:
+def update_translatable_strings(
+    content: Dict[str, Any],
+    translations: Dict[str, str],
+    source_content: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
     Update .stringsdict content with new translations.
-    
+
+    Keys that already exist in `content` have their translatable values
+    updated in place. Keys that exist in `source_content` (e.g. the source
+    language file) but are missing from `content` — such as newly added
+    source strings that don't have a target entry yet — are first copied
+    over from `source_content` so their structure (including plural rule
+    metadata) is available, and are then translated like any other key.
+    Without `source_content`, keys missing from `content` are left
+    untouched, since there's no structural template to create them from.
+
     Args:
-        content: Original .stringsdict content
+        content: Original .stringsdict content (typically the target file)
         translations: New translations with dot-notation keys
-        
+        source_content: Source .stringsdict content, used as a structural
+            template for keys missing from `content`
+
     Returns:
         Updated content
     """
     import copy
     result = copy.deepcopy(content)
-    
-    def _update_dict(data: Dict[str, Any], prefix: str = "") -> None:
+
+    def _is_plural_rule_dict(value: Any) -> bool:
+        return (
+            isinstance(value, dict)
+            and value.get("NSStringFormatSpecTypeKey") == "NSStringPluralRuleType"
+        )
+
+    def _merge_missing_keys(data: Dict[str, Any], source_data: Dict[str, Any], prefix: str = "") -> None:
+        # Copy entries present in source but missing from data, so their
+        # (possibly plural-rule) structure exists before translation.
+        for key, source_value in source_data.items():
+            current_key = f"{prefix}.{key}" if prefix else key
+
+            if key not in data:
+                data[key] = copy.deepcopy(source_value)
+                continue
+
+            value = data[key]
+            if isinstance(value, dict) and isinstance(source_value, dict) and not _is_plural_rule_dict(value):
+                _merge_missing_keys(value, source_value, current_key)
+
+    def _apply_translations(data: Dict[str, Any], prefix: str = "") -> None:
         for key, value in data.items():
             current_key = f"{prefix}.{key}" if prefix else key
-            
+
             if isinstance(value, dict):
-                # Check if this is a plural rule dict
-                if "NSStringFormatSpecTypeKey" in value and value.get("NSStringFormatSpecTypeKey") == "NSStringPluralRuleType":
+                if _is_plural_rule_dict(value):
                     # Update plural forms
                     plural_forms = ["zero", "one", "two", "few", "many", "other"]
                     for form in plural_forms:
                         form_key = f"{current_key}.{form}"
                         if form_key in translations:
-                            data[key][form] = translations[form_key]
+                            value[form] = translations[form_key]
                 else:
                     # Recursively process nested dicts
-                    _update_dict(value, current_key)
+                    _apply_translations(value, current_key)
             elif isinstance(value, str):
                 # Update direct string values
                 if current_key in translations and not key.startswith("NSString"):
                     data[key] = translations[current_key]
-    
-    _update_dict(result)
-    return result 
+
+    if source_content:
+        _merge_missing_keys(result, source_content)
+
+    _apply_translations(result)
+    return result
