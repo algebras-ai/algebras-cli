@@ -513,6 +513,12 @@ algebras translate --max-parallel-batches 3
 algebras configure --batch-size 10 --max-parallel-batches 3
 ```
 
+By default, each batch is translated asynchronously: the CLI submits the batch and polls for the result, which avoids client-side timeouts on large or slow batches. Use `--sync-batch` to fall back to the older, blocking batch endpoint instead:
+
+```bash
+algebras translate --sync-batch
+```
+
 ### String Normalization
 
 Control how strings are processed before translation:

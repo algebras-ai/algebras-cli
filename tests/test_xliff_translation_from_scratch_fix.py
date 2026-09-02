@@ -264,7 +264,11 @@ class TestXLIFFTranslationFromScratchFix:
         # Create translator with verbose enabled
         translator = Translator(config=mock_config)
         translator.set_verbose(True)
-        
+        # This test mocks requests.post to return the batch result directly
+        # (the legacy single-call shape), not the async endpoint's
+        # submit+poll shape.
+        translator.set_sync_batch(True)
+
         # Mock environment
         with patch.dict(os.environ, {'ALGEBRAS_API_KEY': 'test-key'}):
             # Use api_client.translate_batch directly for testing
