@@ -77,6 +77,30 @@ from algebras.utils.file_format_handlers import get_handler
 from algebras.utils.file_format_detector import is_flat_format, detect_format
 
 
+def lookup_source_file_config(
+    source_file: str, source_files_config: Optional[Dict[str, Dict[str, Any]]]
+) -> Optional[Dict[str, Any]]:
+    """
+    Look up a source file's entry in the `source_files` config section.
+
+    `source_files_config` keys are raw strings from the YAML file (almost
+    always forward slashes, since configs are authored to be portable),
+    while `source_file` typically comes from FileScanner, which normalizes
+    paths via os.path.normpath() - backslashes on Windows. Comparing them
+    directly only works on OSes where normpath is a no-op for forward
+    slashes (Linux/macOS); on Windows it silently never matches, so
+    destination_path aliases get ignored. Normalizing both sides here makes
+    the lookup match regardless of OS or which separator the config uses.
+    """
+    if not source_files_config:
+        return None
+
+    normalized_source_files_config = {
+        os.path.normpath(key): value for key, value in source_files_config.items()
+    }
+    return normalized_source_files_config.get(os.path.normpath(source_file))
+
+
 def execute(
     language: Optional[str] = None,
     force: Optional[str] = None,  # None=no force, "__all__"=force all, "key1,key2"=force specific keys
@@ -468,10 +492,13 @@ def _process_all_files(
                 # Re-use the existing config instance
                 config.load()
                 source_files_config = config.get_source_files()
+                source_file_config = lookup_source_file_config(
+                    source_file, source_files_config
+                )
 
-                if source_files_config and source_file in source_files_config:
+                if source_file_config is not None:
                     # Use the new destination pattern system
-                    destination_pattern = source_files_config[source_file].get(
+                    destination_pattern = source_file_config.get(
                         "destination_path", ""
                     )
                     if destination_pattern:
