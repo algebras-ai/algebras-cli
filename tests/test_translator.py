@@ -672,11 +672,16 @@ class TestTranslator:
         from algebras.services.api_client import AlgebrasAIClient
         from algebras.services.rate_limiter import RateLimiter
         from algebras.services.retry_handler import RetryHandler
-        
+
         rate_limiter = RateLimiter()
         retry_handler = RetryHandler(rate_limiter=rate_limiter)
-        api_client = AlgebrasAIClient(config=mock_config, retry_handler=retry_handler)
-        
+        # sync_batch=True: this test mocks requests.post to return the batch
+        # result directly (the legacy single-call shape), not the async
+        # endpoint's submit+poll shape.
+        api_client = AlgebrasAIClient(
+            config=mock_config, retry_handler=retry_handler, sync_batch=True
+        )
+
         texts = ["Hello", "", "World", ""]
         result = api_client.translate_batch(texts, "en", "fr")
 
@@ -724,6 +729,253 @@ class TestTranslator:
         # Verify all empty strings are preserved
         assert len(result) == 3
         assert result == ["", "", ""]
+
+    def test_translate_batch_async_is_default(self, monkeypatch):
+        """translate_batch should submit via translate-batch-async and poll
+        for the result by default (sync_batch not set)."""
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        mock_config.get_base_url.return_value = "https://platform.algebras.ai"
+        mock_config.get_setting.return_value = True
+
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        submit_response = MagicMock()
+        submit_response.status_code = 200
+        submit_response.json.return_value = {
+            "data": {"job_id": "job-1", "status": "PENDING"}
+        }
+        mock_post = MagicMock(return_value=submit_response)
+        monkeypatch.setattr("algebras.services.api_client.requests.post", mock_post)
+
+        poll_response = MagicMock()
+        poll_response.status_code = 200
+        poll_response.json.return_value = {
+            "data": {
+                "id": "job-1",
+                "status": "READY",
+                "result": {
+                    "translations": [
+                        {"index": 0, "content": "Bonjour"},
+                        {"index": 1, "content": "Monde"},
+                    ]
+                },
+            }
+        }
+        mock_get = MagicMock(return_value=poll_response)
+        monkeypatch.setattr("algebras.services.api_client.requests.get", mock_get)
+
+        from algebras.services.api_client import AlgebrasAIClient
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
+
+        rate_limiter = RateLimiter()
+        retry_handler = RetryHandler(rate_limiter=rate_limiter)
+        api_client = AlgebrasAIClient(config=mock_config, retry_handler=retry_handler)
+
+        result = api_client.translate_batch(["Hello", "World"], "en", "fr")
+
+        assert result == ["Bonjour", "Monde"]
+        assert mock_post.call_args[0][0].endswith("/translation/translate-batch-async")
+        assert mock_get.call_args[0][0].endswith(
+            "/translation/translate-batch-async/job-1"
+        )
+
+    def test_translate_batch_async_still_polls_when_submit_says_ready(
+        self, monkeypatch
+    ):
+        """
+        Regression test: the submit response only ever carries
+        {job_id, status} - never a `result`, even when status is already
+        READY (e.g. an all-cache-hit batch). The client must still GET the
+        job to fetch the actual result rather than assuming it's inline on
+        the submit response.
+        """
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        mock_config.get_base_url.return_value = "https://platform.algebras.ai"
+        mock_config.get_setting.return_value = True
+
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        submit_response = MagicMock()
+        submit_response.status_code = 200
+        submit_response.json.return_value = {
+            "data": {"job_id": "job-1", "status": "READY"}
+        }
+        monkeypatch.setattr(
+            "algebras.services.api_client.requests.post",
+            MagicMock(return_value=submit_response),
+        )
+
+        poll_response = MagicMock()
+        poll_response.status_code = 200
+        poll_response.json.return_value = {
+            "data": {
+                "id": "job-1",
+                "status": "READY",
+                "result": {"translations": [{"index": 0, "content": "Bonjour"}]},
+            }
+        }
+        mock_get = MagicMock(return_value=poll_response)
+        monkeypatch.setattr("algebras.services.api_client.requests.get", mock_get)
+
+        from algebras.services.api_client import AlgebrasAIClient
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
+
+        rate_limiter = RateLimiter()
+        retry_handler = RetryHandler(rate_limiter=rate_limiter)
+        api_client = AlgebrasAIClient(config=mock_config, retry_handler=retry_handler)
+
+        result = api_client.translate_batch(["Hello"], "en", "fr")
+
+        assert result == ["Bonjour"]
+        mock_get.assert_called_once()
+
+    def test_translate_batch_async_polls_until_ready(self, monkeypatch):
+        """The poll loop should keep polling while the job is PENDING and
+        stop as soon as it sees READY."""
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        mock_config.get_base_url.return_value = "https://platform.algebras.ai"
+        mock_config.get_setting.return_value = True
+
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        submit_response = MagicMock()
+        submit_response.status_code = 200
+        submit_response.json.return_value = {
+            "data": {"job_id": "job-1", "status": "PENDING"}
+        }
+        monkeypatch.setattr(
+            "algebras.services.api_client.requests.post",
+            MagicMock(return_value=submit_response),
+        )
+
+        pending_response = MagicMock()
+        pending_response.status_code = 200
+        pending_response.json.return_value = {
+            "data": {"id": "job-1", "status": "PENDING"}
+        }
+        ready_response = MagicMock()
+        ready_response.status_code = 200
+        ready_response.json.return_value = {
+            "data": {
+                "id": "job-1",
+                "status": "READY",
+                "result": {"translations": [{"index": 0, "content": "Bonjour"}]},
+            }
+        }
+        mock_get = MagicMock(side_effect=[pending_response, pending_response, ready_response])
+        monkeypatch.setattr("algebras.services.api_client.requests.get", mock_get)
+
+        from algebras.services.api_client import AlgebrasAIClient
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
+
+        rate_limiter = RateLimiter()
+        retry_handler = RetryHandler(rate_limiter=rate_limiter)
+        api_client = AlgebrasAIClient(config=mock_config, retry_handler=retry_handler)
+
+        with patch("algebras.services.api_client.time.sleep"):
+            result = api_client.translate_batch(["Hello"], "en", "fr")
+
+        assert result == ["Bonjour"]
+        assert mock_get.call_count == 3
+
+    def test_translate_batch_async_job_error_raises(self, monkeypatch):
+        """A job that finishes with status ERROR should raise with the
+        job's error message."""
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        mock_config.get_base_url.return_value = "https://platform.algebras.ai"
+        mock_config.get_setting.return_value = True
+
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        submit_response = MagicMock()
+        submit_response.status_code = 200
+        submit_response.json.return_value = {
+            "data": {"job_id": "job-1", "status": "PENDING"}
+        }
+        monkeypatch.setattr(
+            "algebras.services.api_client.requests.post",
+            MagicMock(return_value=submit_response),
+        )
+
+        error_response = MagicMock()
+        error_response.status_code = 200
+        error_response.json.return_value = {
+            "data": {"id": "job-1", "status": "ERROR", "error": "Boom"}
+        }
+        monkeypatch.setattr(
+            "algebras.services.api_client.requests.get",
+            MagicMock(return_value=error_response),
+        )
+
+        from algebras.services.api_client import AlgebrasAIClient
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
+
+        rate_limiter = RateLimiter()
+        retry_handler = RetryHandler(rate_limiter=rate_limiter)
+        api_client = AlgebrasAIClient(config=mock_config, retry_handler=retry_handler)
+
+        with pytest.raises(Exception, match="Boom"):
+            api_client.translate_batch(["Hello"], "en", "fr")
+
+    def test_translate_batch_sync_flag_uses_legacy_endpoint(self, monkeypatch):
+        """sync_batch=True should hit translate-batch directly, with no
+        polling involved."""
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        mock_config.get_base_url.return_value = "https://platform.algebras.ai"
+        mock_config.get_setting.return_value = True
+
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {
+            "data": {"translations": [{"index": 0, "content": "Bonjour"}]}
+        }
+        mock_post = MagicMock(return_value=response)
+        monkeypatch.setattr("algebras.services.api_client.requests.post", mock_post)
+        mock_get = MagicMock()
+        monkeypatch.setattr("algebras.services.api_client.requests.get", mock_get)
+
+        from algebras.services.api_client import AlgebrasAIClient
+        from algebras.services.rate_limiter import RateLimiter
+        from algebras.services.retry_handler import RetryHandler
+
+        rate_limiter = RateLimiter()
+        retry_handler = RetryHandler(rate_limiter=rate_limiter)
+        api_client = AlgebrasAIClient(
+            config=mock_config, retry_handler=retry_handler, sync_batch=True
+        )
+
+        result = api_client.translate_batch(["Hello"], "en", "fr")
+
+        assert result == ["Bonjour"]
+        assert mock_post.call_args[0][0].endswith("/translation/translate-batch")
+        assert not mock_post.call_args[0][0].endswith("-async")
+        mock_get.assert_not_called()
 
     def test_translate_flat_dict_empty_strings(self, monkeypatch):
         """Test flat dict translation with empty strings"""
@@ -1143,8 +1395,13 @@ class TestTranslator:
         
         rate_limiter = RateLimiter()
         retry_handler = RetryHandler(rate_limiter=rate_limiter)
-        api_client = AlgebrasAIClient(config=mock_config, retry_handler=retry_handler)
-        
+        # sync_batch=True: this test mocks requests.post to return the batch
+        # result directly (the legacy single-call shape), not the async
+        # endpoint's submit+poll shape.
+        api_client = AlgebrasAIClient(
+            config=mock_config, retry_handler=retry_handler, sync_batch=True
+        )
+
         with patch('time.sleep'):
             result = api_client.translate_batch(["Hello"], "en", "fr")
 

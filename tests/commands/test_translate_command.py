@@ -422,6 +422,7 @@ class TestTranslateCommand:
                 glossary_id=None,
                 prompt_file=None,
                 regenerate_from_scratch=False,
+                sync_batch=False,
                 config_file=None,
             )
 
@@ -443,6 +444,7 @@ class TestTranslateCommand:
                 glossary_id=None,
                 prompt_file=None,
                 regenerate_from_scratch=False,
+                sync_batch=False,
                 config_file=None,
             )
 
@@ -464,6 +466,7 @@ class TestTranslateCommand:
                 glossary_id=None,
                 prompt_file=None,
                 regenerate_from_scratch=False,
+                sync_batch=False,
                 config_file=None,
             )
 
@@ -965,6 +968,7 @@ class TestTranslateCommand:
                 glossary_id=None,
                 prompt_file=None,
                 regenerate_from_scratch=False,
+                sync_batch=False,
                 config_file=None,
             )
 

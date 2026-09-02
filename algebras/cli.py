@@ -67,11 +67,12 @@ def add(ctx, language):
 @click.option("--glossary-id", help="Glossary ID to use for Algebras AI translations.")
 @click.option("--prompt-file", help="Path to a file containing a custom prompt for translation.")
 @click.option("--regenerate-from-scratch", is_flag=True, help="Regenerate files from scratch instead of updating in-place (default: update in-place when target file exists).")
+@click.option("--sync-batch", is_flag=True, help="Use the legacy synchronous batch translation endpoint instead of the default async submit+poll endpoint.")
 @click.pass_context
-def translate(ctx, language, force, only_missing, ui_safe, verbose, batch_size, max_parallel_batches, glossary_id, prompt_file, regenerate_from_scratch):
+def translate(ctx, language, force, only_missing, ui_safe, verbose, batch_size, max_parallel_batches, glossary_id, prompt_file, regenerate_from_scratch, sync_batch):
     """Translate your application."""
     config_file = ctx.obj.get('config_file') if ctx.obj else None
-    translate_command.execute(language, force, only_missing, ui_safe=ui_safe, verbose=verbose, batch_size=batch_size, max_parallel_batches=max_parallel_batches, glossary_id=glossary_id, prompt_file=prompt_file, regenerate_from_scratch=regenerate_from_scratch, config_file=config_file)
+    translate_command.execute(language, force, only_missing, ui_safe=ui_safe, verbose=verbose, batch_size=batch_size, max_parallel_batches=max_parallel_batches, glossary_id=glossary_id, prompt_file=prompt_file, regenerate_from_scratch=regenerate_from_scratch, sync_batch=sync_batch, config_file=config_file)
 
 
 @cli.command("update")

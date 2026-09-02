@@ -184,6 +184,10 @@ class Translator:
         # Initialize verbose flag
         self.verbose = False
 
+        # Use the legacy blocking translate-batch endpoint instead of the
+        # default translate-batch-async submit+poll flow.
+        self.sync_batch = False
+
         # Initialize rate limiter and retry handler
         # Rate limiter: 30 requests per minute (server limit is 30)
         self._rate_limiter = RateLimiter(max_requests_per_minute=30)
@@ -197,6 +201,7 @@ class Translator:
             retry_handler=self._retry_handler,
             verbose=self.verbose,
             custom_prompt=self.custom_prompt,
+            sync_batch=self.sync_batch,
         )
 
         # BatchProcessor will be created lazily when needed
@@ -234,6 +239,18 @@ class Translator:
         """
         self.verbose = verbose
         self.api_client.set_verbose(verbose)
+
+    def set_sync_batch(self, sync_batch: bool) -> None:
+        """
+        Choose which batch translation endpoint to use.
+
+        Args:
+            sync_batch: If True, use the legacy blocking translate-batch
+                endpoint instead of the default translate-batch-async
+                submit+poll flow.
+        """
+        self.sync_batch = sync_batch
+        self.api_client.set_sync_batch(sync_batch)
 
     def translate_text(
         self,
