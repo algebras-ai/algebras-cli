@@ -1061,3 +1061,92 @@ class TestTranslateCommand:
             keys_arg = call_args[0][2]  # third positional: list of keys
             assert "greeting" in keys_arg, \
                 f"'greeting' should be treated as missing (empty value), got keys={keys_arg}"
+
+
+class TestLookupSourceFileConfig:
+    """
+    Regression tests for lookup_source_file_config, which fixes a bug where
+    FileScanner-normalized paths (os.path.normpath, backslashes on Windows)
+    never matched raw source_files config keys (forward slashes, as
+    typically authored). On Windows this silently fell through to the
+    legacy fallback naming, ignoring destination_path aliases entirely -
+    e.g. a configured "pt_BR" -> "pt-BR" alias would be ignored and the
+    file would be written as pt_BR.po instead of pt-BR.po.
+    """
+
+    def test_matches_when_source_file_uses_windows_separators(self, monkeypatch):
+        """
+        The exact reported scenario: source_files_config is keyed with
+        forward slashes (as authored), but source_file arrives already
+        normalized to Windows-style backslashes (as FileScanner would
+        produce via os.path.normpath() on a real Windows machine).
+
+        We simulate running on Windows by swapping in ntpath.normpath (the
+        standard library's platform-independent implementation of Windows
+        path semantics - it's what os.path.normpath actually is on a real
+        Windows machine) for the duration of this test, so this reproduces
+        the bug/fix on any OS without needing an actual Windows machine.
+        """
+        import ntpath
+
+        monkeypatch.setattr(
+            "algebras.commands.translate_command.os.path.normpath",
+            ntpath.normpath,
+        )
+
+        source_files_config = {
+            "translations/locales/en.po": {
+                "destination_path": "translations/locales/%algebras_locale_code%.po"
+            }
+        }
+
+        # What FileScanner.group_files_by_language() would have produced on
+        # Windows: os.path.normpath("translations/locales/en.po")
+        windows_source_file = ntpath.normpath("translations/locales/en.po")
+        assert windows_source_file == "translations\\locales\\en.po"
+
+        result = translate_command.lookup_source_file_config(
+            windows_source_file, source_files_config
+        )
+
+        assert result is not None
+        assert (
+            result["destination_path"]
+            == "translations/locales/%algebras_locale_code%.po"
+        )
+
+    def test_matches_on_posix_style_paths(self):
+        """Baseline: still matches when both sides already use forward
+        slashes (the Linux/macOS case, where the bug was never visible)."""
+        source_files_config = {
+            "translations/locales/en.po": {
+                "destination_path": "translations/locales/%algebras_locale_code%.po"
+            }
+        }
+
+        result = translate_command.lookup_source_file_config(
+            "translations/locales/en.po", source_files_config
+        )
+
+        assert result is not None
+        assert (
+            result["destination_path"]
+            == "translations/locales/%algebras_locale_code%.po"
+        )
+
+    def test_returns_none_for_unconfigured_source_file(self):
+        """A source file with no matching config entry returns None."""
+        source_files_config = {
+            "translations/locales/en.po": {"destination_path": "x/%algebras_locale_code%.po"}
+        }
+
+        result = translate_command.lookup_source_file_config(
+            "other/file.po", source_files_config
+        )
+
+        assert result is None
+
+    def test_returns_none_for_empty_or_missing_config(self):
+        """Handles None and {} source_files_config without raising."""
+        assert translate_command.lookup_source_file_config("en.po", None) is None
+        assert translate_command.lookup_source_file_config("en.po", {}) is None
