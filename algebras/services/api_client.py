@@ -31,6 +31,7 @@ class AlgebrasAIClient:
         verbose: bool = False,
         custom_prompt: str = "",
         sync_batch: bool = False,
+        ignore_cache: bool = False,
     ):
         """
         Initialize Algebras AI API client.
@@ -43,12 +44,16 @@ class AlgebrasAIClient:
             sync_batch: If True, use the legacy blocking translate-batch
                 endpoint. If False (default), submit via translate-batch-async
                 and poll for the result.
+            ignore_cache: If True, sets ignoreCache=true on every request so
+                the API skips its own cached translations and returns a
+                fresh result.
         """
         self.config = config
         self._retry_handler = retry_handler
         self.verbose = verbose
         self.custom_prompt = custom_prompt
         self.sync_batch = sync_batch
+        self.ignore_cache = ignore_cache
 
     def set_custom_prompt(self, prompt: str) -> None:
         """
@@ -77,6 +82,16 @@ class AlgebrasAIClient:
                 endpoint instead of the default submit+poll async endpoint.
         """
         self.sync_batch = sync_batch
+
+    def set_ignore_cache(self, ignore_cache: bool) -> None:
+        """
+        Choose whether requests should bypass the API's translation cache.
+
+        Args:
+            ignore_cache: If True, sets ignoreCache=true on every request so
+                the API always returns a freshly generated translation.
+        """
+        self.ignore_cache = ignore_cache
 
     def translate(
         self,
@@ -126,6 +141,7 @@ class AlgebrasAIClient:
             "glossaryId": glossary_id,
             "prompt": self.custom_prompt,
             "flag": "true" if ui_safe else "false",
+            "ignoreCache": "true" if self.ignore_cache else "false",
         }
 
         try:
@@ -142,6 +158,7 @@ class AlgebrasAIClient:
                         "glossaryId": (None, data["glossaryId"]),
                         "prompt": (None, data["prompt"]),
                         "flag": (None, data["flag"]),
+                        "ignoreCache": (None, data["ignoreCache"]),
                     },
                 )
 
@@ -325,6 +342,7 @@ class AlgebrasAIClient:
             "glossaryId": glossary_id,
             "prompt": self.custom_prompt,
             "flag": ui_safe,
+            "ignoreCache": self.ignore_cache,
         }
 
         if self.verbose:
@@ -404,6 +422,7 @@ class AlgebrasAIClient:
             "glossaryId": glossary_id,
             "prompt": self.custom_prompt,
             "flag": ui_safe,
+            "ignoreCache": self.ignore_cache,
         }
 
         if self.verbose:

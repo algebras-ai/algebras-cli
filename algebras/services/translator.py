@@ -188,6 +188,10 @@ class Translator:
         # default translate-batch-async submit+poll flow.
         self.sync_batch = False
 
+        # If True, bypass both the API's own translation cache (ignoreCache)
+        # and the local TranslationCache, forcing fresh translations.
+        self.ignore_cache = False
+
         # Initialize rate limiter and retry handler
         # Rate limiter: 30 requests per minute (server limit is 30)
         self._rate_limiter = RateLimiter(max_requests_per_minute=30)
@@ -202,6 +206,7 @@ class Translator:
             verbose=self.verbose,
             custom_prompt=self.custom_prompt,
             sync_batch=self.sync_batch,
+            ignore_cache=self.ignore_cache,
         )
 
         # BatchProcessor will be created lazily when needed
@@ -252,6 +257,19 @@ class Translator:
         self.sync_batch = sync_batch
         self.api_client.set_sync_batch(sync_batch)
 
+    def set_ignore_cache(self, ignore_cache: bool) -> None:
+        """
+        Choose whether translations should bypass caching.
+
+        Args:
+            ignore_cache: If True, skip the local TranslationCache lookup
+                and set ignoreCache=true on API requests, so every call
+                returns a freshly generated translation instead of a
+                previously cached one.
+        """
+        self.ignore_cache = ignore_cache
+        self.api_client.set_ignore_cache(ignore_cache)
+
     def translate_text(
         self,
         text: str,
@@ -281,16 +299,17 @@ class Translator:
         source_lang = map_language_code(source_lang)
         target_lang = map_language_code(target_lang)
 
-        # Check cache first
+        # Check cache first, unless the caller asked to bypass it
         cache_key = self.cache.get_cache_key(
             text, source_lang, target_lang, ui_safe, self.custom_prompt
         )
-        cached_translation = self.cache.get(cache_key)
-        if cached_translation:
-            print(
-                f"Cache hit: Using cached translation for '{text[:30]}...' ({source_lang} → {target_lang})"
-            )
-            return cached_translation
+        if not self.ignore_cache:
+            cached_translation = self.cache.get(cache_key)
+            if cached_translation:
+                print(
+                    f"Cache hit: Using cached translation for '{text[:30]}...' ({source_lang} → {target_lang})"
+                )
+                return cached_translation
 
         print(
             f"Cache miss: Translating '{text[:30]}...' ({source_lang} → {target_lang})"
