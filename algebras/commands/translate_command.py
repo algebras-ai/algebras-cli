@@ -116,6 +116,7 @@ def execute(
     prompt_file: Optional[str] = None,
     regenerate_from_scratch: bool = False,
     sync_batch: bool = False,
+    no_cache: bool = False,
     config_file: Optional[str] = None,
 ) -> None:
     """
@@ -136,6 +137,7 @@ def execute(
         prompt_file: Path to a file containing a custom prompt for translation
         regenerate_from_scratch: If True, regenerate files from scratch instead of updating in-place
         sync_batch: If True, use the legacy blocking batch translation endpoint instead of the default submit+poll async endpoint
+        no_cache: If True, bypass both the API's translation cache and the local translation cache, forcing fresh translations
         config_file: Path to custom config file (optional)
     """
     config = Config(config_file)
@@ -233,6 +235,12 @@ def execute(
     if verbose:
         mode = "legacy synchronous" if sync_batch else "async submit+poll (default)"
         click.echo(f"{Fore.BLUE}Using {mode} batch translation endpoint\x1b[0m")
+
+    translator.set_ignore_cache(no_cache)
+    if no_cache:
+        click.echo(
+            f"{Fore.BLUE}--no-cache: bypassing cached translations, forcing fresh results from the API\x1b[0m"
+        )
 
     # Handle custom prompt from file or config
     custom_prompt = None
