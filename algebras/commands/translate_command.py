@@ -1484,110 +1484,109 @@ def _process_outdated_keys_files(
         verbose: Verbose mode flag
     """
     for target_file, outdated_keys, source_file in outdated_keys_files:
-        if os.path.basename(target_file).startswith(target_lang):
-            click.echo(
-                f"\n{Fore.BLUE}Processing file with outdated keys {os.path.basename(target_file)}...{Fore.RESET}"
+        click.echo(
+            f"\n{Fore.BLUE}Processing file with outdated keys {os.path.basename(target_file)}...{Fore.RESET}"
+        )
+
+        try:
+            # Get handler for file format
+            handler = get_handler(source_file, config)
+
+            # Load both source and target files using handler
+            (
+                source_content,
+                target_content,
+                source_raw_content,
+                target_raw_content,
+            ) = _load_file_contents(
+                source_file,
+                target_file,
+                handler,
+                source_language,
+                target_lang,
+                config,
+                verbose,
+                xlf_version,
             )
 
-            try:
-                # Get handler for file format
-                handler = get_handler(source_file, config)
-
-                # Load both source and target files using handler
-                (
-                    source_content,
-                    target_content,
-                    source_raw_content,
-                    target_raw_content,
-                ) = _load_file_contents(
-                    source_file,
-                    target_file,
-                    handler,
-                    source_language,
-                    target_lang,
-                    config,
-                    verbose,
-                    xlf_version,
-                )
-
-                # Translate outdated keys
-                if outdated_keys and not only_missing:
-                    click.echo(
-                        f"  {Fore.GREEN}Translating {len(outdated_keys)} outdated keys...{Fore.RESET}"
-                    )
-
-                    # Save updated content
-                    use_in_place = _should_use_in_place(
-                        target_file, regenerate_from_scratch
-                    )
-                    keys_to_update = set(outdated_keys)
-
-                    # For TypeScript files, use incremental writer (special case)
-                    if detect_format(target_file) == FileFormat.TS:
-                        # Determine export name
-                        basename = os.path.basename(target_file)
-                        export_name = basename.split(".")[0]
-
-                        # Create incremental writer
-                        incremental_writer = IncrementalFileWriter(
-                            target_file, "ts", export_name
-                        )
-
-                        # Define callback for batch completion
-                        def on_batch_complete(
-                            batch_results: Dict[str, str], batch_index: int
-                        ):
-                            incremental_writer.write_batch(batch_results, batch_index)
-
-                        # Translate with callback
-                        target_content = translator.translate_outdated_keys_batch(
-                            source_content,
-                            target_content,
-                            list(outdated_keys),
-                            target_lang,
-                            ui_safe,
-                            glossary_id,
-                            on_batch_complete=on_batch_complete,
-                        )
-
-                        # Wait for all writes to complete
-                        incremental_writer.finish()
-                    else:
-                        # Translate outdated keys
-                        target_content = translator.translate_outdated_keys_batch(
-                            source_content,
-                            target_content,
-                            list(outdated_keys),
-                            target_lang,
-                            ui_safe,
-                            glossary_id,
-                        )
-
-                        # Write using handler
-                        _write_translated_content(
-                            target_file,
-                            target_content,
-                            handler,
-                            keys_to_update,
-                            use_in_place,
-                            source_file=source_file,
-                            source_language=source_language,
-                            target_language=target_lang,
-                            xlf_target_state=xlf_target_state,
-                            xlf_version=xlf_version,
-                            po_mark_fuzzy=po_mark_fuzzy,
-                            source_raw_content=source_raw_content,
-                            target_raw_content=target_raw_content,
-                            verbose=verbose,
-                        )
-
-                    click.echo(
-                        f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m"
-                    )
-            except Exception as e:
+            # Translate outdated keys
+            if outdated_keys and not only_missing:
                 click.echo(
-                    f"  {Fore.RED}Error processing file with outdated keys {os.path.basename(target_file)}: {str(e)}\x1b[0m"
+                    f"  {Fore.GREEN}Translating {len(outdated_keys)} outdated keys...{Fore.RESET}"
                 )
+
+                # Save updated content
+                use_in_place = _should_use_in_place(
+                    target_file, regenerate_from_scratch
+                )
+                keys_to_update = set(outdated_keys)
+
+                # For TypeScript files, use incremental writer (special case)
+                if detect_format(target_file) == FileFormat.TS:
+                    # Determine export name
+                    basename = os.path.basename(target_file)
+                    export_name = basename.split(".")[0]
+
+                    # Create incremental writer
+                    incremental_writer = IncrementalFileWriter(
+                        target_file, "ts", export_name
+                    )
+
+                    # Define callback for batch completion
+                    def on_batch_complete(
+                        batch_results: Dict[str, str], batch_index: int
+                    ):
+                        incremental_writer.write_batch(batch_results, batch_index)
+
+                    # Translate with callback
+                    target_content = translator.translate_outdated_keys_batch(
+                        source_content,
+                        target_content,
+                        list(outdated_keys),
+                        target_lang,
+                        ui_safe,
+                        glossary_id,
+                        on_batch_complete=on_batch_complete,
+                    )
+
+                    # Wait for all writes to complete
+                    incremental_writer.finish()
+                else:
+                    # Translate outdated keys
+                    target_content = translator.translate_outdated_keys_batch(
+                        source_content,
+                        target_content,
+                        list(outdated_keys),
+                        target_lang,
+                        ui_safe,
+                        glossary_id,
+                    )
+
+                    # Write using handler
+                    _write_translated_content(
+                        target_file,
+                        target_content,
+                        handler,
+                        keys_to_update,
+                        use_in_place,
+                        source_file=source_file,
+                        source_language=source_language,
+                        target_language=target_lang,
+                        xlf_target_state=xlf_target_state,
+                        xlf_version=xlf_version,
+                        po_mark_fuzzy=po_mark_fuzzy,
+                        source_raw_content=source_raw_content,
+                        target_raw_content=target_raw_content,
+                        verbose=verbose,
+                    )
+
+                click.echo(
+                    f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m"
+                )
+        except Exception as e:
+            click.echo(
+                f"  {Fore.RED}Error processing file with outdated keys {os.path.basename(target_file)}: {str(e)}\x1b[0m"
+            )
 
 
 def _should_use_in_place(target_file: str, regenerate_from_scratch: bool) -> bool:
