@@ -82,14 +82,15 @@ def translate(ctx, language, force, only_missing, ui_safe, verbose, batch_size, 
 @click.option("--only-missing", is_flag=True, help="Only translate keys that are missing in the target files.")
 @click.option("--ui-safe", is_flag=True, help="Ensure translations will not exceed the original text length.")
 @click.option("--verbose", is_flag=True, help="Show detailed logs of the update process.")
+@click.option("--glossary-id", help="Glossary ID to use for Algebras AI translations.")
 @click.pass_context
-def update(ctx, language, full, only_missing, ui_safe, verbose):
+def update(ctx, language, full, only_missing, ui_safe, verbose, glossary_id):
     """Update your translations."""
     # If both flags are provided, --only-missing takes precedence
     # If neither flag is provided, only_missing defaults to True (current behavior)
     only_missing_value = only_missing if only_missing else not full
     config_file = ctx.obj.get('config_file') if ctx.obj else None
-    update_command.execute(language, only_missing_value, skip_git_validation=only_missing, ui_safe=ui_safe, verbose=verbose, config_file=config_file)
+    update_command.execute(language, only_missing_value, skip_git_validation=only_missing, ui_safe=ui_safe, verbose=verbose, glossary_id=glossary_id, config_file=config_file)
 
 
 @cli.command("ci")

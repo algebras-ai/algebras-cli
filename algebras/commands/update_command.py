@@ -293,10 +293,10 @@ def identify_translation_issues(
     return outdated_by_language, missing_keys_by_language, outdated_keys_by_language
 
 
-def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_validation: bool = False, ui_safe: bool = False, verbose: bool = False, config_file: Optional[str] = None) -> None:
+def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_validation: bool = False, ui_safe: bool = False, verbose: bool = False, glossary_id: Optional[str] = None, config_file: Optional[str] = None) -> None:
     """
     Update your translations.
-    
+
     Args:
         language: Language to update (if None, update all languages)
         config_file: Path to custom config file (optional)
@@ -304,6 +304,7 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
         skip_git_validation: If True, git validation will be skipped even if git is available (default: False)
         ui_safe: If True, ensure translations will not be longer than original text (default: False)
         verbose: If True, show detailed logs of the update process (default: False)
+        glossary_id: ID of the glossary to use for translation (if None, will check config for api.glossary_id)
     """
     config = Config(config_file)
     
@@ -442,12 +443,13 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
             for file_path, source_file in outdated_files:
                 click.echo(f"  {Fore.YELLOW}File {os.path.basename(file_path)} is outdated (modification time):{Fore.RESET}")
                 translate_command.execute(
-                    lang, 
-                    force=True, 
+                    lang,
+                    force=True,
                     only_missing=True,
                     outdated_files=[(file_path, source_file)],
                     ui_safe=ui_safe,
-                    verbose=verbose
+                    verbose=verbose,
+                    glossary_id=glossary_id,
                 )
 
             # For files with missing keys, call translate_command for each file
@@ -465,6 +467,7 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                         missing_keys_files=[(file_path, missing_keys, source_file)],
                         ui_safe=ui_safe,
                         verbose=verbose,
+                        glossary_id=glossary_id,
                     )
         
         click.echo(f"\n{Fore.GREEN}Update completed.\x1b[0m")
