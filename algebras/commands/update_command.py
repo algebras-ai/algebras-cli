@@ -39,12 +39,21 @@ def find_matching_source_file(lang_file: str, source_files: List[str], lang: str
     lang_basename = os.path.basename(lang_file)
     lang_dirname = os.path.dirname(lang_file)
     
+    # iOS-style locale directories, e.g. "en.lproj/Localizable.stringsdict" /
+    # "fr.lproj/Localizable.stringsdict" - the language marker is a directory
+    # name suffixed with ".lproj", not an isolated path segment, so it isn't
+    # caught by the "/{lang}/" check below.
+    if f"{lang}.lproj/" in lang_file or f"{lang}.lproj\\" in lang_file:
+        potential_source_file = lang_file.replace(f"{lang}.lproj/", f"{source_language}.lproj/").replace(f"{lang}.lproj\\", f"{source_language}.lproj\\")
+        if potential_source_file in source_files:
+            return potential_source_file
+
     # Check for language in path first
     if f"/{lang}/" in lang_file or f"\\{lang}\\" in lang_file:
         potential_source_file = lang_file.replace(f"/{lang}/", f"/{source_language}/").replace(f"\\{lang}\\", f"\\{source_language}\\")
         if potential_source_file in source_files:
             return potential_source_file
-    
+
     # Handle simple case where filename is just "language.json"
     if lang_basename == f"{lang}.json" and f"{source_language}.json" in [os.path.basename(f) for f in source_files]:
         source_basename = f"{source_language}.json"
