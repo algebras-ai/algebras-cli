@@ -66,28 +66,36 @@ language.selection=Select Language
         """Test Properties file validation."""
         # Valid Properties file
         properties_content = "app.title=My Application\nwelcome.message=Welcome!"
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.properties', delete=False) as f:
+
+        # Use a fixed basename rather than tempfile's randomly-generated one:
+        # NamedTemporaryFile's random name can include underscores (it draws
+        # from string.ascii_letters + string.digits + "_"), which can
+        # coincidentally produce a "_XX" suffix that looks like a language
+        # code (e.g. "tmpmuwcf_fu.properties" -> language code "fu"), making
+        # this assertion flaky.
+        temp_dir = tempfile.mkdtemp()
+        temp_file = os.path.join(temp_dir, "sample.properties")
+        with open(temp_file, "w") as f:
             f.write(properties_content)
-            temp_file = f.name
-        
+
         try:
             assert is_valid_properties_file(temp_file) is True
             assert get_properties_language_code(temp_file) is None  # No language in filename
         finally:
             os.unlink(temp_file)
-        
+
         # Test with language in filename
-        with tempfile.NamedTemporaryFile(mode='w', suffix='_en.properties', delete=False) as f:
+        temp_file = os.path.join(temp_dir, "sample_en.properties")
+        with open(temp_file, "w") as f:
             f.write(properties_content)
-            temp_file = f.name
-        
+
         try:
             assert is_valid_properties_file(temp_file) is True
             assert get_properties_language_code(temp_file) == "en"
         finally:
             os.unlink(temp_file)
-        
+            os.rmdir(temp_dir)
+
         # Invalid file
         assert is_valid_properties_file("nonexistent.properties") is False
     
