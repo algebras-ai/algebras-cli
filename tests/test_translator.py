@@ -1278,6 +1278,71 @@ class TestTranslator:
         assert result["name"] == "Monde"
         assert result["empty2"] == ""
 
+    def test_translate_outdated_keys_batch_flat_dotted_key(self, monkeypatch):
+        """
+        Regression test: formats like .stringsdict (via extract_translatable_strings)
+        flatten plural forms into literal dot-joined top-level keys, e.g.
+        "items_count.item_count.one". translate_outdated_keys_batch must match
+        those keys directly instead of splitting on "." and treating them as a
+        path into a structure that isn't actually nested - otherwise the key is
+        silently dropped (never translated) while the caller still reports success.
+        """
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.load.return_value = {}
+        mock_config.get_api_config.return_value = {"provider": "algebras-ai"}
+        mock_config.get_base_url.return_value = "https://platform.algebras.ai"
+        mock_config.get_source_language.return_value = "en"
+        mock_config.get_setting.return_value = ""
+        mock_config.has_setting.return_value = False
+
+        monkeypatch.setattr("algebras.config.Config", lambda *args, **kwargs: mock_config)
+        monkeypatch.setenv("ALGEBRAS_API_KEY", "test-api-key")
+
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None
+        mock_cache.get_cache_key.return_value = "test-cache-key"
+        monkeypatch.setattr("algebras.services.translator.TranslationCache", lambda: mock_cache)
+
+        translator = Translator()
+
+        from algebras.services.batch_processor import BatchResult
+
+        mock_batch_processor = MagicMock()
+        mock_batch_processor.process.return_value = BatchResult(
+            translations=["Une seule unité"],
+            error_stats={"5xx": [], "429": [], "other": []},
+            failed_batches=[],
+            successful_batches=1,
+            total_batches=1,
+        )
+        translator._batch_processor = mock_batch_processor
+
+        source_content = {
+            "items_count.item_count.zero": "No items",
+            "items_count.item_count.one": "Just a single unit",
+            "items_count.item_count.other": "%d items",
+        }
+        target_content = {
+            "items_count.item_count.zero": "Aucun élément",
+            "items_count.item_count.one": "Un élément",
+            "items_count.item_count.other": "%d éléments",
+        }
+        outdated_keys = ["items_count.item_count.one"]
+
+        result = translator.translate_outdated_keys_batch(
+            source_content, target_content, outdated_keys, "fr"
+        )
+
+        assert mock_batch_processor.process.called, (
+            "translate_outdated_keys_batch should have called the batch processor "
+            "instead of silently dropping the flat dotted key"
+        )
+        assert result["items_count.item_count.one"] == "Une seule unité"
+        # Untouched keys are preserved as-is
+        assert result["items_count.item_count.zero"] == "Aucun élément"
+        assert result["items_count.item_count.other"] == "%d éléments"
+
     def test_translate_with_algebras_ai_uses_retry_helper(self, monkeypatch):
         """Test that _translate_with_algebras_ai uses retry helper for 429 errors"""
         import time

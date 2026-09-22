@@ -39,12 +39,21 @@ def find_matching_source_file(lang_file: str, source_files: List[str], lang: str
     lang_basename = os.path.basename(lang_file)
     lang_dirname = os.path.dirname(lang_file)
     
+    # iOS-style locale directories, e.g. "en.lproj/Localizable.stringsdict" /
+    # "fr.lproj/Localizable.stringsdict" - the language marker is a directory
+    # name suffixed with ".lproj", not an isolated path segment, so it isn't
+    # caught by the "/{lang}/" check below.
+    if f"{lang}.lproj/" in lang_file or f"{lang}.lproj\\" in lang_file:
+        potential_source_file = lang_file.replace(f"{lang}.lproj/", f"{source_language}.lproj/").replace(f"{lang}.lproj\\", f"{source_language}.lproj\\")
+        if potential_source_file in source_files:
+            return potential_source_file
+
     # Check for language in path first
     if f"/{lang}/" in lang_file or f"\\{lang}\\" in lang_file:
         potential_source_file = lang_file.replace(f"/{lang}/", f"/{source_language}/").replace(f"\\{lang}\\", f"\\{source_language}\\")
         if potential_source_file in source_files:
             return potential_source_file
-    
+
     # Handle simple case where filename is just "language.json"
     if lang_basename == f"{lang}.json" and f"{source_language}.json" in [os.path.basename(f) for f in source_files]:
         source_basename = f"{source_language}.json"
@@ -440,12 +449,14 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                     click.echo(f"  - {file_path}")
             
             # For outdated files based on modification time, call translate_command for each file
+            # only_missing is forwarded so that --full (only_missing=False) actually causes
+            # _process_outdated_files to retranslate changed values, not just fill in missing keys.
             for file_path, source_file in outdated_files:
                 click.echo(f"  {Fore.YELLOW}File {os.path.basename(file_path)} is outdated (modification time):{Fore.RESET}")
                 translate_command.execute(
                     lang,
                     force=True,
-                    only_missing=True,
+                    only_missing=only_missing,
                     outdated_files=[(file_path, source_file)],
                     ui_safe=ui_safe,
                     verbose=verbose,
@@ -477,7 +488,35 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                         verbose=verbose,
                         glossary_id=glossary_id,
                     )
-        
+
+            # For files with outdated keys detected via git history (source value
+            # changed but the file's own mtime didn't independently trip the
+            # modification-time check above, e.g. both files touched in the same
+            # commit/checkout), call translate_command for each file. Skip files
+            # already handled by the modification-time pass above, since that
+            # pass already diffs and retranslates changed values for those files.
+            # _process_outdated_keys_files only retranslates when only_missing is
+            # False (i.e. `algebras update --full`), matching only_missing's
+            # documented meaning of "only missing keys, don't touch existing ones".
+            for file_path, outdated_keys, source_file in outdated_keys_files:
+                if file_path in already_processed:
+                    continue
+                if outdated_keys:
+                    click.echo(f"  {Fore.YELLOW}File {os.path.basename(file_path)} has {len(outdated_keys)} outdated keys (git history):{Fore.RESET}")
+                    for key in sorted(outdated_keys)[:5]:
+                        click.echo(f"    - {key}")
+                    if len(outdated_keys) > 5:
+                        click.echo(f"    - ... and {len(outdated_keys) - 5} more")
+                    translate_command.execute(
+                        lang,
+                        force=True,
+                        only_missing=only_missing,
+                        outdated_keys_files=[(file_path, outdated_keys, source_file)],
+                        ui_safe=ui_safe,
+                        verbose=verbose,
+                        glossary_id=glossary_id,
+                    )
+
         click.echo(f"\n{Fore.GREEN}Update completed.\x1b[0m")
         click.echo(f"To check the status of your translations, run: {Fore.BLUE}algebras status\x1b[0m")
     

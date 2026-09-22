@@ -1038,8 +1038,19 @@ class Translator:
         empty_key_paths = []  # Track keys with empty strings
 
         for key_path in outdated_keys:
-            key_parts = key_path.split(".")
-            source_value = get_nested_value(source_content, key_parts)
+            if isinstance(source_content, dict) and key_path in source_content:
+                # Direct top-level key match (dots, if any, are part of the
+                # literal key name, e.g. flat formats like .stringsdict's
+                # dot-joined plural-form keys, XLIFF, or Android plurals like
+                # "Quiz.timer_format.__plurals__"). Without this check,
+                # splitting the key on "." and traversing as a nested path
+                # into a dict that isn't actually nested never finds the
+                # value, so the key is silently dropped instead of retranslated.
+                key_parts = [key_path]
+                source_value = source_content[key_path]
+            else:
+                key_parts = key_path.split(".")
+                source_value = get_nested_value(source_content, key_parts)
 
             if isinstance(source_value, str):
                 # Filter empty strings - preserve them but don't send to API

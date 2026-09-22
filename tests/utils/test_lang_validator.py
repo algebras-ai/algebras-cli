@@ -102,6 +102,26 @@ class TestLangValidator(unittest.TestCase):
         value5 = get_key_value(self.source_data, "login.nonexistent")
         self.assertIsNone(value5)
 
+    def test_get_key_value_flat_dotted_key(self):
+        # Formats like .stringsdict (extract_translatable_strings), XLIFF and
+        # CSV/TSV are read into an already-flat dict whose literal top-level
+        # keys happen to contain dots (e.g. plural forms flattened to
+        # "items_count.item_count.one"), rather than a genuinely nested
+        # structure. get_key_value must match the literal key directly instead
+        # of splitting on "." and treating it as a nested path - otherwise it
+        # incorrectly returns None for a key that is actually present.
+        flat_data = {
+            "items_count.item_count.zero": "No items",
+            "items_count.item_count.one": "One item",
+        }
+
+        value = get_key_value(flat_data, "items_count.item_count.one")
+        self.assertEqual(value, "One item")
+
+        # A genuinely nested lookup (no direct top-level match) still works
+        value_nested = get_key_value(self.source_data, "login.title")
+        self.assertEqual(value_nested, "Login")
+
     @patch('algebras.utils.lang_validator.read_language_file')
     def test_validate_language_files(self, mock_read_file):
         # Mock read_language_file to return test data

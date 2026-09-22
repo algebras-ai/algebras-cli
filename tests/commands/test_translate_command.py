@@ -1066,6 +1066,136 @@ class TestTranslateCommand:
             assert "greeting" in keys_arg, \
                 f"'greeting' should be treated as missing (empty value), got keys={keys_arg}"
 
+    def test_flat_dotted_key_modified_value_detected_in_process_outdated_files(self):
+        """
+        Regression: formats like .stringsdict flatten plural forms into literal
+        dot-joined top-level keys (e.g. "items_count.item_count.one"), not a
+        genuinely nested structure. _process_outdated_files' modified-key value
+        comparison used to always split every key on "." and traverse it as a
+        nested path, so for these flat-but-dotted-key formats both the source
+        and target lookups silently resolved to None (equal), and a changed
+        value was never detected as outdated.
+        """
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_source_language.return_value = "en"
+        mock_config.get_setting.side_effect = lambda key, default: default
+
+        source_file = "en.lproj/Localizable.stringsdict"
+        target_file = "fr.lproj/Localizable.stringsdict"
+
+        key = "items_count.item_count.one"
+        source_content = {key: "Just a single unit"}
+        target_content = {key: "Un élément"}  # stale translation, different value
+
+        mock_translator = MagicMock(spec=Translator)
+        mock_translator.translate_outdated_keys_batch.return_value = {
+            key: "Une seule unité"
+        }
+
+        mock_handler = MagicMock()
+        mock_handler.extract_keys.return_value = {key}
+
+        with patch(
+            "algebras.commands.translate_command.Config", return_value=mock_config
+        ), patch(
+            "algebras.commands.translate_command.Translator", return_value=mock_translator
+        ), patch(
+            "algebras.commands.translate_command._load_file_contents",
+            return_value=(source_content, target_content, None, None),
+        ), patch(
+            "algebras.commands.translate_command.get_handler", return_value=mock_handler
+        ), patch(
+            "algebras.commands.translate_command._should_use_in_place", return_value=False
+        ), patch(
+            "algebras.commands.translate_command._write_translated_content"
+        ), patch(
+            "algebras.commands.translate_command.click.echo"
+        ), patch(
+            "builtins.print"
+        ):
+            # only_missing defaults to False, so modified (outdated) keys are translated
+            translate_command.execute(
+                outdated_files=[(target_file, source_file)]
+            )
+
+            assert mock_translator.translate_outdated_keys_batch.called, (
+                "translate_outdated_keys_batch should be called - a changed value "
+                "for a flat dotted key must be detected as outdated"
+            )
+            call_args = mock_translator.translate_outdated_keys_batch.call_args
+            modified_keys_arg = call_args[0][2]  # third positional: modified keys
+            assert key in modified_keys_arg, (
+                f"'{key}' should be detected as a modified/outdated key, "
+                f"got {modified_keys_arg}"
+            )
+
+    def test_process_outdated_keys_files_handles_non_lang_prefixed_basename(self):
+        """
+        Regression: _process_outdated_keys_files used to gate its entire body
+        (including the actual translation) behind
+        `os.path.basename(target_file).startswith(target_lang)`. That only
+        happens to hold for the "{lang}.ext" naming convention (e.g.
+        "fr.json") - it silently skips every other real-world layout, such as
+        iOS "fr.lproj/Localizable.stringsdict" (language is a directory, not
+        the basename) or "locales/messages.fr.json" (language is a filename
+        suffix, not a prefix). The same startsWith(target_lang) guard was
+        already identified and removed from the sibling missing_keys_files
+        loop in commit 54455869 for being wrong - it was never removed here.
+        With no matching guard, translate_outdated_keys_batch must still be
+        called for such a file.
+        """
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_source_language.return_value = "en"
+        mock_config.get_setting.side_effect = lambda key, default: default
+
+        source_file = "en.lproj/Localizable.stringsdict"
+        # basename "Localizable.stringsdict" does not start with "fr"
+        target_file = "fr.lproj/Localizable.stringsdict"
+
+        key = "items_count.item_count.one"
+        source_content = {key: "A totally new wording"}
+        target_content = {key: "Un élément"}
+
+        mock_translator = MagicMock(spec=Translator)
+        mock_translator.translate_outdated_keys_batch.return_value = {
+            key: "Une formulation totalement inédite"
+        }
+
+        mock_handler = MagicMock()
+
+        with patch(
+            "algebras.commands.translate_command.Config", return_value=mock_config
+        ), patch(
+            "algebras.commands.translate_command.Translator", return_value=mock_translator
+        ), patch(
+            "algebras.commands.translate_command._load_file_contents",
+            return_value=(source_content, target_content, None, None),
+        ), patch(
+            "algebras.commands.translate_command.get_handler", return_value=mock_handler
+        ), patch(
+            "algebras.commands.translate_command._should_use_in_place", return_value=False
+        ), patch(
+            "algebras.commands.translate_command._write_translated_content"
+        ), patch(
+            "algebras.commands.translate_command.click.echo"
+        ), patch(
+            "builtins.print"
+        ):
+            translate_command.execute(
+                "fr",
+                only_missing=False,
+                outdated_keys_files=[(target_file, {key}, source_file)],
+            )
+
+            assert mock_translator.translate_outdated_keys_batch.called, (
+                "translate_outdated_keys_batch should be called for a target file "
+                "whose basename doesn't start with the language code"
+            )
+
 
 class TestLookupSourceFileConfig:
     """
