@@ -4,7 +4,7 @@ from unittest.mock import patch, Mock, call
 
 from colorama import Fore
 
-from algebras.commands.update_command import execute
+from algebras.commands.update_command import execute, find_matching_source_file
 
 
 class TestUpdateCommand(unittest.TestCase):
@@ -306,6 +306,140 @@ class TestUpdateCommand(unittest.TestCase):
             
             assert language_called, "Language 'fr' wasn't passed to translate_command.execute"
 
+    def test_find_matching_source_file_lproj_directories(self):
+        """
+        Regression test: the standard iOS locale-directory convention
+        (en.lproj/Localizable.stringsdict, fr.lproj/Localizable.stringsdict)
+        embeds the language as a ".lproj" directory suffix, not as an isolated
+        "/{lang}/" path segment or a filename suffix. Without matching this
+        pattern, find_matching_source_file returns None, so update_command
+        never pairs the files together and silently treats the project as
+        fully up to date.
+        """
+        source_files = ["en.lproj/Localizable.stringsdict"]
+        matched = find_matching_source_file(
+            "fr.lproj/Localizable.stringsdict", source_files, "fr", "en"
+        )
+        self.assertEqual(matched, "en.lproj/Localizable.stringsdict")
+
+        # Also works nested under a project directory
+        nested_source_files = ["MyApp/en.lproj/Localizable.stringsdict"]
+        nested_matched = find_matching_source_file(
+            "MyApp/fr.lproj/Localizable.stringsdict", nested_source_files, "fr", "en"
+        )
+        self.assertEqual(nested_matched, "MyApp/en.lproj/Localizable.stringsdict")
+
+    @patch('algebras.commands.update_command.Config')
+    @patch('algebras.commands.update_command.FileScanner')
+    @patch('algebras.commands.update_command.is_git_available')
+    @patch('algebras.commands.update_command.is_git_repository')
+    @patch('algebras.commands.update_command.validate_language_files')
+    @patch('algebras.commands.update_command.find_outdated_keys')
+    @patch('algebras.commands.update_command.translate_command')
+    @patch('os.path.getmtime')
+    def test_execute_translates_git_outdated_keys_with_full(
+        self, mock_getmtime, mock_translate, mock_find_outdated, mock_validate,
+        mock_is_git_repo, mock_is_git_available, mock_scanner_class, mock_config_class
+    ):
+        """
+        Regression test: a key whose source value changed (detected via git
+        history) but whose file mtime didn't independently trip the
+        modification-time check (e.g. both files touched in the same
+        commit/checkout) must still reach translate_command.execute via
+        outdated_keys_files when --full (only_missing=False) is used. This
+        loop was previously dead code, removed in a past commit and never
+        restored, so git-detected outdated keys were reported but never
+        actually retranslated regardless of flags.
+        """
+        mock_config = Mock()
+        mock_config.exists.return_value = True
+        mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_source_language.return_value = "en"
+        mock_config_class.return_value = mock_config
+
+        mock_scanner = Mock()
+        mock_scanner.group_files_by_language.return_value = {
+            "en": [self.en_file],
+            "fr": [self.fr_file],
+        }
+        mock_scanner_class.return_value = mock_scanner
+
+        mock_is_git_available.return_value = True
+        mock_is_git_repo.return_value = True
+
+        # Same mtime for source and target - the modification-time path must not fire
+        mock_getmtime.return_value = 100
+
+        # No missing keys
+        mock_validate.return_value = (True, set())
+
+        # Git history says "greeting" changed
+        mock_find_outdated.return_value = (True, {"greeting"})
+
+        with patch('algebras.commands.update_command.click.echo'):
+            execute(only_missing=False)
+
+        outdated_calls = [
+            kwargs for _, kwargs in mock_translate.execute.call_args_list
+            if kwargs.get("outdated_keys_files")
+        ]
+        assert outdated_calls, (
+            "translate_command.execute was never called with outdated_keys_files - "
+            "git-detected outdated keys are being silently dropped"
+        )
+        assert outdated_calls[0]["outdated_keys_files"] == [
+            (self.fr_file, {"greeting"}, self.en_file)
+        ]
+        assert outdated_calls[0]["only_missing"] is False
+
+    @patch('algebras.commands.update_command.Config')
+    @patch('algebras.commands.update_command.FileScanner')
+    @patch('algebras.commands.update_command.is_git_available')
+    @patch('algebras.commands.update_command.is_git_repository')
+    @patch('algebras.commands.update_command.validate_language_files')
+    @patch('algebras.commands.update_command.find_outdated_keys')
+    @patch('algebras.commands.update_command.translate_command')
+    @patch('os.path.getmtime')
+    def test_execute_default_mode_passes_only_missing_true_for_outdated_keys(
+        self, mock_getmtime, mock_translate, mock_find_outdated, mock_validate,
+        mock_is_git_repo, mock_is_git_available, mock_scanner_class, mock_config_class
+    ):
+        """
+        Without --full, only_missing stays True end-to-end, matching its
+        documented meaning of "only missing keys, don't touch existing ones" -
+        the outdated_keys_files call still happens (so it's reported), but
+        only_missing=True flows through so _process_outdated_keys_files skips
+        actually retranslating them.
+        """
+        mock_config = Mock()
+        mock_config.exists.return_value = True
+        mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.get_source_language.return_value = "en"
+        mock_config_class.return_value = mock_config
+
+        mock_scanner = Mock()
+        mock_scanner.group_files_by_language.return_value = {
+            "en": [self.en_file],
+            "fr": [self.fr_file],
+        }
+        mock_scanner_class.return_value = mock_scanner
+
+        mock_is_git_available.return_value = True
+        mock_is_git_repo.return_value = True
+        mock_getmtime.return_value = 100
+        mock_validate.return_value = (True, set())
+        mock_find_outdated.return_value = (True, {"greeting"})
+
+        with patch('algebras.commands.update_command.click.echo'):
+            execute()  # default: only_missing=True
+
+        outdated_calls = [
+            kwargs for _, kwargs in mock_translate.execute.call_args_list
+            if kwargs.get("outdated_keys_files")
+        ]
+        assert outdated_calls
+        assert outdated_calls[0]["only_missing"] is True
+
 
 if __name__ == "__main__":
-    unittest.main() 
+    unittest.main()
