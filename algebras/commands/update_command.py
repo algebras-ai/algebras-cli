@@ -452,8 +452,16 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                     glossary_id=glossary_id,
                 )
 
+            # Files already handled above (outdated by modification time) have
+            # their missing keys translated as part of that pass already, via
+            # _process_outdated_files' own missing-key detection - so skip
+            # them here to avoid translating the same keys a second time.
+            already_processed = {file_path for file_path, _ in outdated_files}
+
             # For files with missing keys, call translate_command for each file
             for file_path, missing_keys, source_file in missing_keys_files:
+                if file_path in already_processed:
+                    continue
                 if missing_keys:
                     click.echo(f"  {Fore.YELLOW}File {os.path.basename(file_path)} is missing {len(missing_keys)} keys:{Fore.RESET}")
                     for key in list(missing_keys)[:5]:
