@@ -157,6 +157,15 @@ def get_key_value(data: Dict[str, Any], key: str) -> Any:
     Returns:
         Value of the key or None if key doesn't exist
     """
+    # Direct top-level match first: some formats (.stringsdict plural forms,
+    # XLIFF, CSV/TSV, Android "__plurals__" keys) are read into an already-flat
+    # dict whose literal keys happen to contain dots, rather than a genuinely
+    # nested structure. Without this check, splitting those keys on "." and
+    # traversing as a path never finds the value (both sides resolve to None),
+    # so callers like find_outdated_keys() silently never detect changes.
+    if isinstance(data, dict) and key in data and not isinstance(data[key], (dict, list)):
+        return data[key]
+
     parts = key.split(".")
     current = data
 
