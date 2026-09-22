@@ -1184,19 +1184,9 @@ def _process_outdated_files(
                 if len(modified_keys) > 5:
                     click.echo(f"    - ... and {len(modified_keys) - 5} more")
 
-            # Translate missing keys
             if missing_keys:
                 click.echo(
                     f"  {Fore.GREEN}Translating {len(missing_keys)} missing keys...{Fore.RESET}"
-                )
-                target_content = translator.translate_missing_keys_batch(
-                    source_content,
-                    target_content,
-                    list(missing_keys),
-                    target_lang,
-                    ui_safe,
-                    glossary_id,
-                    source_file_path=source_file,
                 )
 
             # Save updated content if there were changes
@@ -1374,15 +1364,6 @@ def _process_missing_keys_files(
             if missing_keys:
                 click.echo(
                     f"  {Fore.GREEN}Translating {len(missing_keys)} missing keys...{Fore.RESET}"
-                )
-                target_content = translator.translate_missing_keys_batch(
-                    source_content,
-                    target_content,
-                    list(missing_keys),
-                    target_lang,
-                    ui_safe,
-                    glossary_id,
-                    source_file_path=source_file,
                 )
 
                 # Save updated content

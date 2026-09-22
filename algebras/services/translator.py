@@ -57,6 +57,25 @@ from algebras.services.string_normalizer import StringNormalizer
 from algebras.services.strategies.strategy_factory import TranslationStrategyFactory
 
 
+def _flatten_translated_subtree(base_key_path: str, subtree: Any) -> Dict[str, str]:
+    """
+    Flatten a translated nested dict back into dot-notation leaf paths,
+    prefixed by base_key_path, for consumers (like incremental file writers)
+    that expect a flat {key_path: translation} mapping.
+    """
+    flattened: Dict[str, str] = {}
+
+    def _walk(value: Any, path: str) -> None:
+        if isinstance(value, dict):
+            for k, v in value.items():
+                _walk(v, f"{path}.{k}")
+        elif isinstance(value, str):
+            flattened[path] = value
+
+    _walk(subtree, base_key_path)
+    return flattened
+
+
 class TranslationCache:
     """Cache for storing translations to avoid duplicate API calls."""
 
@@ -746,90 +765,87 @@ class Translator:
         key_paths_list = []
         key_parts_list = []
         empty_key_paths = []  # Track keys with empty strings
+        missing_subtrees = []  # Track entire nested objects that are missing from target
 
+        # Resolve every missing key to its source value first, then process
+        # shallowest paths first. This lets us detect when a whole nested
+        # object is missing (e.g. a new "settings" section was added to the
+        # source) and translate it once, recursively, instead of once per
+        # ancestor/descendant path that extract_all_keys() also reports as
+        # missing (which previously caused later paths to clobber earlier
+        # ones with an empty string).
+        resolved_entries = []
         for key_path in missing_keys:
-            # First, check if this is a direct key in source_content (flat format)
             if isinstance(source_content, dict) and key_path in source_content:
+                # Direct top-level key match (dots, if any, are part of the
+                # literal key name, e.g. Android plural keys like
+                # "Quiz.timer_format.__plurals__").
+                key_parts = [key_path]
                 source_value = source_content[key_path]
-                if isinstance(source_value, str):
-                    # Filter empty strings - preserve them but don't send to API
-                    if source_value.strip() == "":
+            else:
+                key_parts = key_path.split(".")
+                source_value = get_nested_value(source_content, key_parts)
+            resolved_entries.append((key_path, key_parts, source_value))
+
+        resolved_entries.sort(key=lambda entry: len(entry[1]))
+
+        covered_prefixes = []
+
+        def _is_covered(key_parts):
+            return any(
+                len(prefix) <= len(key_parts)
+                and tuple(key_parts[: len(prefix)]) == prefix
+                for prefix in covered_prefixes
+            )
+
+        for key_path, key_parts, source_value in resolved_entries:
+            if _is_covered(key_parts):
+                # Already covered by a shallower missing subtree above.
+                continue
+
+            if isinstance(source_value, str):
+                # Filter empty strings - preserve them but don't send to API
+                if source_value.strip() == "":
+                    empty_key_paths.append((key_path, key_parts))
+                else:
+                    texts_to_translate.append(source_value)
+                    key_paths_list.append(key_path)
+                    key_parts_list.append(key_parts)
+            elif isinstance(source_value, dict):
+                # An entire nested object is missing from the target. Queue
+                # it for a recursive subtree translation instead of
+                # collapsing it to a single value.
+                missing_subtrees.append((key_path, key_parts, source_value))
+                covered_prefixes.append(tuple(key_parts))
+            else:
+                # Determine file format to decide how to handle missing keys
+                is_flat_format = False
+                if source_file_path:
+                    is_flat_format = source_file_path.endswith((".po", ".csv", ".tsv"))
+                else:
+                    # Fallback: check structure of source_content
+                    # If it's a flat dictionary (all values are strings, no nested dicts),
+                    # then it might be a flat format
+                    is_flat_format = (
+                        isinstance(source_content, dict) and
+                        all(isinstance(v, str) for v in source_content.values()) and
+                        not any("." in k for k in source_content.keys())
+                    )
+
+                if is_flat_format:
+                    # For flat formats like .po, the key itself might BE the text to translate
+                    # This is common when msgid is used as the key
+                    # Filter empty strings
+                    if key_path.strip() == "":
                         empty_key_paths.append((key_path, [key_path]))
                     else:
-                        texts_to_translate.append(source_value)
+                        texts_to_translate.append(key_path)
                         key_paths_list.append(key_path)
-                        key_parts_list.append([key_path])  # Treat as single-level key
-                elif isinstance(source_value, dict):
-                    # Handle plural/dict values (e.g., Android XML plurals)
-                    # Each plural form (one, other, etc.) needs to be translated separately
-                    for plural_key, plural_value in source_value.items():
-                        if isinstance(plural_value, str) and plural_value.strip():
-                            # Create a composite key for this plural form (e.g., "Plural.tasks.__plurals__.one")
-                            composite_key = f"{key_path}.{plural_key}"
-                            texts_to_translate.append(plural_value)
-                            key_paths_list.append(composite_key)
-                            key_parts_list.append([key_path, plural_key])  # Store as nested structure
-                            print(f"DEBUG: ✓ Added plural form '{composite_key}' to translation queue")
-            else:
-                # Try to treat it as a dot-notation path (nested format)
-                key_parts = key_path.split(".")
-                print(f"DEBUG: Trying as nested path -> key_parts: {key_parts}")
-
-                source_value = get_nested_value(source_content, key_parts)
-                print(
-                    f"DEBUG: Source value for nested '{key_path}': {repr(source_value)} (type: {type(source_value)})"
-                )
-
-                if isinstance(source_value, str):
-                    # Filter empty strings - preserve them but don't send to API
-                    if source_value.strip() == "":
-                        empty_key_paths.append((key_path, key_parts))
-                    else:
-                        # This is a nested format, use the source value as text to translate
-                        texts_to_translate.append(source_value)
-                        key_paths_list.append(key_path)
-                        key_parts_list.append(key_parts)
-                        print(
-                            f"DEBUG: ✓ Added '{key_path}' to translation queue (nested format)"
-                        )
+                        key_parts_list.append([key_path])
                 else:
-                    print(
-                        f"DEBUG: Source value for '{key_path}': {repr(source_value)} (type: {type(source_value)})"
-                    )
-                    # Determine file format to decide how to handle missing keys
-                    is_flat_format = False
-                    if source_file_path:
-                        is_flat_format = source_file_path.endswith((".po", ".csv", ".tsv"))
-                    else:
-                        # Fallback: check structure of source_content
-                        # If it's a flat dictionary (all values are strings, no nested dicts),
-                        # then it might be a flat format
-                        is_flat_format = (
-                            isinstance(source_content, dict) and
-                            all(isinstance(v, str) for v in source_content.values()) and
-                            not any("." in k for k in source_content.keys())
-                        )
-                    
-                    if is_flat_format:
-                        # For flat formats like .po, the key itself might BE the text to translate
-                        # This is common when msgid is used as the key
-                        # Filter empty strings
-                        if key_path.strip() == "":
-                            empty_key_paths.append((key_path, [key_path]))
-                        else:
-                            texts_to_translate.append(key_path)
-                            key_paths_list.append(key_path)
-                            key_parts_list.append([key_path])
-                            print(
-                                f"DEBUG: ✓ Added '{key_path}' to translation queue (flat format - key as text)"
-                            )
-                    else:
-                        # For nested formats (TypeScript, JSON, YAML), if key not found in source,
-                        # set empty string (key will be created in target file with empty value)
-                        empty_key_paths.append((key_path, key_parts))
-                        print(
-                            f"DEBUG: ⚠ Key '{key_path}' not found in source, setting empty string (nested format)"
-                        )
+                    # For nested formats (TypeScript, JSON, YAML), if key not found in source,
+                    # set empty string (key will be created in target file with empty value)
+                    empty_key_paths.append((key_path, key_parts))
 
         # Set empty strings in the result
         for key_path, key_parts in empty_key_paths:
@@ -838,10 +854,7 @@ class Translator:
             else:
                 set_nested_value(updated_content, key_parts, "")
 
-        print(f"DEBUG: Final translation queue size: {len(texts_to_translate)}")
-
-        if not texts_to_translate:
-            print("DEBUG: No texts to translate, returning original target content")
+        if not texts_to_translate and not missing_subtrees:
             return updated_content
 
         # Use BatchProcessor for batch translation
@@ -851,105 +864,136 @@ class Translator:
         provider = self.api_config.get("provider", "algebras-ai")
         translate_text_func = None if provider == "algebras-ai" else self.translate_text
 
-        result = batch_processor.process(
-            texts=texts_to_translate,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            ui_safe=ui_safe,
-            glossary_id=glossary_id,
-            on_batch_complete=None,  # We'll handle callback after mapping to keys
-            translate_text_func=translate_text_func,
-        )
-
-        # Map translations back to key paths and update content
-        # Also handle callbacks
-        num_batches = (len(texts_to_translate) + self.batch_size - 1) // self.batch_size
-        failed_indices = set()
-        for batch_idx in result.failed_batches:
-            batch_start_idx = (batch_idx - 1) * self.batch_size
-            batch_end_idx = min(
-                batch_start_idx + self.batch_size, len(texts_to_translate)
-            )
-            for idx in range(batch_start_idx, batch_end_idx):
-                failed_indices.add(idx)
-
-        for batch_idx in range(1, num_batches + 1):
-            batch_start_idx = (batch_idx - 1) * self.batch_size
-            batch_end_idx = min(
-                batch_start_idx + self.batch_size, len(texts_to_translate)
+        num_batches = 0
+        if texts_to_translate:
+            result = batch_processor.process(
+                texts=texts_to_translate,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                ui_safe=ui_safe,
+                glossary_id=glossary_id,
+                on_batch_complete=None,  # We'll handle callback after mapping to keys
+                translate_text_func=translate_text_func,
             )
 
-            batch_dict = {}
-            for i in range(batch_start_idx, batch_end_idx):
-                if i < len(result.translations) and i < len(key_parts_list):
-                    source_text = texts_to_translate[i]
-                    raw_translation = result.translations[i]
-                    key_parts = key_parts_list[i]
-                    key_path = key_paths_list[i]
+            # Map translations back to key paths and update content
+            # Also handle callbacks
+            num_batches = (len(texts_to_translate) + self.batch_size - 1) // self.batch_size
+            failed_indices = set()
+            for batch_idx in result.failed_batches:
+                batch_start_idx = (batch_idx - 1) * self.batch_size
+                batch_end_idx = min(
+                    batch_start_idx + self.batch_size, len(texts_to_translate)
+                )
+                for idx in range(batch_start_idx, batch_end_idx):
+                    failed_indices.add(idx)
 
-                    # Skip failed translations
-                    if i in failed_indices:
-                        continue
+            for batch_idx in range(1, num_batches + 1):
+                batch_start_idx = (batch_idx - 1) * self.batch_size
+                batch_end_idx = min(
+                    batch_start_idx + self.batch_size, len(texts_to_translate)
+                )
 
-                    # Apply normalization
-                    normalized = self.string_normalizer.normalize(
-                        source_text, raw_translation
+                batch_dict = {}
+                for i in range(batch_start_idx, batch_end_idx):
+                    if i < len(result.translations) and i < len(key_parts_list):
+                        source_text = texts_to_translate[i]
+                        raw_translation = result.translations[i]
+                        key_parts = key_parts_list[i]
+                        key_path = key_paths_list[i]
+
+                        # Skip failed translations
+                        if i in failed_indices:
+                            continue
+
+                        # Apply normalization
+                        normalized = self.string_normalizer.normalize(
+                            source_text, raw_translation
+                        )
+
+                        # Update content with translated values
+                        if len(key_parts) == 1:
+                            # Flat format - set directly
+                            updated_content[key_parts[0]] = normalized
+                        elif len(key_parts) == 2 and key_parts[0].endswith('.__plurals__'):
+                            # Handle plurals - reconstruct dictionary structure
+                            plural_base_key = key_parts[0]  # e.g., "Quiz.timer_format.__plurals__"
+                            plural_form = key_parts[1]      # e.g., "one" or "other"
+
+                            # Initialize plural dict if it doesn't exist
+                            if plural_base_key not in updated_content:
+                                updated_content[plural_base_key] = {}
+                            elif not isinstance(updated_content[plural_base_key], dict):
+                                # Convert to dict if it wasn't one already
+                                updated_content[plural_base_key] = {}
+
+                            # Set the plural form
+                            updated_content[plural_base_key][plural_form] = normalized
+                        else:
+                            # Nested format - use nested value setter
+                            set_nested_value(updated_content, key_parts, normalized)
+                        batch_dict[key_path] = normalized
+
+                # Call callback if provided
+                if on_batch_complete and batch_dict:
+                    try:
+                        on_batch_complete(batch_dict, batch_idx)
+                    except Exception as e:
+                        print(f"  ⚠ Error in batch complete callback: {str(e)}")
+
+            # Print summary if there were failures
+            if result.failed_batches:
+                print(f"\n  Summary:")
+                print(f"    Total batches: {result.total_batches}")
+                print(
+                    f"    Successful: {result.successful_batches} ({result.successful_batches / result.total_batches * 100:.1f}%)"
+                )
+                print(
+                    f"    Failed: {len(result.failed_batches)} ({len(result.failed_batches) / result.total_batches * 100:.1f}%)"
+                )
+                if result.error_stats["5xx"]:
+                    print(
+                        f"      - 5xx errors: {len(result.error_stats['5xx'])} batches ({', '.join(map(str, result.error_stats['5xx']))})"
                     )
+                if result.error_stats["429"]:
+                    print(
+                        f"      - 429 errors: {len(result.error_stats['429'])} batches ({', '.join(map(str, result.error_stats['429']))})"
+                    )
+                if result.error_stats["other"]:
+                    print(
+                        f"      - Other errors: {len(result.error_stats['other'])} batches ({', '.join(map(str, result.error_stats['other']))})"
+                    )
+                print(f"    Failed batches will keep existing values (or remain missing)")
 
-                    # Update content with translated values
-                    if len(key_parts) == 1:
-                        # Flat format - set directly
-                        updated_content[key_parts[0]] = normalized
-                    elif len(key_parts) == 2 and key_parts[0].endswith('.__plurals__'):
-                        # Handle plurals - reconstruct dictionary structure
-                        plural_base_key = key_parts[0]  # e.g., "Quiz.timer_format.__plurals__"
-                        plural_form = key_parts[1]      # e.g., "one" or "other"
-                        
-                        # Initialize plural dict if it doesn't exist
-                        if plural_base_key not in updated_content:
-                            updated_content[plural_base_key] = {}
-                        elif not isinstance(updated_content[plural_base_key], dict):
-                            # Convert to dict if it wasn't one already
-                            updated_content[plural_base_key] = {}
-                        
-                        # Set the plural form
-                        updated_content[plural_base_key][plural_form] = normalized
-                        print(f"  ✓ Translated plural: {key_path}")
-                    else:
-                        # Nested format - use nested value setter
-                        set_nested_value(updated_content, key_parts, normalized)
-                    batch_dict[key_path] = normalized
+        # Translate entire missing subtrees (whole nested objects absent from
+        # the target) by delegating to the same nested-dict strategy used for
+        # full-file translation, so they get recursed into correctly instead
+        # of being collapsed to a single value.
+        if missing_subtrees:
+            nested_strategy = TranslationStrategyFactory.get_nested_dict_strategy(self)
+            for subtree_idx, (key_path, key_parts, subtree) in enumerate(missing_subtrees):
+                translated_subtree = nested_strategy.translate(
+                    subtree,
+                    source_lang,
+                    target_lang,
+                    ui_safe,
+                    glossary_id,
+                    None,
+                    translate_text_func,
+                )
 
-            # Call callback if provided
-            if on_batch_complete and batch_dict:
-                try:
-                    on_batch_complete(batch_dict, batch_idx)
-                except Exception as e:
-                    print(f"  ⚠ Error in batch complete callback: {str(e)}")
+                if len(key_parts) == 1:
+                    updated_content[key_parts[0]] = translated_subtree
+                else:
+                    set_nested_value(updated_content, key_parts, translated_subtree)
 
-        # Print summary if there were failures
-        if result.failed_batches:
-            print(f"\n  Summary:")
-            print(f"    Total batches: {result.total_batches}")
-            print(
-                f"    Successful: {result.successful_batches} ({result.successful_batches / result.total_batches * 100:.1f}%)"
-            )
-            print(
-                f"    Failed: {len(result.failed_batches)} ({len(result.failed_batches) / result.total_batches * 100:.1f}%)"
-            )
-            if result.error_stats["5xx"]:
-                print(
-                    f"      - 5xx errors: {len(result.error_stats['5xx'])} batches ({', '.join(map(str, result.error_stats['5xx']))})"
-                )
-            if result.error_stats["429"]:
-                print(
-                    f"      - 429 errors: {len(result.error_stats['429'])} batches ({', '.join(map(str, result.error_stats['429']))})"
-                )
-            if result.error_stats["other"]:
-                print(
-                    f"      - Other errors: {len(result.error_stats['other'])} batches ({', '.join(map(str, result.error_stats['other']))})"
-                )
-            print(f"    Failed batches will keep existing values (or remain missing)")
+                if on_batch_complete:
+                    flattened = _flatten_translated_subtree(key_path, translated_subtree)
+                    if flattened:
+                        try:
+                            on_batch_complete(flattened, num_batches + subtree_idx + 1)
+                        except Exception as e:
+                            print(f"  ⚠ Error in batch complete callback: {str(e)}")
 
         return updated_content
 
