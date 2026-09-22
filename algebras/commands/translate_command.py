@@ -1142,8 +1142,16 @@ def _process_outdated_files(
             # Compare values to find potentially modified keys
             modified_keys = []
             for key in common_keys:
-                if source_file.endswith((".html", ".xlf", ".xliff", ".csv", ".tsv")):
-                    # For HTML, XLIFF, and CSV files, keys are flat, so compare values directly
+                if (
+                    isinstance(source_content, dict)
+                    and key in source_content
+                    and not isinstance(source_content[key], (dict, list))
+                ):
+                    # Direct top-level match: content is a flat dict (HTML, XLIFF,
+                    # CSV/TSV, or .stringsdict's dot-joined plural-form keys) where
+                    # dots, if any, are part of the literal key name rather than a
+                    # nested path - compare values directly instead of treating the
+                    # key as a dotted path into a structure that isn't actually nested.
                     source_value = source_content.get(key)
                     target_value = target_content.get(key)
                 else:
