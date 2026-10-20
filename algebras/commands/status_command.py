@@ -10,7 +10,12 @@ from typing import Optional, Dict, List, Set, Tuple
 
 from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
-from algebras.utils.lang_validator import read_language_file, extract_all_keys, get_key_value
+from algebras.utils.lang_validator import (
+    expand_plural_source_keys,
+    extract_all_keys,
+    get_key_value,
+    read_language_file,
+)
 from algebras.utils.html_handler import read_html_file
 
 
@@ -189,6 +194,7 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
             source_lang = source_language if target_file_path.endswith(('.csv', '.tsv')) else None
             target_lang = target_language if target_file_path.endswith(('.csv', '.tsv')) else None
             source_data = read_language_file(source_file_path, source_lang, config)
+            source_data = expand_plural_source_keys(source_file_path, source_data, target_language)
             target_data = read_language_file(target_file_path, target_lang, config)
             
             # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff, .csv, .tsv)
@@ -265,6 +271,13 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
         click.echo(click.style(f"Warning: Could not check keys between {source_file_path} and {target_file_path}: {str(e)}", fg='yellow'))
         return 0, 0
 
+
+
+def _expected_key_count(source_file: str, lang: str, source_key_counts: Dict[str, int]) -> int:
+    """Source key count, plus the plural forms `lang` needs that a .stringsdict source lacks."""
+    if not source_file.endswith('.stringsdict') or not os.path.isfile(source_file):
+        return source_key_counts.get(source_file, 0)
+    return len(expand_plural_source_keys(source_file, read_language_file(source_file), lang))
 
 
 def execute(language: Optional[str] = None, config_file: str = None) -> None:
@@ -388,7 +401,7 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                 # First, count expected keys from ALL source files (regardless of whether destination files exist)
                 for source_file, source_config in config.get_source_files().items():
                     if os.path.isfile(source_file):
-                        expected_keys = source_key_counts.get(source_file, 0)
+                        expected_keys = _expected_key_count(source_file, lang, source_key_counts)
                         total_expected_keys += expected_keys
                 
                 # Then, count translated keys only from files that have destination files
@@ -402,7 +415,7 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                                 # Count current translated keys and outdated keys
                                 # For CSV/TSV files, pass language parameters
                                 source_lang = source_language if source_file.endswith(('.csv', '.tsv')) else None
-                                target_lang = lang if resolved_path.endswith(('.csv', '.tsv')) else None
+                                target_lang = lang if resolved_path.endswith(('.csv', '.tsv', '.stringsdict')) else None
                                 current_translated_keys, outdated_keys = count_current_and_outdated_keys(
                                     source_file, resolved_path, source_lang, target_lang, config
                                 )
@@ -442,13 +455,13 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                     
                     if potential_source_file in source_files:
                         source_file = potential_source_file
-                        expected_keys = source_key_counts.get(source_file, 0)
+                        expected_keys = _expected_key_count(source_file, lang, source_key_counts)
                         total_expected_keys += expected_keys
                         
                         # Count current translated keys and outdated keys
                         # For CSV/TSV files, pass language parameters
                         source_lang = source_language if source_file.endswith(('.csv', '.tsv')) else None
-                        target_lang = lang if lang_file.endswith(('.csv', '.tsv')) else None
+                        target_lang = lang if lang_file.endswith(('.csv', '.tsv', '.stringsdict')) else None
                         current_translated_keys, outdated_keys = count_current_and_outdated_keys(
                             source_file, lang_file, source_lang, target_lang, config
                         )

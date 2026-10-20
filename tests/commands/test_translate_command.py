@@ -1036,7 +1036,7 @@ class TestTranslateCommand:
             "algebras.commands.translate_command.Translator", return_value=mock_translator
         ), patch(
             "algebras.commands.translate_command._load_file_contents",
-            return_value=(source_content, target_content, None, None),
+            return_value=(source_content, target_content, None, None, None),
         ), patch(
             "algebras.commands.translate_command.get_handler", return_value=mock_handler
         ), patch(
@@ -1103,7 +1103,7 @@ class TestTranslateCommand:
             "algebras.commands.translate_command.Translator", return_value=mock_translator
         ), patch(
             "algebras.commands.translate_command._load_file_contents",
-            return_value=(source_content, target_content, None, None),
+            return_value=(source_content, target_content, None, None, None),
         ), patch(
             "algebras.commands.translate_command.get_handler", return_value=mock_handler
         ), patch(
@@ -1173,7 +1173,7 @@ class TestTranslateCommand:
             "algebras.commands.translate_command.Translator", return_value=mock_translator
         ), patch(
             "algebras.commands.translate_command._load_file_contents",
-            return_value=(source_content, target_content, None, None),
+            return_value=(source_content, target_content, None, None, None),
         ), patch(
             "algebras.commands.translate_command.get_handler", return_value=mock_handler
         ), patch(
