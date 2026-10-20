@@ -31,10 +31,15 @@ from algebras.utils.ios_strings_handler import (
     write_ios_strings_file,
 )
 from algebras.utils.ios_stringsdict_handler import (
-    read_ios_stringsdict_file,
-    write_ios_stringsdict_file,
+    anchor_plural_contexts,
+    build_plural_contexts,
+    expand_plural_forms,
     extract_translatable_strings,
+    read_ios_stringsdict_file,
+    split_plural_passes,
     update_translatable_strings,
+    validate_plural_forms,
+    write_ios_stringsdict_file,
 )
 from algebras.utils.html_handler import (
     read_html_file,
@@ -661,6 +666,7 @@ def _process_all_files(
                             target_content,
                             source_raw_content,
                             target_raw_content,
+                            plural_contexts,
                         ) = _load_file_contents(
                             source_file,
                             target_file,
@@ -684,7 +690,8 @@ def _process_all_files(
                             ):
                                 incremental_writer.write_batch(batch_results, batch_index)
 
-                            translator.translate_missing_keys_batch(
+                            _translate_plural_aware(
+                                translator.translate_missing_keys_batch,
                                 source_content,
                                 target_content,
                                 list(force_keys),
@@ -693,10 +700,12 @@ def _process_all_files(
                                 glossary_id,
                                 on_batch_complete=on_batch_complete,
                                 source_file_path=source_file,
+                                contexts=plural_contexts,
                             )
                             incremental_writer.finish()
                         else:
-                            translated_content = translator.translate_missing_keys_batch(
+                            translated_content = _translate_plural_aware(
+                                translator.translate_missing_keys_batch,
                                 source_content,
                                 target_content,
                                 list(force_keys),
@@ -704,6 +713,7 @@ def _process_all_files(
                                 ui_safe,
                                 glossary_id,
                                 source_file_path=source_file,
+                                contexts=plural_contexts,
                             )
                             _write_translated_content(
                                 target_file,
@@ -765,6 +775,7 @@ def _process_all_files(
                             target_content,
                             source_raw_content,
                             target_raw_content,
+                            plural_contexts,
                         ) = _load_file_contents(
                             source_file,
                             target_file,
@@ -803,7 +814,8 @@ def _process_all_files(
 
                             # Translate only the missing keys with callback
                             translated_content = (
-                                translator.translate_missing_keys_batch(
+                                _translate_plural_aware(
+                                    translator.translate_missing_keys_batch,
                                     source_content,
                                     target_content,
                                     list(missing_keys),
@@ -812,6 +824,7 @@ def _process_all_files(
                                     glossary_id,
                                     on_batch_complete=on_batch_complete,
                                     source_file_path=source_file,
+                                    contexts=plural_contexts,
                                 )
                             )
 
@@ -820,7 +833,8 @@ def _process_all_files(
                         else:
                             # Translate only the missing keys
                             translated_content = (
-                                translator.translate_missing_keys_batch(
+                                _translate_plural_aware(
+                                    translator.translate_missing_keys_batch,
                                     source_content,
                                     target_content,
                                     list(missing_keys),
@@ -828,6 +842,7 @@ def _process_all_files(
                                     ui_safe,
                                     glossary_id,
                                     source_file_path=source_file,
+                                    contexts=plural_contexts,
                                 )
                             )
 
@@ -872,9 +887,25 @@ def _process_all_files(
                         else:
                             target_content_raw = {}
 
-                        # Translate the file
-                        translated_content = translator.translate_file(
-                            source_file, target_lang, ui_safe, glossary_id
+                        # Translate every source string plus the plural forms the
+                        # target language needs but the source lacks
+                        source_flat = expand_plural_forms(
+                            source_content_raw,
+                            extract_translatable_strings(source_content_raw),
+                            target_lang,
+                        )
+                        translated_content = _translate_plural_aware(
+                            translator.translate_missing_keys_batch,
+                            source_flat,
+                            {},
+                            list(source_flat),
+                            target_lang,
+                            ui_safe,
+                            glossary_id,
+                            source_file_path=source_file,
+                            contexts=build_plural_contexts(
+                                source_content_raw, source_language, target_lang
+                            ),
                         )
 
                         # Update the target structure with translations,
@@ -884,6 +915,12 @@ def _process_all_files(
                             target_content_raw, translated_content, source_content_raw
                         )
                         write_ios_stringsdict_file(target_file, updated_content)
+                        _warn_plural_issues(
+                            target_file,
+                            validate_plural_forms(
+                                updated_content, source_content_raw, target_lang
+                            ),
+                        )
                     elif source_file.endswith((".csv", ".tsv")):
                         # For CSV/TSV files, read existing CSV/TSV and add/update language column
                         existing_csv = read_csv_file(source_file)
@@ -1117,6 +1154,7 @@ def _process_outdated_files(
                 target_content,
                 source_raw_content,
                 target_raw_content,
+                plural_contexts,
             ) = _load_file_contents(
                 source_file,
                 target_file,
@@ -1223,7 +1261,8 @@ def _process_outdated_files(
 
                     # Translate missing keys with callback
                     if missing_keys:
-                        target_content = translator.translate_missing_keys_batch(
+                        target_content = _translate_plural_aware(
+                            translator.translate_missing_keys_batch,
                             source_content,
                             target_content,
                             list(missing_keys),
@@ -1232,6 +1271,7 @@ def _process_outdated_files(
                             glossary_id,
                             on_batch_complete=on_batch_complete,
                             source_file_path=source_file,
+                            contexts=plural_contexts,
                         )
 
                     # Translate modified keys with callback
@@ -1239,7 +1279,8 @@ def _process_outdated_files(
                         click.echo(
                             f"  {Fore.GREEN}Translating {len(modified_keys)} outdated keys...{Fore.RESET}"
                         )
-                        target_content = translator.translate_outdated_keys_batch(
+                        target_content = _translate_plural_aware(
+                            translator.translate_outdated_keys_batch,
                             source_content,
                             target_content,
                             modified_keys,
@@ -1247,6 +1288,7 @@ def _process_outdated_files(
                             ui_safe,
                             glossary_id,
                             on_batch_complete=on_batch_complete,
+                            contexts=plural_contexts,
                         )
 
                     # Wait for all writes to complete
@@ -1254,7 +1296,8 @@ def _process_outdated_files(
                 else:
                     # Translate missing keys if needed
                     if missing_keys:
-                        target_content = translator.translate_missing_keys_batch(
+                        target_content = _translate_plural_aware(
+                            translator.translate_missing_keys_batch,
                             source_content,
                             target_content,
                             list(missing_keys),
@@ -1262,6 +1305,7 @@ def _process_outdated_files(
                             ui_safe,
                             glossary_id,
                             source_file_path=source_file,
+                            contexts=plural_contexts,
                         )
 
                     # Translate modified keys if needed
@@ -1269,13 +1313,15 @@ def _process_outdated_files(
                         click.echo(
                             f"  {Fore.GREEN}Translating {len(modified_keys)} outdated keys...{Fore.RESET}"
                         )
-                        target_content = translator.translate_outdated_keys_batch(
+                        target_content = _translate_plural_aware(
+                            translator.translate_outdated_keys_batch,
                             source_content,
                             target_content,
                             modified_keys,
                             target_lang,
                             ui_safe,
                             glossary_id,
+                            contexts=plural_contexts,
                         )
 
                     # Write using handler
@@ -1357,6 +1403,7 @@ def _process_missing_keys_files(
                 target_content,
                 source_raw_content,
                 target_raw_content,
+                plural_contexts,
             ) = _load_file_contents(
                 source_file,
                 target_file,
@@ -1398,7 +1445,8 @@ def _process_missing_keys_files(
                         incremental_writer.write_batch(batch_results, batch_index)
 
                     # Translate only the missing keys with callback
-                    target_content = translator.translate_missing_keys_batch(
+                    target_content = _translate_plural_aware(
+                        translator.translate_missing_keys_batch,
                         source_content,
                         target_content,
                         list(missing_keys),
@@ -1407,13 +1455,15 @@ def _process_missing_keys_files(
                         glossary_id,
                         on_batch_complete=on_batch_complete,
                         source_file_path=source_file,
+                        contexts=plural_contexts,
                     )
 
                     # Wait for all writes to complete
                     incremental_writer.finish()
                 else:
                     # Translate missing keys
-                    target_content = translator.translate_missing_keys_batch(
+                    target_content = _translate_plural_aware(
+                        translator.translate_missing_keys_batch,
                         source_content,
                         target_content,
                         list(missing_keys),
@@ -1421,6 +1471,7 @@ def _process_missing_keys_files(
                         ui_safe,
                         glossary_id,
                         source_file_path=source_file,
+                        contexts=plural_contexts,
                     )
 
                     # Write using handler
@@ -1498,6 +1549,7 @@ def _process_outdated_keys_files(
                 target_content,
                 source_raw_content,
                 target_raw_content,
+                plural_contexts,
             ) = _load_file_contents(
                 source_file,
                 target_file,
@@ -1539,7 +1591,8 @@ def _process_outdated_keys_files(
                         incremental_writer.write_batch(batch_results, batch_index)
 
                     # Translate with callback
-                    target_content = translator.translate_outdated_keys_batch(
+                    target_content = _translate_plural_aware(
+                        translator.translate_outdated_keys_batch,
                         source_content,
                         target_content,
                         list(outdated_keys),
@@ -1547,19 +1600,22 @@ def _process_outdated_keys_files(
                         ui_safe,
                         glossary_id,
                         on_batch_complete=on_batch_complete,
+                        contexts=plural_contexts,
                     )
 
                     # Wait for all writes to complete
                     incremental_writer.finish()
                 else:
                     # Translate outdated keys
-                    target_content = translator.translate_outdated_keys_batch(
+                    target_content = _translate_plural_aware(
+                        translator.translate_outdated_keys_batch,
                         source_content,
                         target_content,
                         list(outdated_keys),
                         target_lang,
                         ui_safe,
                         glossary_id,
+                        contexts=plural_contexts,
                     )
 
                     # Write using handler
@@ -1629,11 +1685,13 @@ def _load_file_contents(
         xlf_version: XLIFF version (for XLIFF files)
 
     Returns:
-        Tuple of (source_content, target_content, source_raw_content, target_raw_content)
-        raw_content may be None for formats that don't need it
+        Tuple of (source_content, target_content, source_raw_content, target_raw_content,
+        plural_contexts). raw_content may be None for formats that don't need it;
+        plural_contexts maps plural-form keys to translator notes (.stringsdict only).
     """
     source_raw_content = None
     target_raw_content = None
+    plural_contexts = None
 
     # For formats that need raw content (XLIFF, StringsDict)
     format_type = detect_format(source_file)
@@ -1680,8 +1738,13 @@ def _load_file_contents(
         target_raw_content = (
             handler.read(target_file) if os.path.exists(target_file) else None
         )
-        source_content = handler.read_for_translation(
-            source_file, source_language, config
+        source_content = expand_plural_forms(
+            source_raw_content,
+            handler.read_for_translation(source_file, source_language, config),
+            target_language,
+        )
+        plural_contexts = build_plural_contexts(
+            source_raw_content, source_language, target_language
         )
         target_content = (
             handler.read_for_translation(target_file, target_language, config)
@@ -1709,7 +1772,58 @@ def _load_file_contents(
             else {}
         )
 
-    return source_content, target_content, source_raw_content, target_raw_content
+    return (
+        source_content,
+        target_content,
+        source_raw_content,
+        target_raw_content,
+        plural_contexts,
+    )
+
+
+def _translate_plural_aware(
+    translate_fn,
+    source_content: Dict[str, Any],
+    target_content: Dict[str, Any],
+    keys,
+    *args,
+    contexts: Optional[Dict[str, str]] = None,
+    **kwargs,
+) -> Dict[str, Any]:
+    """
+    Call a Translator batch method; with plural contexts, translate in two passes.
+
+    Pass 1 translates each plural entry's 'other' form (plus non-plural keys). Pass 2 translates
+    the remaining forms with that 'other' translation (or the one already in the target) added to
+    their context, so every form of an entry uses the same wording.
+    """
+    if not contexts:
+        return translate_fn(source_content, target_content, list(keys), *args, contexts=contexts, **kwargs)
+
+    first, second = split_plural_passes(list(keys), contexts)
+    content = target_content
+    if first:
+        content = translate_fn(source_content, content, first, *args, contexts=contexts, **kwargs)
+    if second:
+        content = translate_fn(
+            source_content,
+            content,
+            second,
+            *args,
+            contexts=anchor_plural_contexts(contexts, second, content),
+            **kwargs,
+        )
+    return content
+
+
+def _warn_plural_issues(target_file: str, warnings: List[str]) -> None:
+    if not warnings:
+        return
+    click.echo(
+        f"  {Fore.YELLOW}⚠ Plural form issues in {os.path.basename(target_file)}:\x1b[0m"
+    )
+    for warning in warnings:
+        click.echo(f"    - {warning}")
 
 
 def _write_translated_content(
@@ -1794,3 +1908,11 @@ def _write_translated_content(
                 f"  {Fore.YELLOW}{format_type.value.upper()} format does not support in-place updates yet, regenerating from scratch{Fore.RESET}"
             )
         handler.write(target_file, content, **kwargs)
+
+    if format_type == FileFormat.STRINGSDICT and source_raw_content and target_language:
+        _warn_plural_issues(
+            target_file,
+            validate_plural_forms(
+                read_ios_stringsdict_file(target_file), source_raw_content, target_language
+            ),
+        )

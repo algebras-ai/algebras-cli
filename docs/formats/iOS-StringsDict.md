@@ -266,13 +266,37 @@ algebras review --language es
 
 ### 5. Language-Specific Rules
 
-- **Polish**: 5 plural forms (zero, one, few, many, other)
-- **Russian**: 4 plural forms (one, few, many, other)
-- **Arabic**: 6 plural forms (zero, one, two, few, many, other)
-- **English**: 2 plural forms (one, other)
+Each language needs its own set of plural forms, defined by the
+[CLDR Language Plural Rules](https://www.unicode.org/cldr/charts/latest/supplemental/language_plural_rules.html)
+(see also Apple's [Localizing strings that contain plurals](https://developer.apple.com/documentation/xcode/localizing-strings-that-contain-plurals)):
+
+| Language | Forms | Example counts |
+|----------|-------|----------------|
+| English, German | one, other | one: 1 · other: 0, 2, 3… |
+| French, Spanish, Portuguese | one, many, other | many: 1000000 |
+| Russian, Ukrainian | one, few, many, other | one: 1, 21, 31… · few: 2–4, 22–24… · many: 0, 5–20, 25–30… · other: fractions |
+| Polish | one, few, many, other | one: 1 · few: 2–4, 22–24… · many: 0, 5–21, 25–31… · other: fractions |
+| Czech | one, few, many, other | one: 1 · few: 2–4 · many: fractions · other: 0, 5+ |
+| Arabic | zero, one, two, few, many, other | few: 3–10 · many: 11–99 · other: 100–102 |
+| Japanese, Chinese, Korean | other | all counts |
+
+`other` is always required. An explicit `zero` form is shown for 0 in any language, even one whose
+rules have no `zero` category (e.g. English "No items"). Other forms a language doesn't use are
+ignored, and iOS falls back to `other`.
+
+**Algebras adds missing forms automatically.** When the source file has fewer forms than the
+target language needs (e.g. English `one`/`other` → Russian `one`/`few`/`many`/`other`), the
+missing forms are created and translated from the source `other` text. Each form is sent to the
+translator with a note saying which counts it covers, so it gets the right grammatical form.
+`algebras status` and `algebras update` count these forms too: a Russian file with only
+`one`/`other` is reported as incomplete.
+
+Forms that cover several counts should use the number placeholder rather than a spelled-out
+number. Russian `one` is also shown for 21, 31, 101…, so write `%d товар`, not `Один товар`.
+After translating, Algebras warns about missing forms and placeholders that don't match the source.
 
 ```xml
-<!-- Polish pluralization rules -->
+<!-- Russian -->
 <key>items_count</key>
 <dict>
     <key>NSStringLocalizedFormatKey</key>
@@ -283,16 +307,14 @@ algebras review --language es
         <string>NSStringPluralRuleType</string>
         <key>NSStringFormatValueTypeKey</key>
         <string>d</string>
-        <key>zero</key>
-        <string>Brak elementów</string>
         <key>one</key>
-        <string>Jeden element</string>
+        <string>%d товар</string>
         <key>few</key>
-        <string>%d elementy</string>
+        <string>%d товара</string>
         <key>many</key>
-        <string>%d elementów</string>
+        <string>%d товаров</string>
         <key>other</key>
-        <string>%d elementów</string>
+        <string>%d товара</string>
     </dict>
 </dict>
 ```

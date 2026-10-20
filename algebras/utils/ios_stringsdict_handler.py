@@ -2,9 +2,16 @@
 iOS .stringsdict localization file handler
 """
 
-import xml.etree.ElementTree as ET
-from typing import Dict, Any, Optional
 import os
+import re
+import xml.etree.ElementTree as ET
+from typing import Any, Dict, List, Optional, Tuple
+
+from algebras.utils.plural_rules import (
+    get_category_examples,
+    get_language_name,
+    get_plural_categories,
+)
 
 
 def read_ios_stringsdict_file(file_path: str) -> Dict[str, Any]:
@@ -249,6 +256,212 @@ def extract_translatable_strings(content: Dict[str, Any]) -> Dict[str, str]:
     return result
 
 
+PLURAL_FORMS = ("zero", "one", "two", "few", "many", "other")
+
+# printf-style specifiers iOS accepts: %d, %ld, %lu, %@, %1$@, %.2f, ...
+_IOS_FORMAT_SPECIFIER = re.compile(
+    r"%(?:\d+\$)?[-+ 0#']*\d*(?:\.\d+)?(?:hh|h|ll|l|q|L|z|t|j)?[@dDiuUxXoOfFeEgGaAcCsSp]"
+)
+
+
+def _is_plural_rule_dict(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("NSStringFormatSpecTypeKey") == "NSStringPluralRuleType"
+    )
+
+
+def find_plural_rule_dicts(content: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+    """(dot-notation key, plural rule dict) pairs, keyed the same way as extract_translatable_strings."""
+    found: List[Tuple[str, Dict[str, Any]]] = []
+
+    def _walk(data: Dict[str, Any], prefix: str) -> None:
+        for key, value in data.items():
+            current_key = f"{prefix}.{key}" if prefix else key
+            if _is_plural_rule_dict(value):
+                found.append((current_key, value))
+            elif isinstance(value, dict):
+                _walk(value, current_key)
+
+    _walk(content, "")
+    return found
+
+
+def extract_format_specifiers(text: str) -> List[str]:
+    return sorted(_IOS_FORMAT_SPECIFIER.findall(text.replace("%%", "")))
+
+
+def _present_forms(plural_dict: Dict[str, Any]) -> List[str]:
+    return [f for f in PLURAL_FORMS if isinstance(plural_dict.get(f), str)]
+
+
+def _covers_single_count(language: str, form: str) -> bool:
+    examples = get_category_examples(language, form)
+    return bool(examples) and examples.isdigit()
+
+
+def _build_plural_context(
+    form: str,
+    plural_dict: Dict[str, Any],
+    source_lang: str,
+    target_lang: str,
+) -> str:
+    target_name = get_language_name(target_lang)
+    source_name = get_language_name(source_lang)
+    examples = get_category_examples(target_lang, form)
+
+    if form in get_plural_categories(target_lang):
+        usage = ""
+        if examples:
+            usage = f"It is shown when the count is {examples}"
+            usage += "" if examples.endswith("…") else "."
+    elif form == "zero":
+        usage = "It is an explicit override shown when the count is 0."
+    else:
+        usage = (
+            f"{target_name} does not use this form, so iOS will not show it; "
+            "translate it like the general plural."
+        )
+
+    source_forms = "; ".join(
+        f"{f}: '{plural_dict[f]}'" for f in _present_forms(plural_dict)
+    )
+    parts = [
+        f"iOS .stringsdict plural form '{form}' for {target_name}. {usage}".strip(),
+        f"{source_name} source forms: {source_forms}.",
+        f"Write the {target_name} text for exactly these counts, using the correct "
+        "grammatical form of the counted noun.",
+    ]
+
+    count_specifiers = extract_format_specifiers(plural_dict.get("other", ""))
+    if count_specifiers and form in get_plural_categories(target_lang) and not _covers_single_count(target_lang, form):
+        parts.append(
+            "This form covers several different counts, so include the number "
+            f"placeholder ({count_specifiers[0]}) instead of spelling out a number."
+        )
+    parts.append("Keep every placeholder (such as %d, %ld, %@, %1$@) exactly as written.")
+    return " ".join(parts)
+
+
+def expand_plural_forms(
+    source_raw: Dict[str, Any],
+    source_flat: Dict[str, Any],
+    target_lang: str,
+) -> Dict[str, Any]:
+    """
+    Add the plural forms `target_lang` needs but the source lacks (e.g. en one/other -> ru few/many).
+    New forms take the source 'other' text as the text to translate.
+    """
+    expanded = dict(source_flat)
+    target_forms = get_plural_categories(target_lang)
+
+    for key, plural_dict in find_plural_rule_dicts(source_raw):
+        present = _present_forms(plural_dict)
+        if not present:
+            continue
+        base_form = "other" if "other" in present else present[-1]
+        for form in target_forms:
+            if form not in present:
+                expanded[f"{key}.{form}"] = plural_dict[base_form]
+
+    return expanded
+
+
+def build_plural_contexts(
+    source_raw: Dict[str, Any],
+    source_lang: str,
+    target_lang: str,
+) -> Dict[str, str]:
+    """Translator context for every plural-form key (source forms plus the target's required forms)."""
+    contexts: Dict[str, str] = {}
+    target_forms = get_plural_categories(target_lang)
+
+    for key, plural_dict in find_plural_rule_dicts(source_raw):
+        present = _present_forms(plural_dict)
+        if not present:
+            continue
+        for form in set(present) | set(target_forms):
+            contexts[f"{key}.{form}"] = _build_plural_context(
+                form, plural_dict, source_lang, target_lang
+            )
+
+    return contexts
+
+
+def split_plural_passes(
+    keys: List[str], contexts: Dict[str, str]
+) -> Tuple[List[str], List[str]]:
+    """
+    Split keys into (first pass, second pass): plural forms other than 'other' go second,
+    so they can be anchored to their entry's translated 'other' and use the same wording.
+    """
+    first: List[str] = []
+    second: List[str] = []
+    for key in keys:
+        if key in contexts and not key.endswith(".other"):
+            second.append(key)
+        else:
+            first.append(key)
+    return first, second
+
+
+def anchor_plural_contexts(
+    contexts: Dict[str, str], keys: List[str], translated: Dict[str, Any]
+) -> Dict[str, str]:
+    """Contexts for `keys`, each extended with its entry's translated 'other' form when known."""
+    anchored = dict(contexts)
+    for key in keys:
+        base = key.rsplit(".", 1)[0]
+        other = translated.get(f"{base}.other")
+        if key in anchored and isinstance(other, str) and other.strip():
+            anchored[key] += (
+                f" This entry's general plural form is already translated as '{other}'. "
+                "Use the same wording and the same noun, inflected for this form."
+            )
+    return anchored
+
+
+def validate_plural_forms(
+    target_raw: Dict[str, Any],
+    source_raw: Dict[str, Any],
+    target_lang: str,
+) -> List[str]:
+    """Warnings for missing plural forms or placeholders that don't match the source."""
+    warnings: List[str] = []
+    target_by_key = dict(find_plural_rule_dicts(target_raw))
+    required = get_plural_categories(target_lang)
+
+    for key, source_dict in find_plural_rule_dicts(source_raw):
+        target_dict = target_by_key.get(key)
+        if target_dict is None:
+            warnings.append(f"{key}: plural entry is missing")
+            continue
+
+        missing = [f for f in required if not isinstance(target_dict.get(f), str)]
+        if missing:
+            warnings.append(f"{key}: missing plural forms {', '.join(missing)}")
+
+        allowed = set()
+        for f in _present_forms(source_dict):
+            allowed.update(extract_format_specifiers(source_dict[f]))
+        count_specifiers = set(extract_format_specifiers(source_dict.get("other", "")))
+
+        for form in _present_forms(target_dict):
+            found = set(extract_format_specifiers(target_dict[form]))
+            unexpected = found - allowed
+            if unexpected:
+                warnings.append(
+                    f"{key}.{form}: placeholders not in source: {', '.join(sorted(unexpected))}"
+                )
+            lost = count_specifiers - found
+            if lost and form in required and not _covers_single_count(target_lang, form):
+                warnings.append(
+                    f"{key}.{form}: missing placeholder {', '.join(sorted(lost))}"
+                )
+
+    return warnings
+
+
 def update_translatable_strings(
     content: Dict[str, Any],
     translations: Dict[str, str],
@@ -277,12 +490,6 @@ def update_translatable_strings(
     """
     import copy
     result = copy.deepcopy(content)
-
-    def _is_plural_rule_dict(value: Any) -> bool:
-        return (
-            isinstance(value, dict)
-            and value.get("NSStringFormatSpecTypeKey") == "NSStringPluralRuleType"
-        )
 
     def _merge_missing_keys(data: Dict[str, Any], source_data: Dict[str, Any], prefix: str = "") -> None:
         # Copy entries present in source but missing from data, so their

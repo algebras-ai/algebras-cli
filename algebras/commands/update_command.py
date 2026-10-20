@@ -95,6 +95,11 @@ def find_matching_source_file(lang_file: str, source_files: List[str], lang: str
     return None
 
 
+def _plural_target(source_file: str, lang: str) -> Optional[str]:
+    # Other formats use target_language to pick CSV columns, so only pass it where plurals need it.
+    return lang if source_file.endswith(".stringsdict") else None
+
+
 def identify_translation_issues(
     languages: List[str], 
     source_language: str, 
@@ -181,7 +186,9 @@ def identify_translation_issues(
             # Check for missing keys
             if check_missing_keys:
                 # #endregion
-                is_valid, missing_keys = validate_language_files(src_file, tgt_file)
+                is_valid, missing_keys = validate_language_files(
+                    src_file, tgt_file, target_language=_plural_target(src_file, lang)
+                )
                 if not is_valid:
                     results["missing_keys"] = missing_keys
             
@@ -275,7 +282,9 @@ def identify_translation_issues(
                     if check_missing_keys:
                         if verbose:
                             click.echo(f"{Fore.BLUE}Validating language file for missing keys...\x1b[0m")
-                        is_valid, missing_keys = validate_language_files(source_file, lang_file)
+                        is_valid, missing_keys = validate_language_files(
+                            source_file, lang_file, target_language=_plural_target(source_file, lang)
+                        )
                         if not is_valid:
                             if verbose:
                                 click.echo(f"{Fore.YELLOW}Found {len(missing_keys)} missing keys\x1b[0m")

@@ -15,6 +15,7 @@ from algebras.utils.ts_handler import read_ts_translation_file
 from algebras.utils.android_xml_handler import read_android_xml_file
 from algebras.utils.ios_strings_handler import read_ios_strings_file
 from algebras.utils.ios_stringsdict_handler import (
+    expand_plural_forms,
     read_ios_stringsdict_file,
     extract_translatable_strings,
 )
@@ -196,6 +197,17 @@ def get_key_value(data: Dict[str, Any], key: str) -> Any:
     return current
 
 
+def expand_plural_source_keys(
+    source_file: str, source_data: Dict[str, Any], target_language: Optional[str]
+) -> Dict[str, Any]:
+    """For .stringsdict sources, add the plural-form keys target_language needs."""
+    if not target_language or not source_file.endswith(".stringsdict"):
+        return source_data
+    return expand_plural_forms(
+        read_ios_stringsdict_file(source_file), source_data, target_language
+    )
+
+
 def validate_language_files(
     source_file: str,
     target_file: str,
@@ -223,6 +235,7 @@ def validate_language_files(
             source_data = read_language_file(source_file, source_language, config)
         else:
             source_data = read_language_file(source_file)
+        source_data = expand_plural_source_keys(source_file, source_data, target_language)
 
         if target_file.endswith((".csv", ".tsv")):
             target_data = read_language_file(target_file, target_language, config)
