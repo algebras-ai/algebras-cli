@@ -180,6 +180,7 @@ class AlgebrasAIClient:
         target_lang: str,
         ui_safe: bool = False,
         glossary_id: str = "",
+        contexts: Optional[List[Optional[str]]] = None,
     ) -> List[str]:
         """
         Translate multiple texts using the Algebras AI batch API.
@@ -194,6 +195,7 @@ class AlgebrasAIClient:
             target_lang: Target language code (already mapped to ISO 2-letter format)
             ui_safe: If True, ensures translation will be no more characters than original text
             glossary_id: Glossary ID to use for translation
+            contexts: Optional per-text translator notes, aligned by index with texts
 
         Returns:
             List of translated texts (raw, without normalization)
@@ -204,10 +206,10 @@ class AlgebrasAIClient:
         """
         if self.sync_batch:
             return self._translate_batch_sync(
-                texts, source_lang, target_lang, ui_safe, glossary_id
+                texts, source_lang, target_lang, ui_safe, glossary_id, contexts
             )
         return self._translate_batch_async(
-            texts, source_lang, target_lang, ui_safe, glossary_id
+            texts, source_lang, target_lang, ui_safe, glossary_id, contexts
         )
 
     @staticmethod
@@ -234,6 +236,19 @@ class AlgebrasAIClient:
                 non_empty_texts.append(text)
 
         return non_empty_texts, empty_indices, index_mapping
+
+    @staticmethod
+    def _align_contexts(
+        contexts: Optional[List[Optional[str]]],
+        index_mapping: List[Optional[int]],
+    ) -> Optional[List[Optional[str]]]:
+        """Drop contexts of empty texts so they stay aligned with non_empty_texts; None if all empty."""
+        if not contexts:
+            return None
+        aligned = [
+            contexts[i] for i, mapped in enumerate(index_mapping) if mapped is not None
+        ]
+        return aligned if any(aligned) else None
 
     @staticmethod
     def _reassemble_full_translations(
@@ -311,6 +326,7 @@ class AlgebrasAIClient:
         target_lang: str,
         ui_safe: bool = False,
         glossary_id: str = "",
+        contexts: Optional[List[Optional[str]]] = None,
     ) -> List[str]:
         """Legacy blocking batch translation call (translate-batch)."""
         api_key = os.environ.get("ALGEBRAS_API_KEY")
@@ -344,6 +360,9 @@ class AlgebrasAIClient:
             "flag": ui_safe,
             "ignoreCache": self.ignore_cache,
         }
+        non_empty_contexts = self._align_contexts(contexts, index_mapping)
+        if non_empty_contexts:
+            data["contexts"] = non_empty_contexts
 
         if self.verbose:
             print(
@@ -389,6 +408,7 @@ class AlgebrasAIClient:
         target_lang: str,
         ui_safe: bool = False,
         glossary_id: str = "",
+        contexts: Optional[List[Optional[str]]] = None,
     ) -> List[str]:
         """
         Submit a batch translation job (translate-batch-async) and poll for
@@ -424,6 +444,9 @@ class AlgebrasAIClient:
             "flag": ui_safe,
             "ignoreCache": self.ignore_cache,
         }
+        non_empty_contexts = self._align_contexts(contexts, index_mapping)
+        if non_empty_contexts:
+            data["contexts"] = non_empty_contexts
 
         if self.verbose:
             print(

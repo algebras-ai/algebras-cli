@@ -57,6 +57,16 @@ from algebras.services.string_normalizer import StringNormalizer
 from algebras.services.strategies.strategy_factory import TranslationStrategyFactory
 
 
+def _contexts_kwarg(
+    contexts: Optional[Dict[str, str]], key_paths: List[str]
+) -> Dict[str, List[Optional[str]]]:
+    """{"contexts": [...]} aligned with key_paths, or {} when no key has a context."""
+    if not contexts:
+        return {}
+    aligned = [contexts.get(key_path) for key_path in key_paths]
+    return {"contexts": aligned} if any(aligned) else {}
+
+
 def _flatten_translated_subtree(base_key_path: str, subtree: Any) -> Dict[str, str]:
     """
     Flatten a translated nested dict back into dot-notation leaf paths,
@@ -734,6 +744,7 @@ class Translator:
         glossary_id: Optional[str] = None,
         on_batch_complete: Optional[Callable[[Dict[str, str], int], None]] = None,
         source_file_path: Optional[str] = None,
+        contexts: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Translate missing keys in batches to avoid overloading the API.
@@ -874,6 +885,7 @@ class Translator:
                 glossary_id=glossary_id,
                 on_batch_complete=None,  # We'll handle callback after mapping to keys
                 translate_text_func=translate_text_func,
+                **_contexts_kwarg(contexts, key_paths_list),
             )
 
             # Map translations back to key paths and update content
@@ -1006,6 +1018,7 @@ class Translator:
         ui_safe: bool = False,
         glossary_id: Optional[str] = None,
         on_batch_complete: Optional[Callable[[Dict[str, str], int], None]] = None,
+        contexts: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Translate outdated keys in batches to avoid overloading the API.
@@ -1086,6 +1099,7 @@ class Translator:
             glossary_id=glossary_id,
             on_batch_complete=None,  # We'll handle callback after mapping to keys
             translate_text_func=translate_text_func,
+            **_contexts_kwarg(contexts, key_paths_list),
         )
 
         # Map translations back to key paths and update content

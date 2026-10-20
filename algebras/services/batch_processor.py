@@ -62,6 +62,7 @@ class BatchProcessor:
             Callable[[Dict[str, str], int], None]
         ] = None,
         translate_text_func: Optional[Callable[[str, str, str, bool, str], str]] = None,
+        contexts: Optional[List[Optional[str]]] = None,
     ) -> BatchResult:
         """
         Process texts in batches with parallel execution.
@@ -74,6 +75,7 @@ class BatchProcessor:
             glossary_id: Glossary ID to use for translation
             on_batch_complete: Optional callback function called after each batch completes
             translate_text_func: Optional function for translating individual texts (for non-batch providers)
+            contexts: Optional per-text translator notes aligned with texts (algebras-ai only)
 
         Returns:
             BatchResult with translations and statistics
@@ -81,9 +83,16 @@ class BatchProcessor:
         # Flatten targeted ICU messages into literal segments first.
         # This preserves syntax tokens while translating only literal text.
         preprocessed_texts, icu_mapping = self.icu_service.preprocess_texts(texts)
+        preprocessed_contexts: List[Optional[str]] = [None] * len(preprocessed_texts)
+        if contexts:
+            # An ICU message may be split into several segments; each inherits its context.
+            for entry, context in zip(icu_mapping, contexts):
+                for offset in range(entry.count):
+                    preprocessed_contexts[entry.start + offset] = context
 
         # Filter empty strings and maintain mapping
         non_empty_texts = []
+        non_empty_contexts: List[Optional[str]] = []
         empty_indices = []  # Track which indices were empty
         index_mapping = []  # Maps original index to non-empty index
 
@@ -94,6 +103,7 @@ class BatchProcessor:
             else:
                 index_mapping.append(len(non_empty_texts))
                 non_empty_texts.append(text)
+                non_empty_contexts.append(preprocessed_contexts[i])
 
         # If all texts are empty, return early
         if not non_empty_texts:
@@ -118,6 +128,13 @@ class BatchProcessor:
             f"Processing {total_texts} text items in {num_batches} batches (batch size: {self.batch_size})"
         )
 
+        if self.provider != "algebras-ai" and any(non_empty_contexts):
+            print(
+                f"  ⚠ Plural-form notes are only sent to Algebras AI. With provider "
+                f"'{self.provider}', plural forms such as few/many may come back identical "
+                "— review them."
+            )
+
         if self.provider == "algebras-ai":
             result = self._process_algebras_ai(
                 non_empty_texts,
@@ -130,6 +147,7 @@ class BatchProcessor:
                 empty_indices,
                 index_mapping,
                 len(preprocessed_texts),
+                non_empty_contexts if any(non_empty_contexts) else None,
             )
         else:
             result = self._process_other_provider(
@@ -165,6 +183,7 @@ class BatchProcessor:
         empty_indices: List[int],
         index_mapping: List[Optional[int]],
         total_texts: int,
+        contexts: Optional[List[Optional[str]]] = None,
     ) -> BatchResult:
         """Process batches using Algebras AI batch API with parallel execution."""
         print(
@@ -175,8 +194,9 @@ class BatchProcessor:
         batches = []
         for i in range(0, len(non_empty_texts), self.batch_size):
             batch_texts = non_empty_texts[i : i + self.batch_size]
+            batch_contexts = contexts[i : i + self.batch_size] if contexts else None
             batch_idx = i // self.batch_size + 1
-            batches.append((batch_texts, batch_idx))
+            batches.append((batch_texts, batch_contexts, batch_idx))
 
         # Process batches in parallel using ThreadPoolExecutor
         failed_batches = []
@@ -189,7 +209,8 @@ class BatchProcessor:
         ) as executor:
             # Submit all batch translation tasks
             future_to_batch = {}
-            for batch_texts, batch_idx in batches:
+            for batch_texts, batch_contexts, batch_idx in batches:
+                submit_kwargs = {"contexts": batch_contexts} if batch_contexts else {}
                 future = executor.submit(
                     self.api_client.translate_batch,
                     batch_texts,
@@ -197,6 +218,7 @@ class BatchProcessor:
                     target_lang,
                     ui_safe,
                     glossary_id,
+                    **submit_kwargs,
                 )
                 future_to_batch[future] = (batch_texts, batch_idx)
 
