@@ -14,6 +14,7 @@ setup(
         "beautifulsoup4>=4.12.0",
         "openpyxl>=3.0.0",
         "pyicumessageformat>=1.0.0",
+        "babel>=2.12",
     ],
     entry_points={
         "console_scripts": [
