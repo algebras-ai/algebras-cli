@@ -1,0 +1,136 @@
+name: Install Instructions
+
+# Follows the README / docs installation steps on macOS and Windows, the way a user would,
+# to catch instructions that stop working. The only deviation from the docs is that the CLI
+# is installed from this checkout instead of git+https://github.com/...main, so a PR is
+# tested with its own code.
+#
+# "Open a new terminal" steps start a shell that doesn't inherit the runner's PATH, so they
+# only pass if `pipx ensurepath` really made `algebras` reachable for the user.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS (${{ matrix.method }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        method: [pipx, venv]
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+
+    # README "Using pipx": brew install pipx, pipx ensurepath, pipx install
+    - name: Install with pipx
+      if: matrix.method == 'pipx'
+      env:
+        # macOS opens zsh by default; ensurepath uses SHELL to decide which rc file to update
+        SHELL: /bin/zsh
+      run: |
+        # Runner images ship their own pipx setup; a user's machine doesn't have it
+        unset PIPX_HOME PIPX_BIN_DIR PIPX_MAN_DIR
+        brew install pipx
+        pipx ensurepath
+        pipx install "$GITHUB_WORKSPACE"
+
+    - name: Open a new terminal and run algebras --version
+      if: matrix.method == 'pipx'
+      run: |
+        # shellcheck disable=SC2016  # expanded by the new shell, not this one
+        env -i HOME="$HOME" USER="$USER" TERM=xterm-256color PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+          /bin/zsh -l -i -c '
+            set -e
+            algebras --version
+            [[ "$(command -v algebras)" == "$HOME/.local/bin/algebras" ]] || {
+              echo "algebras resolved to $(command -v algebras), expected $HOME/.local/bin/algebras"; exit 1; }
+          '
+
+    # README "Using a virtual environment"
+    - name: Install into a virtual environment
+      if: matrix.method == 'venv'
+      run: |
+        python3 -m venv ~/.venvs/algebras
+        # shellcheck source=/dev/null
+        source ~/.venvs/algebras/bin/activate
+        pip install "$GITHUB_WORKSPACE"
+
+    - name: Open a new terminal, activate and run algebras --version
+      if: matrix.method == 'venv'
+      run: |
+        env -i HOME="$HOME" USER="$USER" TERM=xterm-256color PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+          /bin/zsh -l -i -c '
+            set -e
+            source ~/.venvs/algebras/bin/activate
+            algebras --version
+          '
+
+  windows:
+    name: Windows (${{ matrix.method }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        method: [pipx, venv]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+
+    # README "Installing pipx on Windows", Option 1, then the pipx install
+    - name: Install with pipx
+      if: matrix.method == 'pipx'
+      run: |
+        # Runner images ship their own pipx setup; a user's machine doesn't have it
+        Remove-Item Env:PIPX_HOME, Env:PIPX_BIN_DIR, Env:PIPX_MAN_DIR -ErrorAction SilentlyContinue
+        python -m pip install --user pipx
+        python -m pipx ensurepath
+        python -m pipx install $env:GITHUB_WORKSPACE
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Open a new terminal and run algebras --version
+      if: matrix.method == 'pipx'
+      run: |
+        # A new terminal reads PATH from the registry, which is where ensurepath writes it
+        $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+                    [Environment]::GetEnvironmentVariable('Path', 'User')
+        algebras --version
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $resolved = (Get-Command algebras).Source
+        $expected = Join-Path $HOME '.local\bin\algebras.exe'
+        if ($resolved -ne $expected) { Write-Error "algebras resolved to $resolved, expected $expected"; exit 1 }
+
+    # Docs "Using a virtual environment", Windows tab
+    - name: Install into a virtual environment
+      if: matrix.method == 'venv'
+      run: |
+        python -m venv $HOME\.venvs\algebras
+        & $HOME\.venvs\algebras\Scripts\Activate.ps1
+        pip install $env:GITHUB_WORKSPACE
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Open a new terminal, activate and run algebras --version
+      if: matrix.method == 'venv'
+      run: |
+        & $HOME\.venvs\algebras\Scripts\Activate.ps1
+        algebras --version
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
