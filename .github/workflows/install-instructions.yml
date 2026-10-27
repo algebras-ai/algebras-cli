@@ -1,6 +1,6 @@
 name: Install Instructions
 
-# Follows the README / docs installation steps on macOS and Windows, the way a user would,
+# Follows the README / docs installation steps on Linux, macOS and Windows, the way a user would,
 # to catch instructions that stop working. The only deviation from the docs is that the CLI
 # is installed from this checkout instead of git+https://github.com/...main, so a PR is
 # tested with its own code.
@@ -19,6 +19,100 @@ permissions:
   contents: read
 
 jobs:
+  linux:
+    name: ${{ matrix.distro.image }} (${{ matrix.method }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.distro.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # pip: whether the README says plain `pip install` works there or is blocked by PEP 668
+        distro:
+          - { image: 'debian:12', pip: blocked }
+          - { image: 'ubuntu:24.04', pip: blocked }
+          - { image: 'ubuntu:22.04', pip: works }
+          - { image: 'fedora:42', pip: works }
+          - { image: 'archlinux:latest', pip: blocked }
+        method: [pipx, venv, pip]
+    defaults:
+      run:
+        shell: bash
+    steps:
+    # A desktop install has Python, pip, Git and sudo, and a normal user to run commands as
+    - name: Prepare a user machine
+      run: |
+        if command -v apt-get >/dev/null; then
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq python3 python3-pip git sudo tzdata >/dev/null
+          echo 'APT::Get::Assume-Yes "true";' > /etc/apt/apt.conf.d/90yes
+          echo "PKG=apt" >> "$GITHUB_ENV"
+        elif command -v dnf >/dev/null; then
+          dnf install -y -q python3 python3-pip git sudo >/dev/null
+          echo "assumeyes=True" >> /etc/dnf/dnf.conf
+          echo "PKG=dnf" >> "$GITHUB_ENV"
+        else
+          pacman -Sy --noconfirm --needed python python-pip git sudo >/dev/null
+          echo "PKG=pacman" >> "$GITHUB_ENV"
+        fi
+        useradd -m -s /bin/bash dev
+        echo "dev ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev
+
+    - uses: actions/checkout@v5
+
+    - name: Copy the checkout into the user's home
+      run: |
+        cp -r "$GITHUB_WORKSPACE" /home/dev/algebras-cli
+        chown -R dev:dev /home/dev/algebras-cli
+
+    # The README commands for this distro, written to a script and run as the user
+    - name: Install as the README describes
+      run: |
+        {
+          case "${{ matrix.method }}" in
+            pipx)
+              case "$PKG" in
+                apt) echo 'sudo apt update'; echo 'sudo apt install pipx' ;;
+                dnf) echo 'sudo dnf install pipx' ;;
+                pacman) echo 'sudo pacman -S python-pipx' ;;
+              esac
+              echo 'pipx ensurepath'
+              echo 'pipx install ~/algebras-cli' ;;
+            venv)
+              if [ "$PKG" = apt ]; then echo 'sudo apt install python3-venv'; fi
+              echo 'python3 -m venv ~/.venvs/algebras'
+              echo 'source ~/.venvs/algebras/bin/activate'
+              echo 'pip install ~/algebras-cli' ;;
+            pip)
+              echo 'pip install ~/algebras-cli' ;;
+          esac
+        } > /tmp/install.sh
+        chmod 644 /tmp/install.sh
+        # `yes` answers package manager prompts, as the user would
+        set +e
+        yes | su - dev -c 'bash -ex /tmp/install.sh' 2>&1 | tee /tmp/install.log
+        status=${PIPESTATUS[1]}
+        set -e
+        if [ "${{ matrix.method }}" = pip ] && [ "${{ matrix.distro.pip }}" = blocked ]; then
+          if [ "$status" -eq 0 ] || ! grep -q "externally-managed-environment" /tmp/install.log; then
+            echo "Expected plain pip to be blocked with externally-managed-environment"; exit 1
+          fi
+          echo "Plain pip is blocked, as the README says"
+        else
+          exit "$status"
+        fi
+
+    - name: Open a new terminal and run algebras --version
+      if: matrix.method != 'pip' || matrix.distro.pip == 'works'
+      run: |
+        case "${{ matrix.method }}" in
+          venv) activate='source ~/.venvs/algebras/bin/activate'; expected=/home/dev/.venvs/algebras/bin/algebras ;;
+          *) activate=':'; expected=/home/dev/.local/bin/algebras ;;
+        esac
+        # su - starts a fresh login shell with the user's own PATH and shell config
+        su - dev -c "set -e; $activate; algebras --version; [ \"\$(command -v algebras)\" = $expected ] \
+          || { echo \"algebras resolved to \$(command -v algebras), expected $expected\"; exit 1; }"
+
   macos:
     name: macOS (${{ matrix.method }})
     runs-on: macos-latest
