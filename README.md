@@ -97,7 +97,7 @@ Comprehensive guides for each supported file format with detailed usage examples
 
 ### Installation Methods
 
-> **Linux and Homebrew users:** don't install with plain `pip install`. On Debian/Ubuntu (Python 3.11+), Fedora, Arch, and Homebrew Python, the system Python is "externally managed" ([PEP 668](https://peps.python.org/pep-0668/)) and pip refuses with `error: externally-managed-environment`. Use pipx or a virtual environment instead.
+> **Debian/Ubuntu, Arch and Homebrew users:** don't install with plain `pip install`. On Debian/Ubuntu (Python 3.11+), Arch, and Homebrew Python, the system Python is "externally managed" ([PEP 668](https://peps.python.org/pep-0668/)) and pip refuses with `error: externally-managed-environment`. Use pipx or a virtual environment instead.
 
 #### Using pipx (Recommended)
 
@@ -170,7 +170,7 @@ pip install --upgrade git+https://github.com/algebras-ai/algebras-cli.git
 
 #### Using pip
 
-Only use plain pip where the Python installation isn't externally managed: Windows, the python.org installer on macOS, or older Linux distributions such as Ubuntu 22.04.
+Only use plain pip where the Python installation isn't externally managed: Windows, the python.org installer on macOS, Fedora, or older Linux distributions such as Ubuntu 22.04.
 
 ```bash
 pip install git+https://github.com/algebras-ai/algebras-cli.git
