@@ -21,7 +21,7 @@ init()
 @click.group()
 @click.option('-f', '--config-file', type=click.Path(exists=False), help='Path to custom config file (default: .algebras.config)')
 @click.pass_context
-@click.version_option()
+@click.version_option(package_name="algebras-cli")
 def cli(ctx, config_file):
     """Algebras CLI - Powerful AI-driven localization tool for your applications."""
     # Ensure ctx.obj exists and is a dict

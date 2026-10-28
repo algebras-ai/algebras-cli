@@ -93,50 +93,93 @@ Comprehensive guides for each supported file format with detailed usage examples
 ### Prerequisites
 
 - Python 3.7 or higher
-- pip (Python package installer)
+- Git (the CLI is installed from its GitHub repository)
 
 ### Installation Methods
 
-#### Using pip
-
-Install Algebras CLI directly using pip:
-
-```bash
-pip install git+https://github.com/algebras-ai/algebras-cli.git
-```
-
-For a specific version or to upgrade:
-
-```bash
-pip install --upgrade git+https://github.com/algebras-ai/algebras-cli.git
-```
+> **Debian/Ubuntu, Arch and Homebrew users:** don't install with plain `pip install`. On Debian/Ubuntu (Python 3.11+), Arch, and Homebrew Python, the system Python is "externally managed" ([PEP 668](https://peps.python.org/pep-0668/)) and pip refuses with `error: externally-managed-environment`. Use pipx or a virtual environment instead.
 
 #### Using pipx (Recommended)
 
-[pipx](https://pipx.pypa.io/) installs Python applications in isolated environments, preventing dependency conflicts with other Python packages. This is the recommended installation method.
+[pipx](https://pipx.pypa.io/) installs Python applications in isolated environments, preventing dependency conflicts with other Python packages. This is the recommended installation method and works on every platform.
 
-**Install pipx first:**
+**1. Install pipx:**
 
 ```bash
-# On macOS/Linux
-pip install --user pipx
-pipx ensurepath
+# Debian/Ubuntu
+sudo apt update
+sudo apt install pipx
 
-# Or using Homebrew (macOS)
+# Fedora
+sudo dnf install pipx
+
+# Arch
+sudo pacman -S python-pipx
+
+# macOS (Homebrew)
 brew install pipx
+```
+
+For Windows, see [Windows Installation](#windows-installation).
+
+**2. Add pipx's app directory to your PATH:**
+
+```bash
 pipx ensurepath
 ```
 
-**Then install Algebras CLI:**
+**3. Install Algebras CLI:**
 
 ```bash
 pipx install git+https://github.com/algebras-ai/algebras-cli.git
+```
+
+**4. Open a new terminal** so the PATH change takes effect, then check the install:
+
+```bash
+algebras --version
 ```
 
 **Upgrade Algebras CLI:**
 
 ```bash
 pipx upgrade algebras-cli
+```
+
+#### Using a virtual environment
+
+If you'd rather not use pipx, install into a virtual environment:
+
+```bash
+# Debian/Ubuntu only: venv support is a separate package
+sudo apt install python3-venv
+
+python3 -m venv ~/.venvs/algebras
+source ~/.venvs/algebras/bin/activate
+pip install git+https://github.com/algebras-ai/algebras-cli.git
+```
+
+The `algebras` command is available only while the environment is active. In each new terminal, run `source ~/.venvs/algebras/bin/activate` first.
+
+**Upgrade Algebras CLI:**
+
+```bash
+source ~/.venvs/algebras/bin/activate
+pip install --upgrade git+https://github.com/algebras-ai/algebras-cli.git
+```
+
+#### Using pip
+
+Only use plain pip where the Python installation isn't externally managed: Windows, the python.org installer on macOS, Fedora, or older Linux distributions such as Ubuntu 22.04.
+
+```bash
+pip install git+https://github.com/algebras-ai/algebras-cli.git
+```
+
+To upgrade:
+
+```bash
+pip install --upgrade git+https://github.com/algebras-ai/algebras-cli.git
 ```
 
 ### Windows Installation
@@ -148,9 +191,11 @@ You can install pipx on Windows using several methods:
 **Option 1: Using pip**
 ```powershell
 # In PowerShell or Command Prompt
-pip install --user pipx
-pipx ensurepath
+python -m pip install --user pipx
+python -m pipx ensurepath
 ```
+
+`pipx` isn't on your PATH until you open a new terminal, so run `ensurepath` through `python -m`.
 
 **Option 2: Using winget**
 ```powershell
@@ -756,6 +801,11 @@ The following environment variables can be used to configure the Algebras CLI:
 ## Troubleshooting
 
 ### Common Issues
+
+**"error: externally-managed-environment" when installing**
+- Your system Python is managed by the OS ([PEP 668](https://peps.python.org/pep-0668/)), so pip won't install into it
+- Install with pipx or a virtual environment instead; see [Installation](#installation-methods)
+- Don't use `--break-system-packages`: it can break OS tools that depend on the system Python
 
 **"No Algebras configuration found"**
 - Run `algebras init` to create the configuration file
