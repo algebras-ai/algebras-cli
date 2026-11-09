@@ -248,3 +248,92 @@ class GlossaryService:
             else:
                 error_msg = str(e)
             raise requests.RequestException(f"Failed to get glossary: {error_msg}")
+
+    def list_glossaries(self, limit: int = 100, page: int = 1) -> Dict[str, Any]:
+        """
+        List glossaries available to the authenticated organization.
+
+        Args:
+            limit: Maximum number of glossaries to return.
+            page: Page number.
+
+        Returns:
+            API response data containing glossaries and pagination metadata.
+        """
+        base_url = self.config.get_base_url()
+        url = f"{base_url}/api/v1/translation/glossaries"
+        params = {"limit": min(limit, 100), "page": max(page, 1)}
+
+        if self.debug:
+            click.echo(f"{Fore.CYAN}[DEBUG] GET {url}{Fore.RESET}")
+            click.echo(f"{Fore.CYAN}[DEBUG] Query params: {json.dumps(params)}{Fore.RESET}")
+
+        try:
+            response = requests.get(url, headers=self._get_headers(), params=params)
+            if self.debug:
+                try:
+                    click.echo(f"{Fore.CYAN}[DEBUG] Response {response.status_code}: {response.text[:2000]}{Fore.RESET}")
+                except Exception:
+                    pass
+            response.raise_for_status()
+
+            result = response.json()
+            if result.get("status") == "ok" and "data" in result:
+                return result["data"]
+            raise requests.RequestException(f"API returned error: {result.get('error', 'Unknown error')}")
+
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get("error", {}).get("message", str(e))
+                except Exception:
+                    error_msg = str(e)
+            else:
+                error_msg = str(e)
+            raise requests.RequestException(f"Failed to list glossaries: {error_msg}")
+
+    def list_terms(self, glossary_id: str, limit: int = 100, page: int = 1) -> Dict[str, Any]:
+        """
+        List terms for a glossary.
+
+        Args:
+            glossary_id: ID of the glossary to retrieve terms for.
+            limit: Maximum number of terms to return.
+            page: Page number.
+
+        Returns:
+            API response data containing terms and pagination metadata.
+        """
+        base_url = self.config.get_base_url()
+        url = f"{base_url}/api/v1/translation/glossaries/{glossary_id}/terms"
+        params = {"limit": min(limit, 100), "page": max(page, 1)}
+
+        if self.debug:
+            click.echo(f"{Fore.CYAN}[DEBUG] GET {url}{Fore.RESET}")
+            click.echo(f"{Fore.CYAN}[DEBUG] Query params: {json.dumps(params)}{Fore.RESET}")
+
+        try:
+            response = requests.get(url, headers=self._get_headers(), params=params)
+            if self.debug:
+                try:
+                    click.echo(f"{Fore.CYAN}[DEBUG] Response {response.status_code}: {response.text[:2000]}{Fore.RESET}")
+                except Exception:
+                    pass
+            response.raise_for_status()
+
+            result = response.json()
+            if result.get("status") == "ok" and "data" in result:
+                return result["data"]
+            raise requests.RequestException(f"API returned error: {result.get('error', 'Unknown error')}")
+
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get("error", {}).get("message", str(e))
+                except Exception:
+                    error_msg = str(e)
+            else:
+                error_msg = str(e)
+            raise requests.RequestException(f"Failed to list glossary terms: {error_msg}")
