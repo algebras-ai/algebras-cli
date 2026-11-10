@@ -23,6 +23,8 @@ jobs:
     name: ${{ matrix.distro.image }} (${{ matrix.method }})
     runs-on: ubuntu-latest
     container: ${{ matrix.distro.image }}
+    # A normal run takes 1-2 minutes; anything that hangs (e.g. an unreachable mirror) fails here
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -43,8 +45,34 @@ jobs:
       run: |
         if command -v apt-get >/dev/null; then
           export DEBIAN_FRONTEND=noninteractive
-          apt-get update -qq
-          apt-get install -y -qq python3 python3-pip git sudo tzdata >/dev/null
+          # Time out and retry instead of hanging when a mirror stops responding. This also
+          # covers the README's own `sudo apt update` / `sudo apt install` commands later on.
+          printf 'Acquire::http::Timeout "10";\nAcquire::Retries "2";\n' > /etc/apt/apt.conf.d/80timeouts
+          # Older apt exits 0 when some index files fail to download, so check the output too
+          apt_update() {
+            apt-get update -qq > /tmp/apt-update.log 2>&1 \
+              && ! grep -qE '^(W|E): (Failed to fetch|Some index files failed)' /tmp/apt-update.log
+          }
+          if ! apt_update; then
+            cat /tmp/apt-update.log
+            # GitHub runners are hosted on Azure, which has its own Ubuntu mirror
+            ubuntu_sources=$(grep -lsE '//(archive|security)\.ubuntu\.com' \
+              /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources || true)
+            if [ -z "$ubuntu_sources" ]; then
+              echo "::error::Package mirrors unreachable (infrastructure problem, not the install instructions)"
+              exit 1
+            fi
+            echo "::warning::archive.ubuntu.com unreachable, switching to azure.archive.ubuntu.com"
+            # shellcheck disable=SC2086  # one path per word
+            sed -i -E 's#//(archive|security)\.ubuntu\.com#//azure.archive.ubuntu.com#g' $ubuntu_sources
+            if ! apt_update; then
+              cat /tmp/apt-update.log
+              echo "::error::Ubuntu package mirrors unreachable (infrastructure problem, not the install instructions)"
+              exit 1
+            fi
+          fi
+          apt-get install -y -qq python3 python3-pip git sudo tzdata > /tmp/apt-install.log 2>&1 \
+            || { cat /tmp/apt-install.log; exit 1; }
           echo 'APT::Get::Assume-Yes "true";' > /etc/apt/apt.conf.d/90yes
           echo "PKG=apt" >> "$GITHUB_ENV"
         elif command -v dnf >/dev/null; then
