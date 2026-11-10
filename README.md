@@ -289,10 +289,14 @@ algebras init --verbose
 algebras init --provider algebras-ai
 ```
 
-### Add a new language to your application
+### Add languages to your application
 
 ```bash
+# Add one language
 algebras add <language>
+
+# Add several languages at once
+algebras add es fr de
 ```
 
 ### Translate your application

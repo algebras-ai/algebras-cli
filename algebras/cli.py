@@ -42,12 +42,15 @@ def init(ctx, force, verbose, provider):
 
 
 @cli.command("add")
-@click.argument("language", required=True)
+@click.argument("languages", nargs=-1, required=True, metavar="LANGUAGE...")
 @click.pass_context
-def add(ctx, language):
-    """Add a new language to your application."""
+def add(ctx, languages):
+    """Add one or more languages to your application.
+
+    Example: algebras add es fr de
+    """
     config_file = ctx.obj.get('config_file') if ctx.obj else None
-    add_command.execute(language, config_file)
+    add_command.execute(list(languages), config_file)
 
 
 @cli.command("translate")
