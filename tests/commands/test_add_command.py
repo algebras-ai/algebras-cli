@@ -110,10 +110,48 @@ class TestAddCommand:
             assert result.exit_code == 0
             
             # Verify execute was called with the right arguments
-            mock_execute.assert_called_once_with("fr", None)
+            mock_execute.assert_called_once_with(["fr"], None)
             
             # Test with missing argument
             result = runner.invoke(add)
             
             # Command should fail because language is required
-            assert result.exit_code != 0 
+            assert result.exit_code != 0
+
+    def test_execute_integration_multiple_languages(self):
+        """The CLI accepts several languages in one command"""
+        runner = CliRunner()
+
+        with patch("algebras.commands.add_command.execute") as mock_execute:
+            from algebras.cli import add
+
+            result = runner.invoke(add, ["es", "fr", "de"])
+
+            assert result.exit_code == 0, result.output
+            mock_execute.assert_called_once_with(["es", "fr", "de"], None)
+
+    def test_execute_add_multiple_languages(self):
+        """Each new language is added; already-configured and duplicate codes are skipped"""
+        mock_config = MagicMock(spec=Config)
+        mock_config.exists.return_value = True
+        mock_config.get_languages.return_value = ["en", "fr"]
+        mock_config.check_deprecated_format.return_value = False
+
+        with patch("algebras.commands.add_command.Config", return_value=mock_config), \
+             patch("algebras.commands.add_command.click.echo") as mock_echo:
+
+            add_command.execute(["ES", "fr", "de", "es"])
+
+            assert [c.args[0] for c in mock_config.add_language.call_args_list] == ["es", "de"]
+            mock_echo.assert_any_call(f"{click.style('Language \'fr\' is already configured.', fg='yellow')}")
+            mock_echo.assert_any_call(f"{click.style('✓ Language \'es\' has been added to your project.', fg='green')}")
+            mock_echo.assert_any_call(f"{click.style('✓ Language \'de\' has been added to your project.', fg='green')}")
+
+    def test_execute_multiple_with_invalid_adds_nothing(self):
+        """An invalid code in the list aborts before the config is touched"""
+        with patch("algebras.commands.add_command.Config") as mock_config_class, \
+             patch("algebras.commands.add_command.click.echo"):
+
+            add_command.execute(["es", "x", "de"])
+
+            assert not mock_config_class.called
