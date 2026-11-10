@@ -50,7 +50,9 @@ jobs:
           printf 'Acquire::http::Timeout "10";\nAcquire::Retries "2";\n' > /etc/apt/apt.conf.d/80timeouts
           # Older apt exits 0 when some index files fail to download, so check the output too
           apt_update() {
-            apt-get update -qq > /tmp/apt-update.log 2>&1 \
+            # Cap the whole update: apt's own timeout applies per address and per file, so an
+            # unresponsive mirror with many addresses can otherwise take many minutes to give up
+            timeout 60 apt-get update -qq > /tmp/apt-update.log 2>&1 \
               && ! grep -qE '^(W|E): (Failed to fetch|Some index files failed)' /tmp/apt-update.log
           }
           if ! apt_update; then
