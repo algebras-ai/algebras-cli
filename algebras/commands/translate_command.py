@@ -1321,6 +1321,7 @@ def _process_outdated_files(
                             ui_safe,
                             glossary_id,
                             on_batch_complete=on_batch_complete,
+                            source_file_path=source_file,
                             contexts=plural_contexts,
                         )
 
@@ -1354,6 +1355,7 @@ def _process_outdated_files(
                             target_lang,
                             ui_safe,
                             glossary_id,
+                            source_file_path=source_file,
                             contexts=plural_contexts,
                         )
 
@@ -1633,6 +1635,7 @@ def _process_outdated_keys_files(
                         ui_safe,
                         glossary_id,
                         on_batch_complete=on_batch_complete,
+                        source_file_path=source_file,
                         contexts=plural_contexts,
                     )
 
@@ -1648,6 +1651,7 @@ def _process_outdated_keys_files(
                         target_lang,
                         ui_safe,
                         glossary_id,
+                        source_file_path=source_file,
                         contexts=plural_contexts,
                     )
 
