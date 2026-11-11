@@ -72,7 +72,7 @@ def execute(language: Optional[str] = None, output_format: str = 'console',
         scanner = FileScanner(config=config)
         files_by_language = scanner.group_files_by_language()
         
-        if not files_by_language.get(source_language, []):
+        if not files_by_language.get(source_language, []) and not scanner.multi_language_files():
             click.echo(click.style(f"No source files found for language '{source_language}'.", fg='yellow'))
             return 0
         
@@ -165,6 +165,12 @@ def iter_file_pairs(
             source_file = find_source_file(target_file, source_files, source_language, target_lang)
             if source_file:
                 yield source_file, target_file
+        # Multi-language CSV / TSV: the same file is source and target (one column per language).
+        from algebras.services.file_scanner import has_language_column
+
+        for csv_file in FileScanner(config=config).multi_language_files():
+            if has_language_column(csv_file, target_lang, config):
+                yield csv_file, csv_file
 
 
 def find_source_file(target_file: str, source_files: List[str], 
