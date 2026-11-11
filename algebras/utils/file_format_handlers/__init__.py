@@ -20,6 +20,7 @@ from algebras.utils.file_format_handlers.po_handler import POHandler
 from algebras.utils.file_format_handlers.html_handler import HTMLHandler
 from algebras.utils.file_format_handlers.xliff_handler import XLIFFHandler
 from algebras.utils.file_format_handlers.csv_handler import CSVHandler
+from algebras.utils.file_format_handlers.arb_handler import ARBHandler
 
 
 def get_handler(file_path: str, config: Optional["Config"] = None) -> FileFormatHandler:
@@ -56,6 +57,8 @@ def get_handler(file_path: str, config: Optional["Config"] = None) -> FileFormat
         return HTMLHandler()
     elif format_type == FileFormat.XLIFF:
         return XLIFFHandler()
+    elif format_type == FileFormat.ARB:
+        return ARBHandler()
     elif format_type in (FileFormat.CSV, FileFormat.TSV):
         if config is None:
             raise ValueError("Config is required for CSV/TSV handlers")
@@ -79,4 +82,5 @@ __all__ = [
     "HTMLHandler",
     "XLIFFHandler",
     "CSVHandler",
+    "ARBHandler",
 ]

@@ -10,6 +10,7 @@ MVP scope:
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, List, Sequence, Tuple
@@ -19,6 +20,24 @@ from pyicumessageformat import Parser
 
 TARGETED_ICU_TYPES = {"plural", "select", "selectordinal"}
 ORDINAL_SUFFIX_LITERALS = {"st", "nd", "rd", "th"}
+
+_BRACES = re.compile(r"\{[^{}']*\}|[{}]+")
+
+
+def _quote_literal(text: str, closes_option: bool = False) -> str:
+    """
+    Literal text back into ICU syntax. The parser unquotes "'{'" to "{", so literal braces must be
+    quoted again or they would turn into arguments ("'{name}'" stays text, not {name}).
+    """
+    if "{" not in text and "}" not in text and not text.endswith("'"):
+        return text
+    trailing_apostrophe = closes_option and text.endswith("'")
+    # An apostrophe right before a quoted brace would merge with the quote: double it first.
+    text = re.sub(r"'(?=[{}])", "''", text)
+    text = _BRACES.sub(lambda m: f"'{m.group(0)}'", text)
+    if trailing_apostrophe:
+        text += "'"
+    return text
 
 
 @dataclass
@@ -148,7 +167,11 @@ class ICUMessageService:
                 translated_index += 1
 
             replacement_core = replacement_core.strip()
-            replacement = f"{segment.leading_ws}{replacement_core}{segment.trailing_ws}"
+            if not segment.core_text and not replacement_core:
+                # Whitespace-only text between arguments ("# {v}") stays exactly as it was.
+                replacement = segment.original_text
+            else:
+                replacement = f"{segment.leading_ws}{replacement_core}{segment.trailing_ws}"
             self._set_by_path(ast_copy, segment.path, replacement)
 
         return self._serialize_tokens(ast_copy)
@@ -310,12 +333,21 @@ class ICUMessageService:
             current = current[key]
         current[path[-1]] = value
 
-    def _serialize_tokens(self, tokens: Any) -> str:
+    def _serialize_tokens(self, tokens: Any, in_option: bool = False) -> str:
         if isinstance(tokens, str):
-            return tokens
+            return _quote_literal(tokens, closes_option=in_option)
 
         if isinstance(tokens, list):
-            return "".join(self._serialize_tokens(token) for token in tokens)
+            parts = []
+            for i, token in enumerate(tokens):
+                if isinstance(token, str):
+                    # A trailing apostrophe before an argument or a closing brace would start
+                    # ICU quoting and swallow it ("l'{name}"): double it.
+                    followed = i + 1 < len(tokens) or in_option
+                    parts.append(_quote_literal(token, closes_option=followed))
+                else:
+                    parts.append(self._serialize_tokens(token))
+            return "".join(parts)
 
         if isinstance(tokens, dict):
             name = tokens.get("name", "")
@@ -329,7 +361,7 @@ class ICUMessageService:
                 option_chunks = []
                 for option_key, option_value in options.items():
                     option_chunks.append(
-                        f"{option_key} {{{self._serialize_tokens(option_value)}}}"
+                        f"{option_key} {{{self._serialize_tokens(option_value, in_option=True)}}}"
                     )
 
                 if node_type in {"plural", "selectordinal"} and tokens.get("offset"):
@@ -342,7 +374,8 @@ class ICUMessageService:
                 return f"{{{name}, {node_type}, {options_part}}}"
 
             if node_type:
-                style = tokens.get("style")
+                # pyicumessageformat stores the style ("compact", "yMd") under "format".
+                style = tokens.get("style") or tokens.get("format")
                 if style:
                     return f"{{{name}, {node_type}, {style}}}"
                 return f"{{{name}, {node_type}}}"
