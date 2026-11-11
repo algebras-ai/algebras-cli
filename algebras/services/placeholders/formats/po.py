@@ -227,23 +227,31 @@ def check_file(
     config=None,
 ) -> List[Finding]:
     """Placeholder findings for every translated msgstr / msgstr[N] of a target .po file."""
-    from algebras.utils.po_handler import file_plural_forms, plural_forms_for_language, plural_key, read_po_entries
+    from algebras.utils.po_handler import (
+        entry_key,
+        file_plural_forms,
+        plural_forms_for_language,
+        plural_key,
+        read_po_entries,
+    )
 
-    source_by_msgid = {e["msgid"]: e for e in read_po_entries(source_file) if e.get("msgid")}
+    # Keyed like read_po_file: (msgctxt, msgid), so "Open" (verb) and "Open" (adjective) are
+    # checked against their own source entries.
+    source_by_key = {entry_key(e): e for e in read_po_entries(source_file) if e.get("msgid")}
     target_entries = read_po_entries(target_file)
     plural_forms = file_plural_forms(target_entries) or plural_forms_for_language(target_language)
     override = _config_override(source_file, config)
 
     findings: List[Finding] = []
     for entry in target_entries:
-        msgid = entry.get("msgid")
-        if not msgid:
+        if not entry.get("msgid"):
             continue
-        source_entry = source_by_msgid.get(msgid)
+        base = entry_key(entry)
+        source_entry = source_by_key.get(base)
         if entry.get("msgid_plural") is not None:
-            values = [(i, v, plural_key(msgid, i)) for i, v in sorted((entry.get("msgstr_plural") or {}).items())]
+            values = [(i, v, plural_key(base, i)) for i, v in sorted((entry.get("msgstr_plural") or {}).items())]
         else:
-            values = [(None, entry.get("msgstr"), msgid)]
+            values = [(None, entry.get("msgstr"), base)]
         for index, value, key in values:
             if not isinstance(value, str) or not value.strip():
                 continue  # untranslated: 'status' reports it

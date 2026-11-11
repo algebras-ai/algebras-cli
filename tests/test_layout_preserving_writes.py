@@ -334,11 +334,10 @@ PROPERTIES_SOURCE = (
     "farewell=Bye\n"
 )
 
+# "broken" is left untranslated: it goes with the comment directly above it (no orphaned comment).
 PROPERTIES_EXPECTED = (
     "# Greetings shown on the home screen\n"
     "welcome = UZ Welcome, {0}!\n"
-    "\n"
-    "! legacy section\n"
     "farewell=UZ Bye\n"
 )
 
@@ -384,7 +383,8 @@ def test_properties_update_touches_only_changed_lines(properties_project, fake_a
     removed, added = _changed_lines(before, target.read_bytes())
     assert removed == ["farewell=UZ Bye\n"]
     assert added == ["hint=UZ Tip\n", "farewell=UZ Goodbye\n"]
-    assert target.read_bytes().decode().index("hint=") < target.read_bytes().decode().index("\n\n")
+    text = target.read_bytes().decode()
+    assert text.index("welcome =") < text.index("hint=") < text.index("farewell=")  # source position
 
 
 def test_properties_regenerate_from_scratch_still_rewrites(properties_project, fake_api):

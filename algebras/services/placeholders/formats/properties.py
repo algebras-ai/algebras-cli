@@ -328,7 +328,7 @@ def _decode(translated: str, masked: Masked) -> str:
 def _type_changes(source: str, target: str, problems: List[Problem]) -> List[Problem]:
     """
     {0,number} -> {0,число} (or {0,number,#,##}): one mf_type_changed instead of missing + extra.
-    Used by `algebras placeholders`; verify() (translation gate, healthcheck) keeps missing + extra.
+    Used by `algebras placeholders` and healthcheck; verify() (translation gate) keeps missing + extra.
     """
     src_args = {source[p.start : p.end] for p in scan(source) if p.role == "arg"}
     tgt_args = {target[p.start : p.end] for p in scan(target) if p.role == "arg"}

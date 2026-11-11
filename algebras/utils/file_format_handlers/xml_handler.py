@@ -34,7 +34,9 @@ class XMLHandler(FileFormatHandler):
         """
         source_file = kwargs.get("source_file")
         if kwargs.get("preserve_layout") and source_file:
-            write_android_xml_preserving_layout(file_path, content, source_file)
+            write_android_xml_preserving_layout(
+                file_path, content, source_file, language=kwargs.get("target_language")
+            )
         else:
             write_android_xml_file(file_path, content, source_file=source_file)
     
@@ -52,6 +54,8 @@ class XMLHandler(FileFormatHandler):
         """Change only the given values and add new keys at their source position."""
         source_file = kwargs.get("source_file")
         if source_file:
-            write_android_xml_preserving_layout(file_path, content, source_file, keys_to_update)
+            write_android_xml_preserving_layout(
+                file_path, content, source_file, keys_to_update, language=kwargs.get("target_language")
+            )
         else:
             write_android_xml_file_in_place(file_path, content, keys_to_update)

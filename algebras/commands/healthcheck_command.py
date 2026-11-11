@@ -18,7 +18,7 @@ from algebras.utils.lang_validator import (
     read_language_file,
 )
 from algebras.utils.html_handler import read_html_file
-from algebras.utils.translation_validator import validate_translation, Issue
+from algebras.utils.translation_validator import validate_translation, placeholder_issues, Issue
 from algebras.utils.path_utils import resolve_destination_path
 from algebras.services.placeholders import profile_for_path
 
@@ -72,7 +72,7 @@ def execute(language: Optional[str] = None, output_format: str = 'console',
         scanner = FileScanner(config=config)
         files_by_language = scanner.group_files_by_language()
         
-        if not files_by_language.get(source_language, []):
+        if not files_by_language.get(source_language, []) and not scanner.multi_language_files():
             click.echo(click.style(f"No source files found for language '{source_language}'.", fg='yellow'))
             return 0
         
@@ -165,6 +165,12 @@ def iter_file_pairs(
             source_file = find_source_file(target_file, source_files, source_language, target_lang)
             if source_file:
                 yield source_file, target_file
+        # Multi-language CSV / TSV: the same file is source and target (one column per language).
+        from algebras.services.file_scanner import has_language_column
+
+        for csv_file in FileScanner(config=config).multi_language_files():
+            if has_language_column(csv_file, target_lang, config):
+                yield csv_file, csv_file
 
 
 def find_source_file(target_file: str, source_files: List[str], 
@@ -213,49 +219,62 @@ def validate_file_pair(source_file: str, target_file: str, source_language: str,
                        target_language: str, config: Config, verbose: bool) -> Tuple[List[Issue], int, Set[str], Set[str]]:
     """
     Validate a pair of source and target files.
-    
+
+    Placeholders are checked by the format's registered file check when it has one (the check
+    'algebras placeholders' runs: per-entry PO syntax from `#,` flags, .properties MessageFormat
+    rules, .stringsdict metadata ...), so both commands report the same placeholder findings.
+    Formatting, numbers, tags and tokens are checked per key for every format.
+
     Returns:
         Tuple of (list of issues, number of keys checked, keys with errors, keys with warnings)
     """
-    issues = []
-    keys_checked = 0
-    keys_with_errors = set()
-    keys_with_warnings = set()
+    issues: List[Issue] = []
+    checked_keys: Set[str] = set()
+    keys_with_errors: Set[str] = set()
+    keys_with_warnings: Set[str] = set()
     if source_file.endswith('.xlsx'):
         from algebras.utils.xlsx_handler import is_glossary_xlsx
 
         if is_glossary_xlsx(source_file):
-            return issues, keys_checked, keys_with_errors, keys_with_warnings  # a glossary, not translations
+            return issues, 0, keys_with_errors, keys_with_warnings  # a glossary, not translations
     profile = profile_for_path(source_file, config)
-    
+    is_xliff = target_file.endswith(('.xlf', '.xliff'))
+
+    def _record(key: str, key_issues: List[Issue]) -> None:
+        issues.extend(key_issues)
+        checked_keys.add(key)
+        if any(i.severity == 'error' for i in key_issues):
+            keys_with_errors.add(key)
+        if any(i.severity == 'warning' for i in key_issues):
+            keys_with_warnings.add(key)
+
     try:
+        file_issues = _file_check_issues(source_file, target_file, source_language, target_language, config)
+        check_placeholder_syntax = file_issues is None
+        for key, key_issues in (file_issues or {}).items():
+            _record(key, key_issues)
+
+        def _check(key: str, source_value, target_value) -> None:
+            # Only check translated (non-empty) string values
+            if not isinstance(source_value, str) or not isinstance(target_value, str):
+                return
+            if not target_value or not target_value.strip():
+                return
+            _record(
+                key,
+                validate_translation(
+                    source_value, target_value, key, is_xliff=is_xliff, profile=profile,
+                    check_placeholder_syntax=check_placeholder_syntax,
+                ),
+            )
+
         # Read files based on format
         if source_file.endswith('.html'):
             source_data = read_html_file(source_file)
             target_data = read_html_file(target_file)
-            source_keys = set(source_data.keys())
-            target_keys = set(target_data.keys())
-            
-            # Check all keys that exist in both and are translated
-            for key in source_keys:
-                if key in target_keys:
-                    source_value = source_data.get(key, '')
-                    target_value = target_data.get(key, '')
-                    
-                    # Only check if target is translated (non-empty)
-                    if target_value and target_value.strip():
-                        is_xliff = source_file.endswith(('.xlf', '.xliff'))
-                        key_issues = validate_translation(source_value, target_value, key, is_xliff=is_xliff, profile=profile)
-                        issues.extend(key_issues)
-                        keys_checked += 1
-                        # Track keys with issues
-                        if key_issues:
-                            has_error = any(i.severity == 'error' for i in key_issues)
-                            has_warning = any(i.severity == 'warning' for i in key_issues)
-                            if has_error:
-                                keys_with_errors.add(key)
-                            if has_warning:
-                                keys_with_warnings.add(key)
+            for key in source_data:
+                if key in target_data:
+                    _check(key, source_data.get(key, ''), target_data.get(key, ''))
         else:
             # For CSV/TSV files, pass language parameters
             source_lang = source_language if source_file.endswith(('.csv', '.tsv', '.xlsx')) else None
@@ -270,55 +289,15 @@ def validate_file_pair(source_file: str, target_file: str, source_language: str,
             
             # Handle flat dictionary formats
             if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv', '.arb', '.properties', '.xlsx')):
-                source_keys = set(source_data.keys())
-                target_keys = set(target_data.keys())
-                
-                # Check all keys that exist in both and are translated
-                for key in source_keys:
-                    if key in target_keys:
-                        source_value = source_data.get(key, '')
-                        target_value = target_data.get(key, '')
-                        
-                        # Only check if target is translated (non-empty)
-                        if target_value and target_value.strip():
-                            is_xliff = target_file.endswith(('.xlf', '.xliff'))
-                            key_issues = validate_translation(source_value, target_value, key, is_xliff=is_xliff, profile=profile)
-                            issues.extend(key_issues)
-                            keys_checked += 1
-                            # Track keys with issues
-                            if key_issues:
-                                has_error = any(i.severity == 'error' for i in key_issues)
-                                has_warning = any(i.severity == 'warning' for i in key_issues)
-                                if has_error:
-                                    keys_with_errors.add(key)
-                                if has_warning:
-                                    keys_with_warnings.add(key)
+                for key in source_data:
+                    if key in target_data:
+                        _check(key, source_data.get(key, ''), target_data.get(key, ''))
             else:
                 # Handle nested formats (JSON, YAML, TS)
-                source_keys = extract_all_keys(source_data)
                 target_keys = extract_all_keys(target_data)
-                
-                # Check all keys that exist in both and are translated
-                for key in source_keys:
+                for key in extract_all_keys(source_data):
                     if key in target_keys:
-                        source_value = get_key_value(source_data, key)
-                        target_value = get_key_value(target_data, key)
-                        
-                        # Only check string values that are translated
-                        if isinstance(source_value, str) and isinstance(target_value, str):
-                            if target_value and target_value.strip():
-                                is_xliff = target_file.endswith(('.xlf', '.xliff'))
-                                key_issues = validate_translation(source_value, target_value, key, is_xliff=is_xliff, profile=profile)
-                                issues.extend(key_issues)
-                                keys_checked += 1
-                                # Track keys with issues
-                                if key_issues:
-                                    has_error = any(i.severity == 'error' for i in key_issues)
-                                    has_warning = any(i.severity == 'warning' for i in key_issues)
-                                    if has_error:
-                                        keys_with_errors.add(key)
-                                    if has_warning:
-                                        keys_with_warnings.add(key)
+                        _check(key, get_key_value(source_data, key), get_key_value(target_data, key))
         
         # Add file context to issues
         for issue in issues:
@@ -337,7 +316,34 @@ def validate_file_pair(source_file: str, target_file: str, source_language: str,
         error_issue.language = target_language
         issues.append(error_issue)
     
-    return issues, keys_checked, keys_with_errors, keys_with_warnings
+    return issues, len(checked_keys), keys_with_errors, keys_with_warnings
+
+
+def _file_check_issues(
+    source_file: str, target_file: str, source_language: str, target_language: str, config: Config
+) -> Optional[Dict[str, List[Issue]]]:
+    """
+    Placeholder issues by key from the format's registered file check, or None when the format
+    has none (or it cannot read the files): then placeholders are checked per key as before.
+    """
+    from algebras.services.placeholders.file_checks import get_file_check
+
+    file_check = get_file_check(source_file)
+    if file_check is None:
+        return None
+    try:
+        findings = file_check(source_file, target_file, source_language, target_language, config)
+    except Exception:
+        return None
+    by_key: Dict[str, List[Issue]] = {}
+    for finding in findings:
+        # The key path names the value the way the per-key checks do (Finding.key may be a
+        # display name, e.g. "greet [Strings!C2]" for .xlsx).
+        key = ".".join(finding.path) if finding.path else finding.key
+        key_issues = placeholder_issues(finding.problems, key)
+        if key_issues:
+            by_key.setdefault(key, []).extend(key_issues)
+    return by_key
 
 
 def print_console_report(issues: List[Issue], files_checked: int, keys_checked: int, 

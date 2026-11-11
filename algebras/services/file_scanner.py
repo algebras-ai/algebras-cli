@@ -292,3 +292,35 @@ class FileScanner:
                         break
         
         return result 
+    def multi_language_files(self) -> List[str]:
+        """
+        Legacy mode (no `source_files`): CSV / TSV files with a column for the source language.
+        They hold every language, so each is both the source and the target file, and the
+        filename-based grouping of group_files_by_language (one file per language) does not pair
+        them. Empty with `source_files`, which pairs them through their destination_path.
+        """
+        if self.source_files:
+            return []
+        source_language = self.config.get_source_language()
+        assigned = {f for files in self.group_files_by_language().values() for f in files}
+        return [
+            f
+            for f in self.find_localization_files()
+            if f.endswith((".csv", ".tsv"))
+            and f not in assigned
+            and has_language_column(f, source_language, self.config)
+        ]
+
+
+def has_language_column(file_path: str, language: str, config: Optional[Config] = None) -> bool:
+    """True if a CSV / TSV translation file (not a glossary) has a column for `language`."""
+    from algebras.utils.csv_handler import _find_matching_column, is_glossary_csv, read_csv_file
+
+    try:
+        if is_glossary_csv(file_path):
+            return False
+        columns = read_csv_file(file_path).get("languages", [])
+    except Exception:
+        return False
+    code = config.get_destination_locale_code(language) if config is not None else language
+    return _find_matching_column(columns, code) is not None

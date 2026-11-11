@@ -248,8 +248,10 @@ def extract_translatable_strings(content: Dict[str, Any]) -> Dict[str, str]:
                     # Recursively process nested dicts
                     _extract_from_dict(value, current_key)
             elif isinstance(value, str):
-                # Skip format keys and other metadata
-                if not key.startswith("NSString"):
+                # Skip metadata. A format key with text around its variable references
+                # ("Found %#@items@ in %#@folders@") is translated; the references are masked
+                # as placeholders. A reference-only one ("%#@items@") is copied from the source.
+                if not key.startswith("NSString") or is_translatable_format_key(key, value):
                     result[current_key] = value
     
     _extract_from_dict(content)
@@ -318,6 +320,22 @@ def is_reference_only(format_key: str) -> bool:
         if p.kind == "objc_variable":
             rest = rest[: p.start] + rest[p.end :]
     return rest.strip() == "" and rest != format_key
+
+
+# Any variable name, including ones the placeholder syntax does not take (e.g. "%#@Auth.eula@").
+_ANY_REFERENCE = re.compile(r"%(?:\d+\$)?#@[^@\s]+@")
+
+
+def is_translatable_format_key(name: str, value: Any) -> bool:
+    """True for a NSStringLocalizedFormatKey with text around its references."""
+    from algebras.services.placeholders import extract
+
+    if name != FORMAT_KEY or not isinstance(value, str) or not value.strip():
+        return False
+    rest = value
+    for p in sorted(extract(value, _profile()), key=lambda p: p.start, reverse=True):
+        rest = rest[: p.start] + rest[p.end :]
+    return bool(re.sub(r"[\W\d_]", "", _ANY_REFERENCE.sub("", rest)))
 
 
 def _base_form(plural_dict: Dict[str, Any]) -> Optional[str]:
@@ -744,7 +762,10 @@ def update_translatable_strings(
     def _drop_untranslated(value: Any, current_key: str) -> bool:
         """Remove source-language strings from a copied entry. False = drop the whole entry."""
         if isinstance(value, str):
-            return current_key in translations or current_key.rsplit(".", 1)[-1].startswith("NSString")
+            name = current_key.rsplit(".", 1)[-1]
+            if is_translatable_format_key(name, value):
+                return current_key in translations
+            return current_key in translations or name.startswith("NSString")
         if not isinstance(value, dict):
             return True
         if _is_plural_rule_dict(value):
@@ -757,7 +778,12 @@ def update_translatable_strings(
         for key in list(value):
             child = value[key]
             if isinstance(child, str):
-                if not key.startswith("NSString") and f"{current_key}.{key}" not in translations:
+                if is_translatable_format_key(key, child):
+                    # A format key left in the source language: leave the entry out, so 'status'
+                    # still reports it and the next run retries it.
+                    if f"{current_key}.{key}" not in translations:
+                        return False
+                elif not key.startswith("NSString") and f"{current_key}.{key}" not in translations:
                     del value[key]  # format/type metadata stays; untranslated text goes
             elif not _drop_untranslated(child, f"{current_key}.{key}"):
                 return False
@@ -780,8 +806,20 @@ def update_translatable_strings(
                     _apply_translations(value, current_key)
             elif isinstance(value, str):
                 # Update direct string values
-                if current_key in translations and not key.startswith("NSString"):
+                if current_key not in translations:
+                    continue
+                if not key.startswith("NSString"):
                     data[key] = translations[current_key]
+                elif is_translatable_format_key(key, value):
+                    translated = translations[current_key]
+                    # Its %#@var@ references name the plural dicts: a translation that lost or
+                    # renamed one would break the lookup, so it is not written.
+                    if (
+                        isinstance(translated, str)
+                        and translated.strip()
+                        and not format_key_problems(value, translated)
+                    ):
+                        data[key] = translated
 
     if source_content:
         _merge_missing_keys(result, source_content)

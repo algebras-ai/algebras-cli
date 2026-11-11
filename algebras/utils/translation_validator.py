@@ -193,8 +193,16 @@ def check_placeholders(source: str, target: str, key: Optional[str] = None, prof
 
     # ICU plurals: branches the target language added (ru few/many) repeat {count}/{name}.
     source = align_source_branches(source, target)
+    return placeholder_issues(verify(source, target, profile or GENERIC_PROFILE), key)
+
+
+def placeholder_issues(problems, key: Optional[str] = None) -> List[Issue]:
+    """
+    Healthcheck issues for placeholder Problems, from verify() or a format's file check (the one
+    'algebras placeholders' runs, see algebras.services.placeholders.file_checks).
+    """
     issues = []
-    for problem in verify(source, target, profile or GENERIC_PROFILE):
+    for problem in problems:
         # Codes added by format modules (e.g. mf_type_changed, inline_attr_changed) are errors.
         severity = _PLACEHOLDER_SEVERITY.get(problem.code, 'error')
         if problem.code == 'tags_unbalanced' or problem.placeholder.startswith('<'):
@@ -614,7 +622,8 @@ def check_xliff_placeholders(source: str, target: str, key: Optional[str] = None
     return issues
 
 
-def validate_translation(source: str, target: str, key: Optional[str] = None, is_xliff: bool = False, profile=None) -> List[Issue]:
+def validate_translation(source: str, target: str, key: Optional[str] = None, is_xliff: bool = False, profile=None,
+                         check_placeholder_syntax: bool = True) -> List[Issue]:
     """
     Run all validation checks on a translation pair.
     
@@ -622,6 +631,8 @@ def validate_translation(source: str, target: str, key: Optional[str] = None, is
         source: Source string
         target: Target translation string
         key: Optional key for context
+        check_placeholder_syntax: False when the file's placeholders are checked by its
+            format's file check instead (see healthcheck_command.validate_file_pair)
         
     Returns:
         List of all issues found
@@ -634,7 +645,8 @@ def validate_translation(source: str, target: str, key: Optional[str] = None, is
     
     # Run all checks
     issues.extend(check_formatting(source, target, key))
-    issues.extend(check_placeholders(source, target, key, profile))
+    if check_placeholder_syntax:
+        issues.extend(check_placeholders(source, target, key, profile))
     issues.extend(check_numbers(source, target, key))
     issues.extend(check_html_xml_tags(source, target, key))
     issues.extend(check_non_translatable_tokens(source, target, key))

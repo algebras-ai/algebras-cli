@@ -11,13 +11,17 @@ The writers (algebras/utils/ts_handler.py) escape every value for its literal's 
 translated apostrophe in a '…' value or a backtick / "${" in a `…` value cannot break the module or
 add a substitution.
 
-`algebras placeholders` checks every value like the default check, plus `ts_unparseable`: a target
+`algebras placeholders` checks every value like the default check, plus `ts_template_quote_changed`:
+a source template literal with substitutions (`Hi ${name}`) written as a "…" or '…' string in the
+target, where ${name} is shown as text instead of evaluated; its fix re-quotes the value with
+backticks (the source's substitutions stay substitutions). And `ts_unparseable`: a target
 module that does not parse. If it only breaks because of unescaped quotes inside values (an
 apostrophe in 'Don't'), each such value is found by a lenient parse and reported with
 ts_unparseable; its fix is the value written again with correct escaping (and placeholder repair
 when needed). A module that cannot be read at all is reported once, without a fix.
 """
 
+import os
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from algebras.services.placeholders.engine import Problem, repair, verify
@@ -38,7 +42,16 @@ _EXTENSIONS = [".ts"]
 TS_CANDIDATES = ("i18next", "xml_tag", "js_template", "icu_simple", "printf")
 
 UNPARSEABLE = "ts_unparseable"
+QUOTE_CHANGED = "ts_template_quote_changed"
 FILE_KEY = "(file)"
+
+# Values check_file found re-quoted from a source template literal: (target file, key path) ->
+# the source literal's substitutions. write_fixes writes these back as template literals.
+_TEMPLATE_FIXES: Dict[Tuple[str, KeyPath], Tuple[str, ...]] = {}
+
+
+def _file_id(path: str) -> str:
+    return os.path.realpath(path)
 
 
 def _strings(data: Any) -> Iterator[str]:
@@ -136,6 +149,26 @@ def check_file(
         drop = drop_allowed_for_key(key, source_text, target_language, profile)
         problems = verify(source_text, target_text, profile, drop)
         fixed = repair_value(source_text, target_text, profile, drop) if problems else None
+        source_literal = source.literals.get(path)
+        target_literal = target.literals.get(path)
+        if (
+            source_literal is not None
+            and source_literal.quote == "`"
+            and source_literal.substitutions
+            and target_literal is not None
+            and target_literal.quote != "`"
+        ):
+            problems = [
+                Problem(
+                    QUOTE_CHANGED,
+                    target_literal.quote,
+                    f"The source is a `…` template literal; written with {target_literal.quote} quotes, "
+                    f"{', '.join(source_literal.substitutions)} is shown as text instead of evaluated",
+                )
+            ] + problems
+            if fixed is None and len(problems) == 1:
+                fixed = target_text  # only the quotes were wrong: write the same text as `…`
+            _TEMPLATE_FIXES[(_file_id(target_file), path)] = source_literal.substitutions
         if path in broken:
             quote = target.literals[path].quote
             problems = [
@@ -176,7 +209,7 @@ def write_fixes(target_file: str, fixes: Dict[KeyPath, str], language: str = Non
     module stays byte-for-byte. Values with unescaped quotes are located by a lenient parse. The
     result must parse, or nothing is written.
     """
-    from algebras.utils.ts_handler import TSParseError, _write_checked, parse_ts_module, replace_literals
+    from algebras.utils.ts_handler import TSLiteral, TSParseError, _write_checked, parse_ts_module, replace_literals
 
     with open(target_file, "r", encoding="utf-8", newline="") as f:
         text = f.read()
@@ -187,7 +220,19 @@ def write_fixes(target_file: str, fixes: Dict[KeyPath, str], language: str = Non
     missing = [p for p in fixes if tuple(p) not in doc.literals]
     if missing:
         raise ValueError(f"Could not find {', '.join('.'.join(p) for p in missing)} in {target_file}")
-    _write_checked(target_file, replace_literals(text, doc.literals, {tuple(p): v for p, v in fixes.items()}))
+    # Values that lost their source template literal's backticks are written as `…` again.
+    file_id = _file_id(target_file)
+    templates = {
+        tuple(p): TSLiteral(0, 0, "`", _TEMPLATE_FIXES[(file_id, tuple(p))])
+        for p in fixes
+        if (file_id, tuple(p)) in _TEMPLATE_FIXES
+    }
+    _write_checked(
+        target_file,
+        replace_literals(text, doc.literals, {tuple(p): v for p, v in fixes.items()}, source_literals=templates),
+    )
+    for path in templates:
+        _TEMPLATE_FIXES.pop((file_id, path), None)
 
 
 register_profile_resolver(_EXTENSIONS, resolve_profile)

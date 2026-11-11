@@ -9,7 +9,7 @@ from colorama import Fore
 from typing import Any, Optional, Dict, List, Set, Tuple
 
 from algebras.config import Config
-from algebras.services.file_scanner import FileScanner
+from algebras.services.file_scanner import FileScanner, has_language_column
 from algebras.utils.lang_validator import (
     expand_plural_source_keys,
     extract_all_keys,
@@ -368,7 +368,10 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
         files_by_language = scanner.group_files_by_language()
         
         # Get source files
-        source_files = files_by_language.get(source_language, [])
+        source_files = list(files_by_language.get(source_language, []))
+        # Legacy mode: multi-language CSV / TSV files are their own target (one column per language).
+        multi_language_files = scanner.multi_language_files()
+        source_files.extend(f for f in multi_language_files if f not in source_files)
         if not source_files:
             click.echo(click.style(f"No source files found for language '{source_language}'.", fg='yellow'))
             return
@@ -415,7 +418,8 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                             if os.path.isfile(resolved_path):
                                 file_count += 1
             else:
-                file_count = len(lang_files)
+                lang_multi_files = [f for f in multi_language_files if has_language_column(f, lang, config)]
+                file_count = len(lang_files) + len(lang_multi_files)
             
             # Calculate file percentage
             if expected_file_counts[lang] > 0:
@@ -455,6 +459,15 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                                 total_translated_keys += current_translated_keys
                                 total_outdated_keys += outdated_keys
             else:
+                for csv_file in multi_language_files:
+                    # Every key of the file is expected in the language's column, present or not.
+                    total_expected_keys += source_key_counts.get(csv_file, 0)
+                    if csv_file in lang_multi_files:
+                        current_translated_keys, outdated_keys = count_current_and_outdated_keys(
+                            csv_file, csv_file, source_language, lang, config
+                        )
+                        total_translated_keys += current_translated_keys
+                        total_outdated_keys += outdated_keys
                 # Fallback to old filename-based matching for backward compatibility
                 for lang_file in lang_files:
                     # Find corresponding source file to get expected key count

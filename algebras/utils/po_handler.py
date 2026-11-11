@@ -3,8 +3,10 @@
 
 Reading returns a flat {key: text} dictionary:
 
-- a singular entry is keyed by its msgid;
-- a plural entry (msgid_plural + msgstr[N]) contributes one key per form, "<msgid>::msgstr[N]"
+- a singular entry is keyed by its msgid, or by "<msgctxt>\x04<msgid>" when it has a msgctxt
+  (entry_key / split_entry_key; gettext joins them the same way in compiled catalogs), so the same
+  msgid under two contexts ("Open" the verb and "Open" the adjective) is two keys;
+- a plural entry (msgid_plural + msgstr[N]) contributes one key per form, "<entry key>::msgstr[N]"
   (see plural_key / split_plural_key). Form N means what the file's Plural-Forms header says,
   so a Russian target has msgstr[0..2] while the English source has msgstr[0..1];
   expand_plural_source maps the source onto the target's forms.
@@ -26,12 +28,36 @@ from typing import Any, Dict, List, Optional, Tuple
 # ---------------------------------------------------------------------------
 
 _PLURAL_KEY_RE = re.compile(r"^(.*)::msgstr\[(\d+)\]$", re.DOTALL)
+CONTEXT_SEPARATOR = "\x04"  # EOT, as in gettext's compiled catalogs; never part of a msgid
+
+
+def entry_key(entry: Dict[str, Any]) -> str:
+    """Key of an entry: its msgid, prefixed with "<msgctxt>\x04" when it has a msgctxt."""
+    msgid = entry.get("msgid") or ""
+    msgctxt = entry.get("msgctxt")
+    return f"{msgctxt}{CONTEXT_SEPARATOR}{msgid}" if msgctxt else msgid
+
+
+def split_entry_key(key: str) -> Tuple[Optional[str], str]:
+    """(msgctxt or None, msgid) for an entry key (without a plural suffix)."""
+    if CONTEXT_SEPARATOR in key:
+        msgctxt, msgid = key.split(CONTEXT_SEPARATOR, 1)
+        return msgctxt, msgid
+    return None, key
+
+
+def display_key(key: str) -> str:
+    """A key for messages: "msgid" or "msgid [msgctxt: ...]"."""
+    split = split_plural_key(key)
+    base, suffix = (split[0], f"::msgstr[{split[1]}]") if split else (key, "")
+    msgctxt, msgid = split_entry_key(base)
+    return f"{msgid}{suffix}" + (f" [msgctxt: {msgctxt}]" if msgctxt is not None else "")
 _DEFAULT_PLURAL_FORMS = (2, "(n != 1)")
 _SAMPLE_RANGE = 1001
 
 
 def plural_key(msgid: str, index: int) -> str:
-    """Flat key of one plural form: "<msgid>::msgstr[<index>]"."""
+    """Flat key of one plural form: "<entry key>::msgstr[<index>]"."""
     return f"{msgid}::msgstr[{index}]"
 
 
@@ -151,7 +177,7 @@ def expand_plural_source(
     for entry in plural_entries:
         singular, plural = source_plural_texts(entry, source_forms)
         for index in range(nplurals):
-            expanded[plural_key(entry["msgid"], index)] = singular if samples[index] == (1,) else plural
+            expanded[plural_key(entry_key(entry), index)] = singular if samples[index] == (1,) else plural
     return expanded
 
 
@@ -183,6 +209,14 @@ def plural_anchor_index(nplurals: int, expr: str, language: Optional[str]) -> in
     return others[0] if len(others) == 1 else max(nplurals - 1, 0)
 
 
+def context_note(msgctxt: str) -> str:
+    """Translator note for an entry with a msgctxt."""
+    return (
+        f"gettext context (msgctxt): '{msgctxt}'. The same source text may appear under other "
+        "contexts with a different meaning; translate it for this context."
+    )
+
+
 def build_plural_contexts(
     source_file: str,
     source_language: str,
@@ -190,17 +224,25 @@ def build_plural_contexts(
     target_file: Optional[str] = None,
 ) -> Dict[str, str]:
     """
-    Translator note for every target plural-form key: which counts it covers. The result's
-    `anchors` (PluralContexts) map each form to its entry's anchor form (plural_anchor_index),
-    which is translated first and quoted in the other forms' notes.
+    Translator notes: for every target plural-form key, which counts it covers; for every entry
+    with a msgctxt, the context. The result's `anchors` (PluralContexts) map each form to its
+    entry's anchor form (plural_anchor_index), which is translated first and quoted in the other
+    forms' notes; a singular key with a context note is its own anchor.
     """
     from algebras.utils.ios_stringsdict_handler import PluralContexts
     from algebras.utils.plural_rules import get_language_name
 
     entries = read_po_entries(source_file)
+    contexts = PluralContexts()
+    for entry in entries:
+        if entry.get("msgid") and entry.get("msgctxt") and entry.get("msgid_plural") is None:
+            key = entry_key(entry)
+            contexts[key] = context_note(entry["msgctxt"])
+            contexts.anchors[key] = key
+
     plural_entries = [e for e in entries if e.get("msgid_plural") is not None and e.get("msgid")]
     if not plural_entries:
-        return {}
+        return contexts if contexts else {}
     target_forms = read_po_plural_forms(target_file) if target_file else None
     nplurals, expr = target_forms or plural_forms_for_language(target_language)
     samples = plural_index_samples(nplurals, expr)
@@ -209,11 +251,11 @@ def build_plural_contexts(
     source_name = get_language_name(source_language)
 
     anchor_index = plural_anchor_index(nplurals, expr, target_language)
-    contexts = PluralContexts()
     for entry in plural_entries:
         singular, plural = source_plural_texts(entry, source_forms)
+        base = entry_key(entry)
         for index in range(nplurals):
-            contexts.anchors[plural_key(entry["msgid"], index)] = plural_key(entry["msgid"], anchor_index)
+            contexts.anchors[plural_key(base, index)] = plural_key(base, anchor_index)
             counts = samples[index]
             parts = [
                 f"gettext plural form msgstr[{index}] for {target_name}"
@@ -227,7 +269,9 @@ def build_plural_contexts(
                     "This form covers several different counts, so keep every placeholder of the "
                     "plural text, including the number, instead of spelling out a number."
                 )
-            contexts[plural_key(entry["msgid"], index)] = " ".join(parts)
+            if entry.get("msgctxt"):
+                parts.append(context_note(entry["msgctxt"]))
+            contexts[plural_key(base, index)] = " ".join(parts)
     return contexts
 
 
@@ -243,15 +287,15 @@ def read_po_entries(file_path: str) -> List[Dict[str, Any]]:
 
 def _entry_values(entry: Dict[str, Any]) -> Dict[str, str]:
     """Flat {key: text} for one entry (empty for the header and comment-only blocks)."""
-    msgid = entry.get("msgid")
-    if not msgid:
+    if not entry.get("msgid"):
         return {}
+    key = entry_key(entry)
     if entry.get("msgid_plural") is not None:
         forms = entry.get("msgstr_plural") or {}
-        return {plural_key(msgid, i): forms[i] for i in sorted(forms)}
+        return {plural_key(key, i): forms[i] for i in sorted(forms)}
     if entry.get("msgstr") is None:
         return {}
-    return {msgid: entry["msgstr"]}
+    return {key: entry["msgstr"]}
 
 
 def read_po_file(file_path: str) -> Dict[str, Any]:
@@ -262,7 +306,8 @@ def read_po_file(file_path: str) -> Dict[str, Any]:
         file_path: Path to the .po file
 
     Returns:
-        Dictionary containing the translation content (plural forms as "<msgid>::msgstr[N]")
+        Dictionary containing the translation content, keyed by entry_key (plural forms as
+        "<entry key>::msgstr[N]")
     """
     result: Dict[str, Any] = {}
     for entry in read_po_entries(file_path):
@@ -320,7 +365,7 @@ def write_po_file(
 
     Args:
         file_path: Path to the .po file
-        content: Dictionary to write ({msgid: text}, plural forms as "<msgid>::msgstr[N]")
+        content: Dictionary to write ({entry key: text}, plural forms as "<entry key>::msgstr[N]")
         mark_fuzzy: If True, add "#, fuzzy" comment to every translated entry
         source_file: Source .po file; new entries take their comments, flags, msgctxt and
             msgid_plural from it, and a new target file is created from it as a template.
@@ -331,7 +376,7 @@ def write_po_file(
     if source_file is None or not os.path.exists(source_file):
         source_file = _guess_source_file(file_path)
     source_entries = read_po_entries(source_file) if source_file else []
-    source_by_msgid = {e["msgid"]: e for e in source_entries if e.get("msgid")}
+    source_by_key = {entry_key(e): e for e in source_entries if e.get("msgid")}
 
     from_template = False
     if os.path.exists(file_path):
@@ -351,7 +396,7 @@ def write_po_file(
         _prepare_template(entries, language)
 
     plural_forms = file_plural_forms(entries) or plural_forms_for_language(language)
-    _apply_content(entries, content, mark_fuzzy, source_by_msgid, plural_forms, file_path)
+    _apply_content(entries, content, mark_fuzzy, source_by_key, plural_forms, file_path)
     _write_text(file_path, _reconstruct_po_content(entries, original_content))
 
 
@@ -400,10 +445,10 @@ def _gate(entry: Dict[str, Any], index: Optional[int], value: str, source_entry,
     _source, problems = check_value(entry, index, value, source_entry, plural_forms)
     if not problems:
         return value
-    key = entry["msgid"] if index is None else plural_key(entry["msgid"], index)
+    key = entry_key(entry) if index is None else plural_key(entry_key(entry), index)
     details = "; ".join(p.message for p in problems)
     print(
-        f"  ⚠ {os.path.basename(file_path)}: not writing '{key}' ({details}); "
+        f"  ⚠ {os.path.basename(file_path)}: not writing '{display_key(key)}' ({details}); "
         "left empty so gettext uses the source text"
     )
     return ""
@@ -413,7 +458,7 @@ def _apply_content(
     entries: List[Dict[str, Any]],
     content: Dict[str, Any],
     mark_fuzzy: bool,
-    source_by_msgid: Dict[str, Dict[str, Any]],
+    source_by_key: Dict[str, Dict[str, Any]],
     plural_forms: Tuple[int, str],
     file_path: str,
 ) -> None:
@@ -433,15 +478,15 @@ def _apply_content(
     handled_plural = set()
 
     for entry in entries:
-        msgid = entry.get("msgid")
-        if not msgid:
+        if not entry.get("msgid"):
             continue
-        source_entry = source_by_msgid.get(msgid)
+        key = entry_key(entry)
+        source_entry = source_by_key.get(key)
         if entry.get("msgid_plural") is not None:
-            values = plurals.get(msgid)
+            values = plurals.get(key)
             if values is None:
                 continue
-            handled_plural.add(msgid)
+            handled_plural.add(key)
             forms = dict(entry.get("msgstr_plural") or {})
             for index in range(nplurals):
                 forms.setdefault(index, "")
@@ -454,31 +499,31 @@ def _apply_content(
             entry["msgstr_plural"] = forms
             if changed:
                 _add_fuzzy_comment_if_needed(entry, mark_fuzzy)
-        elif msgid in singular:
-            handled_singular.add(msgid)
-            value = singular[msgid]
+        elif key in singular:
+            handled_singular.add(key)
+            value = singular[key]
             value = "" if value is None else str(value)
             if entry.get("msgstr") != value:
                 entry["msgstr"] = _gate(entry, None, value, source_entry, plural_forms, file_path)
                 _add_fuzzy_comment_if_needed(entry, mark_fuzzy)
 
     # New entries: comments, flags, msgctxt and msgid_plural come from the source entry.
-    for msgid in sorted(set(singular) - handled_singular):
-        source_entry = source_by_msgid.get(msgid)
+    for key in sorted(set(singular) - handled_singular):
+        source_entry = source_by_key.get(key)
         if source_entry is not None and source_entry.get("msgid_plural") is not None:
             continue  # a plural entry is written from its plural keys
-        entry = _new_entry(msgid, source_entry)
-        value = "" if singular[msgid] is None else str(singular[msgid])
+        entry = _new_entry(key, source_entry)
+        value = "" if singular[key] is None else str(singular[key])
         entry["msgstr"] = _gate(entry, None, value, source_entry, plural_forms, file_path)
         _add_fuzzy_comment_if_needed(entry, mark_fuzzy)
         entries.append(entry)
 
-    for msgid in sorted(set(plurals) - handled_plural):
-        source_entry = source_by_msgid.get(msgid)
-        entry = _new_entry(msgid, source_entry)
-        entry["msgid_plural"] = (source_entry or {}).get("msgid_plural") or msgid
+    for key in sorted(set(plurals) - handled_plural):
+        source_entry = source_by_key.get(key)
+        entry = _new_entry(key, source_entry)
+        entry["msgid_plural"] = (source_entry or {}).get("msgid_plural") or entry["msgid"]
         forms = {i: "" for i in range(nplurals)}
-        for index, value in plurals[msgid].items():
+        for index, value in plurals[key].items():
             value = "" if value is None else str(value)
             forms[index] = _gate(entry, index, value, source_entry, plural_forms, file_path)
         entry["msgstr_plural"] = forms
@@ -486,13 +531,14 @@ def _apply_content(
         entries.append(entry)
 
 
-def _new_entry(msgid: str, source_entry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _new_entry(key: str, source_entry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    msgctxt, msgid = split_entry_key(key)
     source_entry = source_entry or {}
     comments = list(source_entry.get("comments") or [])
     return {
         "comments": comments,
         "flags": _flags_from_comments(comments),
-        "msgctxt": source_entry.get("msgctxt") or "",
+        "msgctxt": msgctxt if msgctxt is not None else (source_entry.get("msgctxt") or ""),
         "msgctxt_lines": [],
         "msgid": msgid,
         "msgid_lines": [],
@@ -508,19 +554,19 @@ def _new_entry(msgid: str, source_entry: Optional[Dict[str, Any]]) -> Dict[str, 
 
 def update_po_values(file_path: str, values: Dict[str, str], mark_fuzzy: bool = False) -> List[str]:
     """
-    Set the given values ({msgid: text} / {"<msgid>::msgstr[N]": text}) in place, without the
+    Set the given values ({entry key: text} / {"<entry key>::msgstr[N]": text}) in place, without the
     placeholder gate (used by 'algebras placeholders --fix' for already verified values). Only the
     changed entries are re-serialized. Returns the keys that were not found.
     """
     with open(file_path, "r", encoding="utf-8") as f:
         original_content = f.read()
     entries = _parse_po_content(original_content)
-    by_msgid = {e["msgid"]: e for e in entries if e.get("msgid")}
+    by_key = {entry_key(e): e for e in entries if e.get("msgid")}
     not_found: List[str] = []
     for key, value in values.items():
         split = split_plural_key(key)
-        msgid, index = split if split else (key, None)
-        entry = by_msgid.get(msgid)
+        base, index = split if split else (key, None)
+        entry = by_key.get(base)
         if entry is None or (index is None) != (entry.get("msgid_plural") is None):
             not_found.append(key)
             continue

@@ -82,7 +82,8 @@ class TestHealthcheckExecute:
         
         mock_scanner = MagicMock(spec=FileScanner)
         mock_scanner.group_files_by_language.return_value = {"en": [], "fr": ["messages.fr.json"]}
-        
+        mock_scanner.multi_language_files.return_value = []
+
         with patch("algebras.commands.healthcheck_command.Config", return_value=mock_config), \
              patch("algebras.commands.healthcheck_command.FileScanner", return_value=mock_scanner), \
              patch("algebras.commands.healthcheck_command.click.echo") as mock_echo:

@@ -158,7 +158,8 @@ def test_transliterating_model_keeps_every_placeholder(ios_project, monkeypatch)
     for form in ("one", "few", "many", "other"):
         assert "%1$@" in files["fileCount"][form] and "%ld" in files["fileCount"][form], form
     items = written["found_items"]
-    assert items["NSStringLocalizedFormatKey"] == "Found %#@itemCount@"
+    # A format key with text is translated around its reference.
+    assert items["NSStringLocalizedFormatKey"] == transliterate("[None] Found ") + "%#@itemCount@"
     for form in ("one", "few", "many", "other"):
         assert items["itemCount"][form].count("%d") == 1, form
 
