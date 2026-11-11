@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional, Callable
 from algebras.utils.file_format_handlers.base import FileFormatHandler
 from algebras.utils.ts_handler import (
     read_ts_translation_file,
-    write_ts_translation_file,
+    write_ts_translation_file_keeping_quotes,
 )
 from algebras.utils.file_writer import IncrementalFileWriter
 
@@ -25,8 +25,8 @@ class TSHandler(FileFormatHandler):
         content: Dict[str, Any],
         **kwargs
     ) -> None:
-        """Write TypeScript translation file"""
-        write_ts_translation_file(file_path, content)
+        """Write TypeScript translation file, keeping each value's quote style"""
+        write_ts_translation_file_keeping_quotes(file_path, content, kwargs.get("source_file"))
     
     def create_incremental_writer(
         self,

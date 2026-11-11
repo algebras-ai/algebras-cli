@@ -94,7 +94,8 @@ I18NEXT = Syntax(
 JS_TEMPLATE = Syntax(
     name="js_template",
     kind="named",
-    pattern=re.compile(r"\$\{[^{}]+\}"),
+    # One whole token, nested braces included (up to three levels): ${fmt({n: count})}.
+    pattern=re.compile(r"\$\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})+\}"),
 )
 
 ICU_SIMPLE = Syntax(
