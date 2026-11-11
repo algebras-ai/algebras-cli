@@ -84,8 +84,9 @@ class FlatDictTranslationStrategy(TranslationStrategy):
             batch_dict = {}
             for i in range(batch_start_idx, batch_end_idx):
                 if i < len(result.translations):
-                    if i in result.failed_indices:
-                        # Placeholders did not survive translation: leave the key untranslated
+                    if i in result.failed_indices or batch_idx in result.failed_batches:
+                        # Placeholders did not survive translation, or the API batch failed:
+                        # leave the key out so it is reported as missing and retried next run.
                         continue
                     key = non_empty_keys[i]
                     source_text = non_empty_items[i]

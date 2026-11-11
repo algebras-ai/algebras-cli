@@ -7,8 +7,8 @@ from typing import Dict, Any, Optional, Callable
 from algebras.services.strategies.base import TranslationStrategy
 
 
-# Marks a value rejected by the placeholder check (as opposed to a failed API batch).
-_REJECTED = object()
+# Marks a value that is left out of the target: its placeholders were rejected, or its API batch failed.
+_LEFT_OUT = object()
 
 
 class NestedDictTranslationStrategy(TranslationStrategy):
@@ -133,7 +133,6 @@ class NestedDictTranslationStrategy(TranslationStrategy):
         # Map translations back to paths and apply normalization
         # Also handle callbacks and track failed translations
         num_batches = (len(string_items) + self.batch_size - 1) // self.batch_size
-        failed_keys_count = 0
 
         # Build set of failed indices from failed batches
         failed_indices = set()
@@ -150,15 +149,10 @@ class NestedDictTranslationStrategy(TranslationStrategy):
                 raw_translation = result.translations[i]
                 path_key = tuple(path)
 
-                if i in result.failed_indices:
-                    # Placeholders did not survive translation: leave the key out of the
-                    # target so 'status' reports it and the next run retries it.
-                    translated_values[path_key] = _REJECTED
-                    failed_keys_count += 1
-                elif i in failed_indices:
-                    # Mark as failed - will use source value in build_result
-                    translated_values[path_key] = None
-                    failed_keys_count += 1
+                if i in failed_indices:
+                    # Placeholders did not survive translation, or the API batch failed: leave
+                    # the key out of the target so 'status' reports it and the next run retries it.
+                    translated_values[path_key] = _LEFT_OUT
                 else:
                     # Apply normalization
                     normalized = self.string_normalizer.normalize(
@@ -179,7 +173,7 @@ class NestedDictTranslationStrategy(TranslationStrategy):
                     if path_key in translated_values:
                         path_str = ".".join(str(p) for p in path)
                         translation = translated_values[path_key]
-                        if translation is not None and translation is not _REJECTED:
+                        if translation is not None and translation is not _LEFT_OUT:
                             batch_dict[path_str] = translation
 
             # Call callback if provided
@@ -211,15 +205,14 @@ class NestedDictTranslationStrategy(TranslationStrategy):
                 print(
                     f"      - Other errors: {len(result.error_stats['other'])} batches ({', '.join(map(str, result.error_stats['other']))})"
                 )
-            print(f"    Failed batches will use source language values")
+            print(f"    Keys from failed batches are left out and will be retried on the next run")
 
         # Build the result dictionary with translations
         result_dict = {}
-        failed_keys_count = 0
-        rejected_keys_count = 0
+        left_out_count = 0
 
         def build_result(src_data, dest_data, current_path=None):
-            nonlocal failed_keys_count, rejected_keys_count
+            nonlocal left_out_count
             if current_path is None:
                 current_path = []
 
@@ -231,38 +224,23 @@ class NestedDictTranslationStrategy(TranslationStrategy):
                         dest_data[key] = {}
                     build_result(value, dest_data[key], path)
                     if created and value and not dest_data[key]:
-                        del dest_data[key]  # every value inside was rejected
+                        del dest_data[key]  # every value inside was left out
                 elif isinstance(value, str):
-                    path_key = tuple(path)
-                    if path_key in translated_values:
-                        translated_value = translated_values[path_key]
-                        if translated_value is _REJECTED:
-                            rejected_keys_count += 1
-                        elif translated_value is None:
-                            # Failed translation - use source value
-                            dest_data[key] = value
-                            failed_keys_count += 1
-                        else:
-                            dest_data[key] = translated_value
+                    translated_value = translated_values.get(tuple(path), _LEFT_OUT)
+                    if translated_value is _LEFT_OUT:
+                        left_out_count += 1
                     else:
-                        # Not translated (shouldn't happen, but use source value as fallback)
-                        dest_data[key] = value
-                        failed_keys_count += 1
+                        dest_data[key] = translated_value
                 else:
                     dest_data[key] = value
 
         # Build the translated dictionary
         build_result(data, result_dict)
 
-        source_fallbacks = failed_keys_count - rejected_keys_count
-        if source_fallbacks > 0:
+        if left_out_count > 0:
             print(
-                f"  ⚠ {source_fallbacks} keys were not translated and will use source language values"
-            )
-        if rejected_keys_count > 0:
-            print(
-                f"  ⚠ {rejected_keys_count} keys were left out because their placeholders did not "
-                "survive translation; they will be retried on the next run"
+                f"  ⚠ {left_out_count} keys were left out (placeholders lost or damaged, or the API "
+                "batch failed); they will be retried on the next run"
             )
 
         return result_dict

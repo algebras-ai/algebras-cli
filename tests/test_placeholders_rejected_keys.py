@@ -159,3 +159,23 @@ def test_left_out_key_is_retried_on_the_next_run(fmt, tmp_path, monkeypatch, fak
     translate_command.execute(language="uz", only_missing=True)
     bad = _get(read_language_file(str(target), None, None), bad_path)
     assert isinstance(bad, str) and bad.startswith("UZ "), f"{fmt}: {bad!r}"
+
+
+@pytest.mark.parametrize("fmt", sorted(FORMATS))
+def test_failed_api_batch_writes_no_source_text(fmt, tmp_path, monkeypatch, fake_api):
+    """A batch that fails at the API (e.g. HTTP 500) leaves its keys out instead of writing source text."""
+    target = _project(tmp_path, monkeypatch, fmt)
+    _, _, _, ok_path, bad_path = FORMATS[fmt]
+
+    def failing_batch(self, texts, *args, **kwargs):
+        raise Exception("Error from Algebras AI API: 500 - server error")
+
+    monkeypatch.setattr("algebras.services.api_client.AlgebrasAIClient.translate_batch", failing_batch)
+    translate_command.execute(language="uz", force="__all__")
+
+    if not target.exists():
+        return  # nothing written at all is fine
+    data = read_language_file(str(target), None, None)
+    for path in (ok_path, bad_path):
+        value = _get(data, path)
+        assert not value, f"{fmt}: {path} was written as {value!r} although its batch failed"

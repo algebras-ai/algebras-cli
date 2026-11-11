@@ -172,3 +172,25 @@ def test_dict_strategies_forward_placeholder_profile():
             {"a": "Hi %s"}, "en", "ru", False, "g", None, None, placeholder_profile=profile
         )
         assert batch_processor.process.call_args.kwargs["placeholder_profile"] is profile
+
+
+def test_strategies_leave_out_keys_of_failed_batches():
+    from algebras.services.strategies.nested_dict_strategy import NestedDictTranslationStrategy
+
+    batch_processor = MagicMock()
+    batch_processor.process.return_value = BatchResult(
+        translations=["Привет", "", "Пока"],
+        error_stats={"5xx": [2], "429": [], "other": []},
+        failed_batches=[2],
+        successful_batches=2,
+        total_batches=3,
+    )
+    normalizer = MagicMock()
+    normalizer.normalize.side_effect = lambda s, t: t
+
+    flat = FlatDictTranslationStrategy(MagicMock(), batch_processor, normalizer, 1, {})
+    assert flat.translate({"a": "Hi", "b": "Hello", "c": "Bye"}, "en", "ru", False, "g") == {"a": "Привет", "c": "Пока"}
+
+    nested = NestedDictTranslationStrategy(MagicMock(), batch_processor, normalizer, 1, {})
+    out = nested.translate({"a": "Hi", "sub": {"b": "Hello"}, "c": "Bye"}, "en", "ru", False, "g")
+    assert out == {"a": "Привет", "c": "Пока"}  # "sub" dropped: its only value was left out
