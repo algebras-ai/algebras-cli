@@ -189,6 +189,54 @@ def _pairs(source: Any, target: Any, target_language: str, profile) -> Iterator[
         yield from walk(source, target, ())
 
 
+def _missing_forms(source: Any, target: Any, target_language: str, profile) -> Iterator[Finding]:
+    """
+    i18next plural groups the target has translated but without every CLDR form the target
+    language needs (ru item_few / item_many): `missing_form`, keyed like the form's own key.
+    """
+    from algebras.services.placeholders.plurals import missing_form_problem
+    from algebras.utils.json_i18n import (
+        i18next_plural_groups,
+        i18next_plural_source_text,
+        is_chrome_messages,
+        is_i18next_profile,
+    )
+    from algebras.utils.plural_rules import PLURAL_CATEGORY_ORDER, get_plural_categories
+
+    if not is_i18next_profile(profile) or not isinstance(source, dict) or is_chrome_messages(source):
+        return
+
+    def walk(src: Dict[str, Any], tgt: Any, prefix: KeyPath):
+        if not isinstance(tgt, dict):
+            return
+        for base, forms in i18next_plural_groups(src).items():
+            if len(forms) < 2:
+                continue  # a lone `x_other` is not expanded (missing_i18next_forms)
+            present = {
+                form
+                for form in PLURAL_CATEGORY_ORDER
+                if isinstance(tgt.get(f"{base}_{form}"), str) and tgt[f"{base}_{form}"].strip()
+            }
+            if not present:
+                continue  # untranslated group: 'status' reports it
+            for form in get_plural_categories(target_language):
+                if form in present:
+                    continue
+                path = prefix + (f"{base}_{form}",)
+                yield Finding(
+                    key=".".join(path),
+                    source=i18next_plural_source_text(forms, form, target_language, profile),
+                    target="",
+                    problems=[missing_form_problem(form, target_language)],
+                    path=path,
+                )
+        for key, value in src.items():
+            if isinstance(value, dict):
+                yield from walk(value, tgt.get(key), prefix + (str(key),))
+
+    yield from walk(source, target, ())
+
+
 def restore_linked(source: str, target: str, profile: PlaceholderProfile) -> Optional[str]:
     """
     Put the source's $t(…) / @:… back: the target's changed linked keys are replaced, in order, by
@@ -241,13 +289,15 @@ def check_file(
     Placeholder findings for a JSON target. Like the default key-by-key check, plus: Chrome
     messages.json compares only "message"; i18next plural forms are checked against the text they
     are translated from (the `_other` text for multi-count forms whose source lacks {{count}}, and
-    for target-only forms such as ru `_few`).
+    for target-only forms such as ru `_few`), and an i18next group the target translated without
+    every CLDR form its language needs is `missing_form` (fixed by --retranslate).
     """
     from algebras.services.placeholders.plurals import drop_allowed_for_key
 
     profile = profile_for_path(source_file, config)
     findings: List[Finding] = []
-    for path, source_text, target_text in _pairs(_read(source_file), _read(target_file), target_language, profile):
+    source, target = _read(source_file), _read(target_file)
+    for path, source_text, target_text in _pairs(source, target, target_language, profile):
         if not isinstance(target_text, str) or not target_text.strip():
             continue  # untranslated: 'status' reports it
         key = ".".join(path)
@@ -264,6 +314,7 @@ def check_file(
                     fixed=repair_value(source_text, target_text, profile, drop),
                 )
             )
+    findings.extend(_missing_forms(source, target, target_language, profile))
     return findings
 
 

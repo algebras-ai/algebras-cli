@@ -195,7 +195,7 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
             source_lang = source_language if target_file_path.endswith(('.csv', '.tsv')) else None
             target_lang = target_language if target_file_path.endswith(('.csv', '.tsv')) else None
             source_data = read_language_file(source_file_path, source_lang, config)
-            source_data = expand_plural_source_keys(source_file_path, source_data, target_language)
+            source_data = expand_plural_source_keys(source_file_path, source_data, target_language, config)
             target_data = read_language_file(target_file_path, target_lang, config)
             # Rails-style YAML: compare under each file's own root key (en.greeting ~ ru.greeting)
             target_data = align_target_data(
@@ -279,7 +279,8 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
 
 
 # Formats whose sources are expanded with the plural forms the target language needs.
-_PLURAL_EXPANDED = ('.stringsdict', '.po', '.yaml', '.yml')
+# JSON: i18next plural groups only (json_i18n.expand_i18next_plurals); other JSON is unchanged.
+_PLURAL_EXPANDED = ('.stringsdict', '.po', '.yaml', '.yml', '.json')
 
 
 def _string_leaf_count(data: Any) -> int:
@@ -288,11 +289,16 @@ def _string_leaf_count(data: Any) -> int:
     return 1 if isinstance(data, str) else 0
 
 
-def _expected_key_count(source_file: str, lang: str, source_key_counts: Dict[str, int]) -> int:
+def _expected_key_count(source_file: str, lang: str, source_key_counts: Dict[str, int], config: Optional[Config] = None) -> int:
     """Source key count, plus the plural forms `lang` needs that the source lacks."""
     if not source_file.endswith(_PLURAL_EXPANDED) or not os.path.isfile(source_file):
         return source_key_counts.get(source_file, 0)
-    expanded = expand_plural_source_keys(source_file, read_language_file(source_file), lang)
+    source_data = read_language_file(source_file)
+    expanded = expand_plural_source_keys(source_file, source_data, lang, config)
+    if source_file.endswith('.json'):
+        # The source's own count, plus the plural forms added for `lang`.
+        added = _string_leaf_count(expanded) - _string_leaf_count(source_data)
+        return source_key_counts.get(source_file, 0) + added
     if source_file.endswith(('.yaml', '.yml')):
         return _string_leaf_count(expanded)  # nested: count strings, not top-level keys
     return len(expanded)
@@ -419,7 +425,7 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                 # First, count expected keys from ALL source files (regardless of whether destination files exist)
                 for source_file, source_config in config.get_source_files().items():
                     if os.path.isfile(source_file):
-                        expected_keys = _expected_key_count(source_file, lang, source_key_counts)
+                        expected_keys = _expected_key_count(source_file, lang, source_key_counts, config)
                         total_expected_keys += expected_keys
                 
                 # Then, count translated keys only from files that have destination files
@@ -473,7 +479,7 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                     
                     if potential_source_file in source_files:
                         source_file = potential_source_file
-                        expected_keys = _expected_key_count(source_file, lang, source_key_counts)
+                        expected_keys = _expected_key_count(source_file, lang, source_key_counts, config)
                         total_expected_keys += expected_keys
                         
                         # Count current translated keys and outdated keys

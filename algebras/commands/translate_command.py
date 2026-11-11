@@ -75,6 +75,7 @@ from algebras.services.file_scanner import FileScanner
 from algebras.utils.path_utils import determine_target_path, resolve_destination_path
 from algebras.utils.git_utils import is_git_available
 from algebras.utils.file_writer import IncrementalFileWriter
+from algebras.utils.json_i18n import expand_i18next_source_file
 from algebras.services.placeholders import profile_for_path
 from algebras.services.translator import Translator
 from algebras.utils.file_format_handlers import get_handler
@@ -1341,7 +1342,11 @@ def _process_outdated_files(
                 source_keys = set(source_content.keys())
                 target_keys = set(target_content.keys())
             else:
-                source_keys = handler.extract_keys(source_content)
+                # i18next JSON: plus the plural forms the target language needs (ru item_few),
+                # so a target lacking them gets them as missing keys (never as outdated ones).
+                source_keys = handler.extract_keys(
+                    expand_i18next_source_file(source_file, source_content, target_lang, config)
+                )
                 target_keys = handler.extract_keys(target_content)
 
             # Find keys that exist in both files - these are potentially outdated
@@ -2241,6 +2246,8 @@ def _write_translated_content(
                 "regenerate_from_scratch": regenerate_from_scratch,
             }
         )
+        if format_type == FileFormat.JSON:
+            kwargs["config"] = config  # a pinned i18next profile places new plural forms
     elif format_type == FileFormat.XLSX:
         # Multi-language workbook: the target column; a new target file starts as a copy of the source.
         kwargs.update({"target_language": target_language, "source_file": source_file})

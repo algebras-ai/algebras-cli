@@ -397,7 +397,10 @@ def test_single_count_form_may_spell_out_the_number(tmp_path):
     target = _write_json(tmp_path / "de" / "a.json", {"item_one": "Ein Element", "item_other": "{{count}} Elemente"})
     assert check_file(str(source), str(target), "en", "de") == []
     ru = _write_json(tmp_path / "ru" / "a.json", {"item_one": "Один элемент", "item_other": "{{count}} элемента"})
-    assert [f.key for f in check_file(str(source), str(ru), "en", "ru")] == ["item_one"]
+    findings = check_file(str(source), str(ru), "en", "ru")
+    assert [f.key for f in findings if f.problems[0].code != "missing_form"] == ["item_one"]
+    # The ru target also lacks the _few / _many forms Russian needs.
+    assert [f.key for f in findings if f.problems[0].code == "missing_form"] == ["item_few", "item_many"]
 
 
 def test_fix_repairs_in_place_and_is_idempotent(ru_project, capsys):

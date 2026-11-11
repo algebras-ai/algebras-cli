@@ -18,7 +18,11 @@ def _layout_source(kwargs) -> Optional[str]:
     return source_file
 
 
-def _read_order(source_file: Optional[str]) -> Optional[Dict[str, Any]]:
+def _read_order(source_file: Optional[str], kwargs) -> Optional[Dict[str, Any]]:
+    """
+    The source data, whose key order places new keys. i18next plural groups include the forms
+    the target language needs (ru item_few, item_many), so those go next to their group.
+    """
     if not source_file:
         return None
     try:
@@ -26,7 +30,11 @@ def _read_order(source_file: Optional[str]) -> Optional[Dict[str, Any]]:
             data = json.load(f)
     except (OSError, ValueError):
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return None
+    from algebras.utils.json_i18n import expand_i18next_source_file
+
+    return expand_i18next_source_file(source_file, data, kwargs.get("target_language"), kwargs.get("config"))
 
 
 class JSONHandler(FileFormatHandler):
@@ -54,11 +62,11 @@ class JSONHandler(FileFormatHandler):
         if not kwargs.get("regenerate_from_scratch"):
             try:
                 if os.path.exists(file_path):
-                    merge_json_file(file_path, content, order=_read_order(source_file))
+                    merge_json_file(file_path, content, order=_read_order(source_file, kwargs))
                     return
                 if source_file is not None:
                     merge_json_file(
-                        file_path, content, order=_read_order(source_file), template_path=source_file
+                        file_path, content, order=_read_order(source_file, kwargs), template_path=source_file
                     )
                     return
             except ValueError:

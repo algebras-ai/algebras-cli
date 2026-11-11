@@ -232,9 +232,16 @@ def get_key_value(data: Dict[str, Any], key: str) -> Any:
 
 
 def expand_plural_source_keys(
-    source_file: str, source_data: Dict[str, Any], target_language: Optional[str]
+    source_file: str, source_data: Dict[str, Any], target_language: Optional[str], config: Optional[Any] = None
 ) -> Dict[str, Any]:
-    """For .stringsdict, .po and YAML sources, add the plural-form keys target_language needs."""
+    """
+    For .stringsdict, .po, YAML and i18next JSON sources, add the plural-form keys
+    target_language needs.
+    """
+    if target_language and source_file.lower().endswith(".json"):
+        from algebras.utils.json_i18n import expand_i18next_source_file
+
+        return expand_i18next_source_file(source_file, source_data, target_language, config)
     if target_language and source_file.endswith((".yaml", ".yml")):
         from algebras.services.placeholders.formats.yaml_format import (
             expand_plural_source,
@@ -280,7 +287,7 @@ def validate_language_files(
             source_data = read_language_file(source_file, source_language, config)
         else:
             source_data = read_language_file(source_file)
-        source_data = expand_plural_source_keys(source_file, source_data, target_language)
+        source_data = expand_plural_source_keys(source_file, source_data, target_language, config)
 
         if target_file.endswith((".csv", ".tsv", ".xlsx")):
             target_data = read_language_file(target_file, target_language, config)
