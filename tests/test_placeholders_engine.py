@@ -257,3 +257,30 @@ def test_no_false_positives_for_icu_branches_and_plain_percent():
     assert verify("Save 50% more", "Скидка 50%больше") == []
     # …but a damaged printf is still found when the source uses printf
     assert codes(verify("Save %d%% more", "Скидка %д%% больше")) == ["corrupted", "missing"]
+
+
+def test_detect_profile_keeps_only_syntaxes_in_use():
+    from algebras.services.placeholders import detect_profile
+
+    texts = ["Hi {{name}}", "You have {{count}} items", "Plain"]
+    profile = detect_profile(texts, ["i18next", "icu_simple", "printf"], "json", always=["xml_tag"])
+    assert profile.syntax_names == ("xml_tag", "i18next")
+    assert profile.name == "json:i18next"
+    assert detect_profile(["Plain"], ["printf"], "x").syntax_names == ()
+
+
+def test_profile_resolver_is_used_and_cached(tmp_path):
+    from algebras.services.placeholders import register_profile_resolver
+
+    calls = []
+
+    def resolver(path, config):
+        calls.append(path)
+        return PlaceholderProfile(name="resolved", syntax_names=("printf",))
+
+    register_profile_resolver([".resolvedfmt"], resolver)
+    f = tmp_path / "a.resolvedfmt"
+    f.write_text("x")
+    assert profile_for_path(str(f)).name == "resolved"
+    assert profile_for_path(str(f)).name == "resolved"
+    assert len(calls) == 1

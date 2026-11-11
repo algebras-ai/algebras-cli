@@ -19,8 +19,10 @@ from algebras.services.placeholders.engine import (
 from algebras.services.placeholders.profiles import (
     GENERIC_PROFILE,
     PlaceholderProfile,
+    detect_profile,
     profile_for_path,
     register_profile,
+    register_profile_resolver,
 )
 
 # Register format-specific profiles and fix writers.
@@ -37,11 +39,13 @@ __all__ = [
     "Problem",
     "combine_context",
     "count_drop_allowed",
+    "detect_profile",
     "extract",
     "mask",
     "placeholder_context",
     "profile_for_path",
     "register_profile",
+    "register_profile_resolver",
     "repair",
     "rewrite_context",
     "token",
