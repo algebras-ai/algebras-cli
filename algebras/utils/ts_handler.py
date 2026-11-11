@@ -58,12 +58,34 @@ class TSLiteral:
     recovered: bool = False
 
 
+@dataclass(frozen=True)
+class TSEntry:
+    """A `key: value` entry of an object literal, by offsets in the file."""
+
+    key: str
+    key_start: int
+    key_end: int
+    value_start: int
+    value_end: int
+    comma: Optional[int]  # offset of the ',' after the value, if any
+
+
+@dataclass(frozen=True)
+class TSObject:
+    """An object literal: its braces (start at '{', end after '}') and entries in file order."""
+
+    start: int
+    end: int
+    entries: Tuple[TSEntry, ...]
+
+
 @dataclass
 class TSDocument:
     text: str
     data: Dict[str, Any]
     literals: Dict[KeyPath, TSLiteral] = field(default_factory=dict)
     export_name: Optional[str] = None
+    objects: Dict[KeyPath, TSObject] = field(default_factory=dict)
 
     @property
     def recovered(self) -> Dict[KeyPath, TSLiteral]:
@@ -92,6 +114,7 @@ class _Parser:
         self.n = len(text)
         self.lenient = lenient
         self.literals: Dict[KeyPath, TSLiteral] = {}
+        self.objects: Dict[KeyPath, TSObject] = {}
 
     def error(self, message: str, offset: int) -> TSParseError:
         return TSParseError(message, offset, self.text)
@@ -170,22 +193,32 @@ class _Parser:
 
     def obj(self, i: int, path: KeyPath) -> Tuple[Dict[str, Any], int]:
         result: Dict[str, Any] = {}
+        start = i
+        entries: List[TSEntry] = []
         i = self.ws(i + 1)
         while True:
             if i >= self.n:
                 raise self.error("Unterminated object", i)
             if self.text[i] == "}":
+                self.objects[path] = TSObject(start, i + 1, tuple(entries))
                 return result, i + 1
+            key_start = i
             key, i = self.key(i)
+            key_end = i
             i = self.ws(i)
             if self.text[i : i + 1] != ":":
                 raise self.error(f"Expected ':' after key {key!r}", i)
+            value_start = self.ws(i + 1)
             result[key], i = self.value(i + 1, path + (key,))
+            value_end = i
             i = self.ws(i)
+            comma = None
             if self.text[i : i + 1] == ",":
+                comma = i
                 i = self.ws(i + 1)
             elif self.text[i : i + 1] != "}":
                 raise self.error("Expected ',' or '}'", i)
+            entries.append(TSEntry(key, key_start, key_end, value_start, value_end, comma))
 
     def arr(self, i: int, path: KeyPath) -> Tuple[List[Any], int]:
         result: List[Any] = []
@@ -359,7 +392,9 @@ def parse_ts_module(text: str, lenient: bool = False) -> TSDocument:
     start, export_name = _object_start(text)
     parser = _Parser(text, lenient)
     data, _ = parser.obj(start, ())
-    return TSDocument(text=text, data=data, literals=parser.literals, export_name=export_name)
+    return TSDocument(
+        text=text, data=data, literals=parser.literals, export_name=export_name, objects=parser.objects
+    )
 
 
 def read_ts_document(file_path: str, lenient: bool = False) -> TSDocument:
@@ -640,61 +675,97 @@ def write_ts_translation_file_in_place(
     """
     Update a TypeScript translation file with new translations (dotted keys for nested values).
 
-    If every key already has a string literal in the file, only those literals are replaced:
-    comments, key order, formatting and each literal's quote style stay as they are. Otherwise the
-    merged content is written out again, keeping each value's quote style (the target's, else the
-    source file's). Template literal substitutions follow the source file: a translated "${" or
-    backtick is escaped, never a new substitution. The written file always parses back.
+    The file keeps its layout (algebras.utils.ts_layout): only changed literals are replaced, each
+    in its quote style; keys the file lacks are inserted at their source position; comments, key
+    order, blank lines, indentation and line endings stay. A file that does not exist yet is made
+    from the source module as a template, with untranslated values left out. Template literal
+    substitutions follow the source file: a translated "${" or backtick is escaped, never a new
+    substitution. The written file always parses back.
 
     Args:
         file_path: Path to the TypeScript file
         translations: Dictionary of key -> translation to update/add
         export_name: Name of the exported constant (defaults to language code from filename)
         lock: Optional lock for thread-safe file access
-        source_file: The source language module, for the quote style of new values
+        source_file: The source language module (template, key order and quote style)
     """
     if lock:
         lock.acquire()
     try:
-        source_literals = _literals_of(source_file)
-
-        doc: Optional[TSDocument] = None
+        base_text = None
         if os.path.exists(file_path):
-            try:
-                doc = read_ts_document(file_path)
-            except (OSError, ValueError):
-                doc = None  # unreadable: written again from scratch below
-
-        if doc is not None:
-            in_place: Optional[Dict[KeyPath, str]] = {}
-            for key, value in translations.items():
-                path = _resolve_path(key, doc.literals)
-                if path is None or not isinstance(value, str):
-                    in_place = None
-                    break
-                in_place[path] = value
-            if in_place is not None:
-                if in_place:
-                    _write_checked(file_path, replace_literals(doc.text, doc.literals, in_place, source_literals))
-                return
-
-        existing_content = doc.data if doc is not None else {}
-        if export_name is None:
-            export_name = (doc.export_name if doc is not None else None) or os.path.basename(file_path).split(".")[0]
-
-        for key, value in translations.items():
-            if "." in key and (key,) not in (doc.literals if doc else {}):
-                set_nested_value(existing_content, key.split("."), value)
-            else:
-                existing_content[key] = value
-
-        existing_content = convert_numeric_dicts_to_lists(existing_content)
-
-        quotes = _quote_map(doc.literals if doc is not None else {}, source_literals)
-        write_ts_translation_file(file_path, existing_content, export_name, quotes)
+            with open(file_path, "r", encoding="utf-8", newline="") as f:
+                base_text = f.read()
+        write_ts_translations(file_path, translations, export_name, source_file=source_file, base_text=base_text)
     finally:
         if lock:
             lock.release()
+
+
+def _read_text(file_path: Optional[str]) -> Optional[str]:
+    if not file_path or not os.path.exists(file_path):
+        return None
+    try:
+        with open(file_path, "r", encoding="utf-8", newline="") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def write_ts_translations(
+    file_path: str,
+    translations: Dict[str, Any],
+    export_name: Optional[str] = None,
+    source_file: Optional[str] = None,
+    base_text: Optional[str] = None,
+    regenerate: bool = False,
+) -> None:
+    """
+    Write `translations` into `base_text` (the target as it was; None: the target is new) and
+    save the result as `file_path`.
+
+    The layout is kept (see write_ts_translation_file_in_place). With regenerate=True, or if the
+    module cannot be edited as text (unparseable target, a value where the source has an object),
+    the merged content is written from scratch instead, keeping each value's quote style.
+    """
+    if export_name is None:
+        export_name = os.path.basename(file_path).split(".")[0]
+    source_text = _read_text(source_file)
+    if not regenerate:
+        from algebras.utils.ts_layout import LayoutError, render_ts_update
+
+        try:
+            _write_checked(file_path, render_ts_update(base_text, source_text, translations, export_name))
+            return
+        except (LayoutError, TSParseError):
+            pass  # written from scratch below
+
+    doc: Optional[TSDocument] = None
+    if base_text is not None:
+        try:
+            doc = parse_ts_module(base_text)
+        except TSParseError:
+            doc = None  # unreadable: written again from scratch
+    existing_content = doc.data if doc is not None else {}
+    if doc is not None and doc.export_name:
+        export_name = doc.export_name
+
+    for key, value in translations.items():
+        if "." in key and (key,) not in (doc.literals if doc else {}):
+            set_nested_value(existing_content, key.split("."), value)
+        else:
+            existing_content[key] = value
+
+    existing_content = convert_numeric_dicts_to_lists(existing_content)
+
+    source_literals: Dict[KeyPath, TSLiteral] = {}
+    if source_text is not None:
+        try:
+            source_literals = parse_ts_module(source_text).literals
+        except TSParseError:
+            pass
+    quotes = _quote_map(doc.literals if doc is not None else {}, source_literals)
+    write_ts_translation_file(file_path, existing_content, export_name, quotes)
 
 
 def convert_numeric_dicts_to_lists(obj: Any) -> Any:

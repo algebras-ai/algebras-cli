@@ -698,7 +698,9 @@ def _process_all_files(
                         if detect_format(source_file) == FileFormat.TS:
                             basename = os.path.basename(target_file)
                             export_name = basename.split(".")[0]
-                            incremental_writer = IncrementalFileWriter(target_file, "ts", export_name, source_file=source_file)
+                            incremental_writer = IncrementalFileWriter(
+                                target_file, "ts", export_name, source_file=source_file, regenerate=regenerate_from_scratch
+                            )
 
                             def on_batch_complete(
                                 batch_results: Dict[str, str], batch_index: int
@@ -818,7 +820,8 @@ def _process_all_files(
 
                             # Create incremental writer
                             incremental_writer = IncrementalFileWriter(
-                                target_file, "ts", export_name, source_file=source_file
+                                target_file, "ts", export_name, source_file=source_file,
+                                regenerate=regenerate_from_scratch,
                             )
 
                             # Define callback for batch completion
@@ -1167,7 +1170,8 @@ def _process_all_files(
 
                         # Create incremental writer
                         incremental_writer = IncrementalFileWriter(
-                            target_file, "ts", export_name, source_file=source_file
+                            target_file, "ts", export_name, source_file=source_file,
+                            regenerate=regenerate_from_scratch,
                         )
 
                         # Define callback for batch completion
@@ -1205,6 +1209,26 @@ def _process_all_files(
 
                         # Wait for all writes to complete
                         incremental_writer.finish()
+                        click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
+                    elif detect_format(source_file) == FileFormat.YAML:
+                        # YAML: written over the existing target, or over the source as a template,
+                        # keeping comments, key order and quoting (--regenerate-from-scratch: yaml.dump).
+                        translated_content = translator.translate_file(
+                            source_file, target_lang, ui_safe, glossary_id
+                        )
+                        handler = get_handler(source_file, config)
+                        _write_translated_content(
+                            target_file,
+                            translated_content,
+                            handler,
+                            handler.extract_keys(translated_content),
+                            use_in_place=not regenerate_from_scratch,
+                            source_file=source_file,
+                            source_language=source_language,
+                            target_language=target_lang,
+                            config=config,
+                            verbose=verbose,
+                        )
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     else:
                         # For other file types, use the normal translation flow
@@ -1396,7 +1420,8 @@ def _process_outdated_files(
 
                     # Create incremental writer
                     incremental_writer = IncrementalFileWriter(
-                        target_file, "ts", export_name, source_file=source_file
+                        target_file, "ts", export_name, source_file=source_file,
+                        regenerate=regenerate_from_scratch,
                     )
 
                     # Define callback for batch completion
@@ -1585,7 +1610,8 @@ def _process_missing_keys_files(
 
                     # Create incremental writer
                     incremental_writer = IncrementalFileWriter(
-                        target_file, "ts", export_name, source_file=source_file
+                        target_file, "ts", export_name, source_file=source_file,
+                        regenerate=regenerate_from_scratch,
                     )
 
                     # Define callback for batch completion
@@ -1733,7 +1759,8 @@ def _process_outdated_keys_files(
 
                     # Create incremental writer
                     incremental_writer = IncrementalFileWriter(
-                        target_file, "ts", export_name, source_file=source_file
+                        target_file, "ts", export_name, source_file=source_file,
+                        regenerate=regenerate_from_scratch,
                     )
 
                     # Define callback for batch completion
@@ -2192,6 +2219,8 @@ def _write_translated_content(
         kwargs["preserve_layout"] = not regenerate_from_scratch and not os.path.exists(target_file)
     elif format_type == FileFormat.TS:
         kwargs["source_file"] = source_file  # quote style of each value ('…', "…" or `…`)
+    elif format_type == FileFormat.YAML:
+        kwargs["source_file"] = source_file  # key order of new keys; the template of a new target
     elif format_type in (FileFormat.CSV, FileFormat.TSV):
         if target_language is None:
             raise ValueError("CSV/TSV write requires target_language")
