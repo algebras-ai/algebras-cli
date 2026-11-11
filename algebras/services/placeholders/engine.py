@@ -120,18 +120,33 @@ def extract(text: str, profile: PlaceholderProfile = GENERIC_PROFILE) -> List[Pl
     return [p for p in _find(text, profile.syntaxes) if p.raw not in profile.literal_values]
 
 
+def _codecs(profile: PlaceholderProfile) -> List[Syntax]:
+    """Syntaxes of the profile with a literal-text codec, each codec once."""
+    seen: List[Syntax] = []
+    for s in profile.syntaxes:
+        if (s.encode or s.decode) and not any(o.encode is s.encode and o.decode is s.decode for o in seen):
+            seen.append(s)
+    return seen
+
+
 def mask(text: str, profile: PlaceholderProfile = GENERIC_PROFILE) -> Masked:
     placeholders = extract(text, profile)
     if not placeholders:
-        return Masked(source=text, text=text)
-    parts: List[str] = []
-    pos = 0
-    for i, p in enumerate(placeholders):
-        parts.append(text[pos : p.start])
-        parts.append(token(i))
-        pos = p.end
-    parts.append(text[pos:])
-    return Masked(source=text, text="".join(parts), placeholders=placeholders)
+        masked = Masked(source=text, text=text)
+    else:
+        parts: List[str] = []
+        pos = 0
+        for i, p in enumerate(placeholders):
+            parts.append(text[pos : p.start])
+            parts.append(token(i))
+            pos = p.end
+        parts.append(text[pos:])
+        masked = Masked(source=text, text="".join(parts), placeholders=placeholders)
+    if isinstance(text, str):
+        for s in _codecs(profile):
+            if s.encode is not None:
+                masked.text = s.encode(masked)
+    return masked
 
 
 def unmask(
@@ -141,6 +156,10 @@ def unmask(
     drop_allowed: FrozenSet[str] = frozenset(),
 ) -> str:
     """Put the original placeholders back. Raises PlaceholderError if tokens were lost or changed."""
+    if isinstance(translated, str):
+        for s in reversed(_codecs(profile)):
+            if s.decode is not None:
+                translated = s.decode(translated, masked)
     if not masked.has_tokens:
         problems = [p for p in verify(masked.source, translated, profile) if p.code != "reordered"]
         if problems:

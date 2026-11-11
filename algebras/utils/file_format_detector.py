@@ -21,6 +21,7 @@ class FileFormat(Enum):
     CSV = "csv"
     TSV = "tsv"
     ARB = "arb"
+    PROPERTIES = "properties"
     UNKNOWN = "unknown"
 
 
@@ -64,6 +65,8 @@ def detect_format(file_path: str) -> FileFormat:
         return FileFormat.HTML
     elif file_path_lower.endswith(".arb"):
         return FileFormat.ARB
+    elif file_path_lower.endswith(".properties"):
+        return FileFormat.PROPERTIES
     else:
         return FileFormat.UNKNOWN
 

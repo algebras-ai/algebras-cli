@@ -429,7 +429,7 @@ class Translator:
         Retries once; raises PlaceholderError if the placeholders still don't survive.
         """
         masked = mask(text, profile)
-        if not masked.has_tokens:
+        if not masked.has_tokens and masked.text == text:
             return self._translate_non_icu_text(text, source_lang, target_lang, ui_safe, glossary_id)
         last_error: Optional[PlaceholderError] = None
         for _ in range(2):
