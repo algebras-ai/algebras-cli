@@ -34,6 +34,10 @@ class Syntax:
 
 
 _PRINTF_FLAGS = r"[-+0#,]*"
+# Letters a model writes in place of a conversion letter: Cyrillic and Greek (transliteration or
+# lookalikes) and fullwidth Latin. Other scripts are not included: "50%オフ" (Japanese, "50% off")
+# or "%ı" are ordinary text, not a damaged specifier.
+_LOOKALIKE_LETTER = r"[\u0370-\u03ff\u0400-\u052f\uff21-\uff3a\uff41-\uff5a]"
 _PRINTF_LENGTH = r"(?:hh|h|ll|l|q|L|z|t|j)?"
 
 # Java Formatter, C and Objective-C/Swift printf in one pattern. The space and "'" flags are left
@@ -55,7 +59,7 @@ PRINTF = Syntax(
         r"[%％]\s?(?:[0-9０-９]+\s?[$＄]\s?)" + _PRINTF_FLAGS + r"\d*(?:\.\d+)?" + _PRINTF_LENGTH + r"[^\W\d_]"
         r"|％(?:\d+\$)?" + _PRINTF_FLAGS + r"\d*(?:\.\d+)?" + _PRINTF_LENGTH + r"[^\W\d_@]"
         r"|[%％]\s?(?:[0-9０-９]+\s?[$＄]\s?)?[＠@]"
-        r"|%\d*(?:\.\d+)?" + _PRINTF_LENGTH + r"[^\W\d_a-zA-Z]"
+        r"|%\d*(?:\.\d+)?" + _PRINTF_LENGTH + _LOOKALIKE_LETTER
     ),
 )
 

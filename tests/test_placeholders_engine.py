@@ -300,3 +300,12 @@ def test_healthcheck_reports_codes_added_by_format_checks():
     issues = check_placeholders("Hi @@x", "Привет @@x", "k", profile)
     assert [(i.severity, i.message) for i in issues] == [("error", "custom problem")]
     del SYNTAXES["test_custom"]
+
+
+def test_percent_before_cjk_text_is_not_a_damaged_placeholder():
+    # Seen against the real API: Japanese "50%オフ" ("50% off") right after a percent sign.
+    assert verify("Save 50% now, only %d left", "今なら50%オフ、残りわずか%d点") == []
+    # Cyrillic/Greek/fullwidth letters after % are still caught.
+    assert codes(verify("Only %d left", "Осталось %д")) == ["corrupted", "missing"]
+    assert codes(verify("Only %d left", "Μόνο %δ")) == ["corrupted", "missing"]
+    assert codes(verify("Only %d left", "残り%ｄ")) == ["corrupted", "missing"]
