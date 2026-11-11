@@ -646,6 +646,14 @@ def _process_all_files(
                             )
                             target_file = os.path.join(target_dirname, target_basename)
 
+                # XLSX: an .xls workbook cannot be written; its translations go to the .xlsx next
+                # to it, which is then the target (read back on the next run).
+                if detect_format(target_file) == FileFormat.XLSX:
+                    from algebras.utils.xlsx_handler import xlsx_output_path
+
+                    target_file = xlsx_output_path(target_file)
+                    target_basename = os.path.basename(target_file)
+
                 os.makedirs(target_dirname, exist_ok=True)
 
                 # Check if target file already exists and is up to date
@@ -2250,7 +2258,15 @@ def _write_translated_content(
             kwargs["config"] = config  # a pinned i18next profile places new plural forms
     elif format_type == FileFormat.XLSX:
         # Multi-language workbook: the target column; a new target file starts as a copy of the source.
-        kwargs.update({"target_language": target_language, "source_file": source_file})
+        # regenerate_from_scratch: write even when only an openpyxl save is possible and it drops
+        # images/charts (see update_xlsx_cells).
+        kwargs.update(
+            {
+                "target_language": target_language,
+                "source_file": source_file,
+                "regenerate_from_scratch": regenerate_from_scratch,
+            }
+        )
     elif format_type == FileFormat.PO:
         kwargs["po_mark_fuzzy"] = po_mark_fuzzy
         # New entries take flags/msgid_plural from the source; a new file gets the target's Plural-Forms.

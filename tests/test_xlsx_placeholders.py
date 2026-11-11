@@ -354,13 +354,21 @@ def test_healthcheck_covers_xlsx(check_project):
     assert {"greet", "formula", "rich"} <= {i.key for i in issues if i.category == "placeholders"}
 
 
-def test_translation_over_a_rich_text_cell_is_reported(tmp_path, capsys):
+def test_translation_over_a_rich_text_cell_takes_the_source_formatting(tmp_path, capsys):
     path = make_workbook(str(tmp_path / "strings.xlsx"), rich_ru=CellRichText(list(RICH_RU)))
+    # No run tags in the translation: the whole cell takes the source's first run (bold).
     XLSXHandler(None).write_in_place(path, {"rich": "Совсем новый перевод %1$s"}, {"rich"},
                                      target_language="ru", source_file=path)
-    assert "rich-text formatting was replaced by plain text in C7" in capsys.readouterr().out
-    ws = load_workbook(path, rich_text=True).active
-    assert ws["C7"].value == "Совсем новый перевод %1$s" and ws["C7"].data_type == "s"
+    assert "rich-text formatting was replaced" not in capsys.readouterr().out
+    value = load_workbook(path, rich_text=True).active["C7"].value
+    assert isinstance(value, CellRichText) and str(value) == "Совсем новый перевод %1$s"
+    assert len(value) == 1 and value[0].font.b
+    # With run tags, each span takes the font of its source run.
+    XLSXHandler(None).write_in_place(path, {"rich": "<run1>Жирно</run1> отправлено %1$s"}, {"rich"},
+                                     target_language="ru", source_file=path)
+    value = load_workbook(path, rich_text=True).active["C7"].value
+    assert [getattr(r, "text", r) for r in value] == ["Жирно", " отправлено %1$s"]
+    assert value[0].font.b
 
 
 def test_read_cells_gives_coordinates(tmp_path):

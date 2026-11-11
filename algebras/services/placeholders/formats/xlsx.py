@@ -3,18 +3,24 @@ XLSX translation workbooks: one row per key, one column per language (row 1 hold
 
 A spreadsheet has no placeholder syntax of its own; the cells hold strings for whatever app reads
 them, and one sheet may mix syntaxes ({0}, %1$s, {{name}}, ${x} …). The profile is detected from
-the source-language column (detect_profile over every candidate syntax), unless pinned in the config
-(`placeholders: [...]`). Detection is per file, which here is the same as per sheet: the workbook's
-translation sheet is its active sheet (read_xlsx_file), the other sheets are never translated.
+the source-language column of every translation sheet (detect_profile over every candidate
+syntax), unless pinned in the config (`placeholders: [...]`). A workbook's translation sheets are
+the sheets with a key + language header row (see algebras.utils.xlsx_handler._data_sheets); other
+sheets (notes, lookups) are never translated. With several translation sheets, keys are
+"<sheet>!<key>".
 
-Writing (see algebras.utils.xlsx_handler):
+Formatted (rich-text) source cells are read with their runs as paired <runN>…</runN> tags (see
+algebras.utils.xlsx_handler.runs_to_tagged), so the profile detected from them includes the
+xml_tag syntax: the tags are masked like any markup placeholder and checked by the write gate.
 
-- cells are written as explicit strings (data_type "s"), so a translation that starts with "=",
-  "+", "-" or "@" is never taken for a formula;
-- the workbook is opened and saved in place: only the written cells change, styles, other sheets,
-  column widths and comments stay;
-- a rich-text cell keeps its runs when the change fits inside them (a repaired placeholder);
-  otherwise it is written as plain text and reported.
+Writing (see algebras.utils.xlsx_handler.update_xlsx_cells):
+
+- the cells are written straight into the workbook package: every other part (images, charts,
+  shapes, styles, other sheets) stays byte-identical, and a written cell keeps its style;
+- cells are written as strings (inline strings), so a translation that starts with "=", "+", "-"
+  or "@" is never taken for a formula;
+- a translation of a formatted source cell gets the source runs' fonts; a repaired rich-text
+  target cell keeps its runs when the change fits inside them.
 
 Before a translated cell is written it is checked against the source cell (gate_values). A cell
 whose placeholders were lost or damaged is not written: it stays empty or keeps its old value, and
@@ -39,7 +45,7 @@ from algebras.services.placeholders.profiles import (
     register_profile_resolver,
 )
 
-_EXTENSIONS = [".xlsx"]
+_EXTENSIONS = [".xlsx", ".xls"]
 
 # Every syntax of the generic profile, more specific ones first (i18next before icu_simple).
 XLSX_CANDIDATES = GENERIC_PROFILE.syntax_names
@@ -73,17 +79,17 @@ def source_column(config, languages: List[str], source_language: Optional[str] =
 
 
 def resolve_profile(file_path: str, config=None) -> PlaceholderProfile:
-    """The syntaxes that occur in the source-language column."""
-    from algebras.utils.xlsx_handler import read_xlsx_cells
+    """The syntaxes that occur in the source-language column (formatted cells with their run tags)."""
+    from algebras.utils.xlsx_handler import read_xlsx_book
 
     try:
-        sheet = read_xlsx_cells(file_path)
+        book = read_xlsx_book(file_path, config)
     except Exception:
         return GENERIC_PROFILE
-    column = source_column(config, sheet.languages)
+    column = source_column(config, book.languages)
     if column is None:
         return GENERIC_PROFILE
-    values = [cell.value for cell in sheet.column(column).values()]
+    values = [cell.tagged for cell in book.column(column).values()]
     return detect_profile(values, XLSX_CANDIDATES, "xlsx")
 
 
@@ -107,38 +113,41 @@ def gate_values(
 ) -> Tuple[Dict[str, str], List[str]]:
     """
     Split translated `values` ({key: text}) into the ones safe to write and the rejected keys.
-    A value is rejected when its placeholders do not match the source cell of the same row. The
+    A value is rejected when its placeholders do not match the source cell of the same row (a
+    value with <runN> tags is compared with the tagged source, so the tags must pair up too). The
     rejected cells are reported with their Excel reference and left as they are.
     """
-    from algebras.utils.xlsx_handler import read_xlsx_cells
+    from algebras.utils.xlsx_handler import has_run_tags, read_xlsx_book
 
     reference = source_file or target_file
     try:
-        source_sheet = read_xlsx_cells(reference)
+        source_book = read_xlsx_book(reference, config)
     except Exception:
         return dict(values), []
-    column = source_column(config, source_sheet.languages)
+    column = source_column(config, source_book.languages)
     if column is None or column == target_column:
         return dict(values), []
-    sources = source_sheet.column(column)
+    sources = source_book.column(column)
     profile = profile_for_path(reference, config)
 
     try:
-        target_sheet = read_xlsx_cells(target_file)
+        target_book = read_xlsx_book(target_file, config)
     except Exception:
-        target_sheet = source_sheet
+        target_book = source_book
 
     accepted: Dict[str, str] = {}
     rejected: List[str] = []
     for key, text in values.items():
         source = sources.get(key)
-        problems = verify(source.value, text, profile) if source is not None and isinstance(text, str) and text else []
+        problems = []
+        if source is not None and isinstance(text, str) and text:
+            source_text = source.tagged if has_run_tags(text) else source.value
+            problems = verify(source_text, text, profile)
         if not problems:
             accepted[key] = text
             continue
         rejected.append(key)
-        coordinate = target_sheet.coordinate(key, target_column)
-        where = target_sheet.ref(coordinate) if coordinate else f"{source_sheet.ref(source.coordinate)} row"
+        where = target_book.ref(key, target_column) or f"{source.ref} row"
         codes = ", ".join(sorted({p.code for p in problems}))
         click.echo(
             f"  {click.style('✗', fg='red')} {where} ({key}): placeholders {codes} in the translation; "
@@ -160,30 +169,31 @@ def check_file(
     config=None,
 ) -> List[Finding]:
     """Compare each target cell with the source cell of the same row; key is `key [Sheet1!D14]`."""
-    from algebras.utils.xlsx_handler import read_xlsx_cells
+    from algebras.utils.xlsx_handler import read_xlsx_book
 
     if _is_glossary(source_file):
         return []
-    source_sheet = read_xlsx_cells(source_file)
-    target_sheet = source_sheet if target_file == source_file else read_xlsx_cells(target_file)
-    src_col = source_column(config, source_sheet.languages, source_language)
+    source_book = read_xlsx_book(source_file, config)
+    target_book = source_book if target_file == source_file else read_xlsx_book(target_file, config)
+    src_col = source_column(config, source_book.languages, source_language)
     tgt_col = column_name(config, target_language)
-    if src_col is None or tgt_col not in target_sheet.languages or tgt_col == src_col:
+    if src_col is None or tgt_col not in target_book.languages or tgt_col == src_col:
         return []
     profile = profile_for_path(source_file, config)
-    targets = target_sheet.column(tgt_col)
+    targets = target_book.column(tgt_col)
 
     findings: List[Finding] = []
-    for key, source_cell in source_sheet.column(src_col).items():
+    for key, source_cell in source_book.column(src_col).items():
         target_cell = targets.get(key)
         if target_cell is None:
             continue  # untranslated: 'status' reports it
         problems = verify(source_cell.value, target_cell.value, profile)
         if not problems:
             continue
+        label = key.split("!", 1)[1] if target_book.multi and "!" in key else key
         findings.append(
             Finding(
-                key=f"{key} [{target_sheet.ref(target_cell.coordinate)}]",
+                key=f"{label} [{target_cell.ref}]",
                 source=source_cell.value,
                 target=target_cell.value,
                 problems=problems,
@@ -195,14 +205,19 @@ def check_file(
 
 
 def write_fixes(target_file: str, fixes: Dict[Tuple[str, ...], str], language: Optional[str] = None, config=None) -> None:
-    """Open the workbook, update only the fixed cells of the language's column, save."""
+    """Write only the fixed cells of the language's column into the workbook package."""
     from algebras.utils.xlsx_handler import update_xlsx_cells
 
     column = column_name(config, language)
     if not column:
         raise ValueError(f"A language is needed to fix {target_file}")
     report = update_xlsx_cells(
-        target_file, column, {path[0]: value for path, value in fixes.items()}, add_missing=False, keep_runs=True
+        target_file,
+        column,
+        {path[0]: value for path, value in fixes.items()},
+        add_missing=False,
+        keep_runs=True,
+        config=config,
     )
     if report["missing"]:
         raise ValueError(f"Could not find {', '.join(report['missing'])} in {target_file}")

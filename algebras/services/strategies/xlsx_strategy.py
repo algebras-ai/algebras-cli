@@ -15,6 +15,11 @@ class XlsxTranslationStrategy(FlatDictTranslationStrategy):
     (see Translator._profile_kwarg). A cell whose placeholders were damaged (BatchResult
     failed_indices) is left out of the result: it keeps its old value (or stays empty) and is
     reported, never written damaged.
+
+    Keys cover every translation sheet ("<sheet>!<key>" when there are several). A formatted
+    (rich-text) source cell is translated in its tagged form (<runN>…</runN> around each formatted
+    run, from read_xlsx_file's "rich_text"), and the result keeps the tags for the writer, which
+    gives each span the font of its source run.
     """
 
     def translate(
@@ -46,11 +51,16 @@ class XlsxTranslationStrategy(FlatDictTranslationStrategy):
         if "translations" not in xlsx_content:
             return xlsx_content
 
-        # Extract source language strings
+        # Extract source language strings. A formatted (rich-text) cell is sent with its runs as
+        # paired <runN> tags (read_xlsx_file's "rich_text"): the tags are markup placeholders, so
+        # the model keeps them around the translated spans and the writer gives each span the
+        # font of its source run.
+        rich_text = xlsx_content.get("rich_text") or {}
         source_strings = {}
         for key, lang_translations in xlsx_content["translations"].items():
             if isinstance(lang_translations, dict) and source_lang in lang_translations:
-                source_strings[key] = lang_translations[source_lang]
+                tagged = rich_text.get(key, {}).get(source_lang)
+                source_strings[key] = tagged if tagged else lang_translations[source_lang]
 
         translated_strings = super().translate(
             source_strings,
@@ -73,6 +83,13 @@ class XlsxTranslationStrategy(FlatDictTranslationStrategy):
         # Update the XLSX content (copy each row that changes, so the input is left as it was)
         updated_content = dict(xlsx_content)
         updated_content["translations"] = dict(xlsx_content["translations"])
+        # Cells that keep their value are compared with the workbook in their tagged form, so a
+        # formatted cell that is not re-translated is not rewritten (and keeps its runs).
+        for key, by_lang in rich_text.items():
+            if key in updated_content["translations"] and target_lang in by_lang:
+                row = dict(updated_content["translations"][key])
+                row[target_lang] = by_lang[target_lang]
+                updated_content["translations"][key] = row
         for key, translated_value in translated_strings.items():
             if key in updated_content["translations"]:
                 row = dict(updated_content["translations"][key])
