@@ -75,6 +75,11 @@ def read_language_file(
         from algebras.utils.properties_handler import read_properties_file
 
         return read_properties_file(file_path)
+    elif file_path.endswith(".xlsx"):
+        # Multi-language workbook: one language column (the first one when no language is given)
+        from algebras.utils.file_format_handlers.xlsx_handler import read_xlsx_language
+
+        return read_xlsx_language(file_path, language, config)
     elif file_path.endswith((".csv", ".tsv")):
         # For CSV/TSV files, extract a specific language column
         csv_content = read_csv_file(file_path)
@@ -244,13 +249,13 @@ def validate_language_files(
     """
     try:
         # For CSV/TSV files, pass language parameters to read_language_file
-        if source_file.endswith((".csv", ".tsv")):
+        if source_file.endswith((".csv", ".tsv", ".xlsx")):
             source_data = read_language_file(source_file, source_language, config)
         else:
             source_data = read_language_file(source_file)
         source_data = expand_plural_source_keys(source_file, source_data, target_language)
 
-        if target_file.endswith((".csv", ".tsv")):
+        if target_file.endswith((".csv", ".tsv", ".xlsx")):
             target_data = read_language_file(target_file, target_language, config)
         else:
             target_data = read_language_file(target_file)
@@ -267,6 +272,7 @@ def validate_language_files(
                 ".xliff",
                 ".csv",
                 ".tsv",
+                ".xlsx",
             )
         ):
             source_keys = set(source_data.keys())

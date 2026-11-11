@@ -2059,6 +2059,9 @@ def _write_translated_content(
                 "source_file": source_file,
             }
         )
+    elif format_type == FileFormat.XLSX:
+        # Multi-language workbook: the target column; a new target file starts as a copy of the source.
+        kwargs.update({"target_language": target_language, "source_file": source_file})
     elif format_type == FileFormat.PO:
         kwargs["po_mark_fuzzy"] = po_mark_fuzzy
         # New entries take flags/msgid_plural from the source; a new file gets the target's Plural-Forms.

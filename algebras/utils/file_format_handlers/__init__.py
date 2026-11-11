@@ -22,6 +22,7 @@ from algebras.utils.file_format_handlers.xliff_handler import XLIFFHandler
 from algebras.utils.file_format_handlers.csv_handler import CSVHandler
 from algebras.utils.file_format_handlers.arb_handler import ARBHandler
 from algebras.utils.file_format_handlers.properties_handler import PropertiesHandler
+from algebras.utils.file_format_handlers.xlsx_handler import XLSXHandler
 
 
 def get_handler(file_path: str, config: Optional["Config"] = None) -> FileFormatHandler:
@@ -62,6 +63,8 @@ def get_handler(file_path: str, config: Optional["Config"] = None) -> FileFormat
         return ARBHandler()
     elif format_type == FileFormat.PROPERTIES:
         return PropertiesHandler()
+    elif format_type == FileFormat.XLSX:
+        return XLSXHandler(config)
     elif format_type in (FileFormat.CSV, FileFormat.TSV):
         if config is None:
             raise ValueError("Config is required for CSV/TSV handlers")
@@ -87,4 +90,5 @@ __all__ = [
     "CSVHandler",
     "ARBHandler",
     "PropertiesHandler",
+    "XLSXHandler",
 ]

@@ -216,6 +216,11 @@ def validate_file_pair(source_file: str, target_file: str, source_language: str,
     keys_checked = 0
     keys_with_errors = set()
     keys_with_warnings = set()
+    if source_file.endswith('.xlsx'):
+        from algebras.utils.xlsx_handler import is_glossary_xlsx
+
+        if is_glossary_xlsx(source_file):
+            return issues, keys_checked, keys_with_errors, keys_with_warnings  # a glossary, not translations
     profile = profile_for_path(source_file, config)
     
     try:
@@ -248,14 +253,14 @@ def validate_file_pair(source_file: str, target_file: str, source_language: str,
                                 keys_with_warnings.add(key)
         else:
             # For CSV/TSV files, pass language parameters
-            source_lang = source_language if source_file.endswith(('.csv', '.tsv')) else None
-            target_lang = target_language if target_file.endswith(('.csv', '.tsv')) else None
+            source_lang = source_language if source_file.endswith(('.csv', '.tsv', '.xlsx')) else None
+            target_lang = target_language if target_file.endswith(('.csv', '.tsv', '.xlsx')) else None
             
             source_data = read_language_file(source_file, source_lang, config)
             target_data = read_language_file(target_file, target_lang, config)
             
             # Handle flat dictionary formats
-            if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv', '.arb', '.properties')):
+            if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv', '.arb', '.properties', '.xlsx')):
                 source_keys = set(source_data.keys())
                 target_keys = set(target_data.keys())
                 
