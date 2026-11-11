@@ -36,6 +36,8 @@ PRINTF = Syntax(
         r"|%(?:\d+\$)?[tT][a-zA-Z]"
         r"|%(?:\d+\$)?" + _PRINTF_FLAGS + r"\d*(?:\.\d+)?" + _PRINTF_LENGTH
         + r"[@diuUoOxXfFeEgGaAcCsSpbBhHn]"
+        # "%#@" only starts a .stringsdict variable reference (%#@name@), never a printf specifier.
+        + r"(?<!#@)"
     ),
     # Any letter (Cyrillic, Greek, fullwidth ...) after a printf prefix that has a position or a
     # length modifier, or a fullwidth percent sign. Kept narrow so normal words are not matched.
@@ -52,6 +54,8 @@ OBJC_VARIABLE = Syntax(
     name="objc_variable",
     kind="objc_variable",
     pattern=re.compile(r"%(?:\d+\$)?#@[A-Za-z_][A-Za-z0-9_]*@"),
+    # A translated or transliterated variable name ("%#@элементы@") or fullwidth signs.
+    lenient=re.compile(r"[%％](?:[0-9０-９]+[$＄])?#[@＠][^@＠\s]+[@＠]"),
 )
 
 PYTHON_PERCENT = Syntax(

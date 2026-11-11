@@ -34,6 +34,7 @@ from algebras.utils.ios_stringsdict_handler import (
     anchor_plural_contexts,
     build_plural_contexts,
     expand_plural_forms,
+    plural_sources_for_translation,
     extract_translatable_strings,
     read_ios_stringsdict_file,
     split_plural_passes,
@@ -889,7 +890,7 @@ def _process_all_files(
 
                         # Translate every source string plus the plural forms the
                         # target language needs but the source lacks
-                        source_flat = expand_plural_forms(
+                        source_flat = plural_sources_for_translation(
                             source_content_raw,
                             extract_translatable_strings(source_content_raw),
                             target_lang,
@@ -1738,7 +1739,7 @@ def _load_file_contents(
         target_raw_content = (
             handler.read(target_file) if os.path.exists(target_file) else None
         )
-        source_content = expand_plural_forms(
+        source_content = plural_sources_for_translation(
             source_raw_content,
             handler.read_for_translation(source_file, source_language, config),
             target_language,
