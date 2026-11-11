@@ -219,7 +219,15 @@ def _apply_fixes(issues: List[KeyIssue], dry_run: bool, config: Config, console:
             for i in fixable:
                 i.status = "unsupported"
             continue
-        writer(target_file, {i.path: i.fixed for i in fixable}, language, config)
+        try:
+            writer(target_file, {i.path: i.fixed for i in fixable}, language, config)
+        except Exception as e:
+            # Nothing (reliably) written: don't report these values as fixed.
+            if console:
+                click.echo(f"  {Fore.RED}✗ Could not write fixes to {target_file}: {e}{Fore.RESET}", err=True)
+            for i in fixable:
+                i.status = "unresolved"
+            continue
         for i in fixable:
             i.status = "fixed"
 

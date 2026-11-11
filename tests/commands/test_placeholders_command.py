@@ -167,3 +167,21 @@ def test_force_key_uses_plural_group():
         "Quiz.points.__plurals__"
     )
     assert placeholders_command._force_key(("a", "b"), {"a": "text"}) == "a.b"
+
+
+def test_writer_failure_is_not_reported_as_fixed(project, capsys):
+    def failing_writer(target_file, fixes, language, config):
+        raise RuntimeError("not written, to keep its images/charts")
+
+    register_fix_writer([".xml", ".json"], failing_writer)
+    try:
+        assert placeholders_command.execute(fix=True) == 2
+    finally:
+        unregister_fix_writer([".xml", ".json"])
+    captured = capsys.readouterr()
+    assert "Could not write fixes" in captured.err
+    import re
+
+    summary = captured.out.split("Checked")[-1]
+    assert not re.search(r"\b\d+ fixed\b", summary)
+    assert re.search(r"\b\d+ unresolved\b", summary)

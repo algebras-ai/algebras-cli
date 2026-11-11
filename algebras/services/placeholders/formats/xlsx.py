@@ -221,6 +221,9 @@ def write_fixes(target_file: str, fixes: Dict[Tuple[str, ...], str], language: O
     )
     if report["missing"]:
         raise ValueError(f"Could not find {', '.join(report['missing'])} in {target_file}")
+    if report["skipped"]:
+        # Saving would drop images/charts: nothing was written (the warning is already printed).
+        raise RuntimeError(f"{target_file} was not written, to keep its images/charts")
     if report["runs_dropped"]:
         click.echo(
             f"  {click.style('⚠', fg='yellow')} {target_file}: rich-text formatting could not be kept in "
