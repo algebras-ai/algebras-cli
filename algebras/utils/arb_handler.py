@@ -314,18 +314,22 @@ def write_arb_from_template(
     target_language: Optional[str] = None,
 ) -> None:
     """
-    Write a new ARB file in the layout of the source: same order, indentation and `@key` metadata,
-    "@@locale" set to the target locale. Messages left untranslated are left out, with their metadata.
+    Write a new ARB file in the layout of the source: same order, indentation and `@key` metadata.
+    "@@locale" is set to the target locale and placed first (the Flutter convention), also when the
+    source has none. Messages left untranslated are left out, with their metadata.
     """
-    from algebras.utils.json_layout import merge_json_file
+    from algebras.utils.json_layout import merge_json_text, read_text, write_text
 
     source = read_arb_file(source_file)
     messages = _messages(content)
     kept = {k for k, v in messages.items() if k in source and (v or source.get(k) == "")}
     desired: Dict[str, Any] = {}
+    locale = target_locale(file_path, target_language) or source.get("@@locale")
+    if isinstance(locale, str) and locale:
+        desired["@@locale"] = locale
     for key, value in source.items():
         if key == "@@locale":
-            desired[key] = target_locale(file_path, target_language) or value
+            continue
         elif key.startswith("@@"):
             desired[key] = value
         elif key.startswith("@"):
@@ -336,7 +340,20 @@ def write_arb_from_template(
             desired[key] = messages[key]
         elif not isinstance(value, str):
             desired[key] = value
-    merge_json_file(file_path, desired, order=source, template_path=source_file)
+    template = _without_late_locale(read_text(source_file))
+    write_text(file_path, merge_json_text(template, desired, desired, drop_missing=True))
+
+
+def _without_late_locale(text: str) -> str:
+    """The template text without an "@@locale" that is not its first entry (it is re-added first)."""
+    try:
+        entries, _open, _close = _top_level_entries(text)
+    except ValueError:
+        return text
+    for index, (key, _key_start, _value_start, value_end) in enumerate(entries):
+        if key == "@@locale" and index > 0:
+            return text[: entries[index - 1][3]] + text[value_end:]
+    return text
 
 
 def update_arb_values(file_path: str, values: Dict[str, str], add_missing: bool = True) -> List[str]:
