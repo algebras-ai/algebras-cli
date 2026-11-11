@@ -19,6 +19,12 @@ def drop_allowed_for_key(
     German "one" may read "Ein Element", Russian "one" may not (it also covers 21, 31 …).
     """
     form = str(key_path).rsplit(".", 1)[-1]
+    if "i18next" in profile.syntax_names:
+        # i18next plural keys: "item_one", "item_few" … (not ordinal "place_ordinal_one").
+        from algebras.utils.json_i18n import i18next_plural_form
+
+        parsed = i18next_plural_form(form)
+        form = parsed[1] if parsed else form
     if form in PLURAL_CATEGORY_ORDER and form != "other" and covers_single_count(target_lang, form):
         return count_drop_allowed(source_text, profile)
     return frozenset()

@@ -481,6 +481,16 @@ def _process_all_files(
             click.echo(
                 f"  {idx}. {Fore.CYAN}{rel_path}{Fore.RESET} ({file_size_str}, {file_ext})"
             )
+            if verbose:
+                try:
+                    from algebras.services.placeholders import profile_for_path as _profile
+
+                    profile = _profile(file_path, config)
+                    click.echo(
+                        f"     placeholders: {profile.name} ({', '.join(profile.syntax_names) or 'none'})"
+                    )
+                except ValueError as e:
+                    click.echo(f"     {Fore.YELLOW}placeholders: {e}{Fore.RESET}")
 
         click.echo("")  # Empty line for better readability
 
