@@ -176,12 +176,13 @@ def update_properties_values(
     values: Dict[str, str],
     add_missing: bool = True,
     ascii_only: Optional[bool] = None,
+    order: Optional[List[str]] = None,
 ) -> List[str]:
     """
     Replace the values of the given keys in place. Comments, blank lines, key order, separators and
     every other entry stay byte for byte; a changed value keeps its continuation lines where the
-    text around each line break is unchanged. Keys not in the file are appended (add_missing) or
-    returned.
+    text around each line break is unchanged. Keys not in the file are added (add_missing) or
+    returned: at their position in `order` (the source's keys) when given, else at the end.
 
     ascii_only: write non-ASCII as \\uXXXX; by default follow the file's own convention.
     """
@@ -209,29 +210,105 @@ def update_properties_values(
             _render_value(entry, value, ascii_only, newline) + (ending or ""),
         )
 
+    # New keys go after the nearest preceding source key in the file (else before the nearest
+    # following one, else at the end), in source order.
+    insert_after: Dict[int, List[str]] = {}
+    insert_before: Dict[int, List[str]] = {}
+    at_end: List[str] = []
+    if add_missing and missing:
+        first_by_key: Dict[str, PropertiesEntry] = {}
+        for e in entries:
+            first_by_key.setdefault(e.key, e)
+        positions = {k: i for i, k in enumerate(order or [])}
+        for key in sorted(missing, key=lambda k: (k not in positions, positions.get(k, 0))):
+            line = f"{_escape_properties_key(key, ascii_only)}={_escape_properties_value(values[key], ascii_only)}"
+            if key not in positions:
+                at_end.append(line)
+                continue
+            index = positions[key]
+            prev = next((k for k in reversed(order[:index]) if k in last_by_key), None)
+            nxt = next((k for k in order[index + 1 :] if k in first_by_key), None)
+            if prev is not None:
+                insert_after.setdefault(last_by_key[prev].last_line, []).append(line)
+            elif nxt is not None:
+                insert_before.setdefault(first_by_key[nxt].first_line, []).append(line)
+            else:
+                at_end.append(line)
+        missing = []
+
     out: List[str] = []
     i = 0
     while i < len(lines):
+        for line in insert_before.get(i, []):
+            out.append(line + newline)
         if i in replacements:
             last, rendered = replacements[i]
             out.append(rendered)
-            i = last + 1
         else:
+            last = i
             out.append(lines[i])
-            i += 1
-
-    if add_missing and missing:
-        if out and not out[-1].endswith(("\n", "\r")):
-            out[-1] += newline
-        for key in missing:
-            out.append(f"{_escape_properties_key(key, ascii_only)}={_escape_properties_value(values[key], ascii_only)}{newline}")
-        missing = []
+        for line in insert_after.get(last, []):
+            _append_line(out, line, newline)
+        i = last + 1
+    for line in at_end:
+        _append_line(out, line, newline)
 
     new_text = "".join(out)
     if new_text != text:
         with open(file_path, "w", encoding="utf-8", newline="") as f:
             f.write(new_text)
     return missing
+
+
+def _append_line(out: List[str], line: str, newline: str) -> None:
+    """Add `line` after the last one; a file without a final line break stays without one."""
+    if not out or out[-1].endswith(("\n", "\r")):
+        out.append(line + newline)
+    else:
+        out.append(newline + line)
+
+
+def write_properties_from_template(
+    file_path: str,
+    source_file: str,
+    values: Dict[str, str],
+    ascii_only: Optional[bool] = None,
+) -> None:
+    """
+    Write a new target in the source file's layout: its comments, blank lines, order, separators
+    and line endings, with each value replaced by its translation. Keys `values` lacks (left
+    untranslated) are left out. Non-ASCII text is written as \\uXXXX unless the source file uses
+    raw UTF-8.
+    """
+    text = _read_text(source_file)
+    if ascii_only is None:
+        ascii_only = uses_unicode_escapes(source_file)
+    lines, entries = parse_properties_text(text)
+    newline = "\r\n" if "\r\n" in text else "\n"
+    by_first = {e.first_line: e for e in entries}
+    out: List[str] = []
+    i = 0
+    while i < len(lines):
+        entry = by_first.get(i)
+        if entry is None:
+            out.append(lines[i])
+            i += 1
+            continue
+        value = values.get(entry.key)
+        if isinstance(value, str):
+            ending = lines[entry.last_line][len(lines[entry.last_line].rstrip("\r\n")) :]
+            if value == entry.value:
+                out.extend(lines[entry.first_line : entry.last_line + 1])
+            else:
+                out.append(_render_value(entry, value, ascii_only, newline) + ending)
+        i = entry.last_line + 1
+    if lines and not lines[-1].endswith(("\n", "\r")) and out and out[-1].endswith(("\n", "\r")):
+        out[-1] = out[-1].rstrip("\r\n")  # the last entry was left out: keep "no final line break"
+    directory = os.path.dirname(file_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(file_path, "w", encoding="utf-8", newline="") as f:
+        f.write("".join(out))
 
 
 def _render_value(entry: PropertiesEntry, value: str, ascii_only: bool, newline: str) -> str:

@@ -58,6 +58,7 @@ from algebras.utils.csv_handler import (
     read_csv_file,
     write_csv_file,
     write_csv_file_in_place,
+    rewrite_csv_file_in_place,
     extract_translatable_strings as extract_csv_strings,
 )
 from algebras.utils.nested_structure_handler import (
@@ -745,6 +746,7 @@ def _process_all_files(
                                 source_raw_content=source_raw_content,
                                 target_raw_content=target_raw_content,
                                 verbose=verbose,
+                                regenerate_from_scratch=regenerate_from_scratch,
                             )
 
                         click.echo(
@@ -878,6 +880,7 @@ def _process_all_files(
                                 source_raw_content=source_raw_content,
                                 target_raw_content=target_raw_content,
                                 verbose=verbose,
+                                regenerate_from_scratch=regenerate_from_scratch,
                             )
 
                         click.echo(
@@ -1036,9 +1039,20 @@ def _process_all_files(
                             import shutil
 
                             shutil.copyfile(source_file, target_file)
-                        write_csv_file_in_place(
-                            target_file, translated_cells, mapped_target_lang
-                        )
+                        if regenerate_from_scratch:
+                            rewrite_csv_file_in_place(
+                                target_file, translated_cells, mapped_target_lang
+                            )
+                        else:
+                            # Only changed cells are written: delimiter, quoting, line
+                            # endings and other cells stay byte for byte; rows the target
+                            # lacks go to their source position.
+                            write_csv_file_in_place(
+                                target_file,
+                                translated_cells,
+                                mapped_target_lang,
+                                key_order=list(translated_content.get("translations", {})),
+                            )
                     elif source_file.endswith((".xlf", ".xliff")):
                         # For XLIFF files, extract strings, translate, then update structure
                         # Don't use translator.translate_file() as it returns structured dict, not flat translations
@@ -1173,8 +1187,9 @@ def _process_all_files(
                         )
 
                         # Save translated content
-                        # For full file translation, we always regenerate from scratch
-                        # (since we're translating the entire file, not just updating keys)
+                        # Full file translation goes through handler.write(); JSON, ARB and
+                        # .properties keep the target's layout (or the source's, for a new
+                        # file) unless regenerate_from_scratch is set.
                         handler = get_handler(source_file, config)
                         # Get all keys for full file translation
                         all_keys = handler.extract_keys(translated_content)
@@ -1194,6 +1209,7 @@ def _process_all_files(
                             source_raw_content=None,
                             target_raw_content=None,
                             verbose=verbose,
+                            regenerate_from_scratch=regenerate_from_scratch,
                         )
 
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
@@ -1447,6 +1463,7 @@ def _process_outdated_files(
                         source_raw_content=source_raw_content,
                         target_raw_content=target_raw_content,
                         verbose=verbose,
+                        regenerate_from_scratch=regenerate_from_scratch,
                     )
 
                 updated_count = len(missing_keys) + len(modified_keys)
@@ -1598,6 +1615,7 @@ def _process_missing_keys_files(
                         source_raw_content=source_raw_content,
                         target_raw_content=target_raw_content,
                         verbose=verbose,
+                        regenerate_from_scratch=regenerate_from_scratch,
                     )
 
                 click.echo(
@@ -1745,6 +1763,7 @@ def _process_outdated_keys_files(
                         source_raw_content=source_raw_content,
                         target_raw_content=target_raw_content,
                         verbose=verbose,
+                        regenerate_from_scratch=regenerate_from_scratch,
                     )
 
                 click.echo(
@@ -2056,6 +2075,7 @@ def _write_translated_content(
     target_raw_content: Optional[Dict[str, Any]] = None,
     verbose: bool = False,
     config=None,
+    regenerate_from_scratch: bool = False,
 ):
     """
     Write translated content to file using handler.
@@ -2076,6 +2096,8 @@ def _write_translated_content(
         target_raw_content: Raw target content (for XLIFF, StringsDict)
         verbose: Verbose mode flag
         config: Config instance (locale mapping for the root key of Rails-style YAML)
+        regenerate_from_scratch: CSV/TSV, JSON, ARB, .properties: write the file from the content
+            alone instead of keeping its layout (or, for a new file, the source's)
     """
     format_type = detect_format(target_file)
 
@@ -2116,6 +2138,17 @@ def _write_translated_content(
             {
                 "target_language": target_language,
                 "source_file": source_file,
+                "regenerate_from_scratch": regenerate_from_scratch,
+            }
+        )
+    elif format_type in (FileFormat.JSON, FileFormat.ARB, FileFormat.PROPERTIES):
+        # Layout preserved: an existing target changes only its changed values, a new one is built
+        # from the source file as a template (ARB: with its metadata and the target's @@locale).
+        kwargs.update(
+            {
+                "source_file": source_file,
+                "target_language": target_language,
+                "regenerate_from_scratch": regenerate_from_scratch,
             }
         )
     elif format_type == FileFormat.XLSX:
