@@ -52,8 +52,12 @@ class TranslationStrategyFactory:
                 batch_size=translator.batch_size,
                 api_config=api_config,
             )
-        elif file_path.endswith((".xlsx", ".xls")):
-            # XLSX files need special handling
+        elif file_path.lower().endswith((".xlsx", ".xls")):
+            # XLSX files need special handling. An .xls workbook is read through xlrd: without
+            # it, fail here with an actionable message instead of a parse error later.
+            from algebras.utils.xlsx_handler import require_xls_support
+
+            require_xls_support(file_path)
             return XlsxTranslationStrategy(
                 config=translator.config,
                 batch_processor=batch_processor,

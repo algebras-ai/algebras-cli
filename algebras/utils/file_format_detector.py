@@ -68,7 +68,9 @@ def detect_format(file_path: str) -> FileFormat:
         return FileFormat.ARB
     elif file_path_lower.endswith(".properties"):
         return FileFormat.PROPERTIES
-    elif file_path_lower.endswith(".xlsx"):
+    elif file_path_lower.endswith((".xlsx", ".xls")):
+        # .xls (Excel 97-2003) is read through xlrd when installed (else an actionable error,
+        # see xlsx_handler.XlsNotSupportedError) and written to the .xlsx next to it.
         return FileFormat.XLSX
     else:
         return FileFormat.UNKNOWN
