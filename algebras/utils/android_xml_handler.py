@@ -1,15 +1,27 @@
-"""
+r"""
 Android XML localization file handler
 
 Values are read as the element's full inner content. Text runs are unescaped (XML entities and
 Android backslash escapes), and child elements are kept as markup with their namespace prefix:
 
-    <string name="x">Hello <xliff:g id="n">%1$s</xliff:g>, it\\'s <b>here</b></string>
-    -> 'Hello <xliff:g id="n">%1$s</xliff:g>, it\\'s <b>here</b>'   (with \\' decoded to ')
+    <string name="x">Hello <xliff:g id="n">%1$s</xliff:g>, it\'s <b>here</b></string>
+    -> "Hello <xliff:g id="n">%1$s</xliff:g>, it's <b>here</b>"
 
 When writing, a value is written back as mixed content (child elements) if the string has markup
 in the source or in the existing target element; otherwise it is plain text. Escaping applies to
 text runs only, so restored markup is never written as &lt;xliff:g&gt;.
+
+Text runs follow aapt2's rules, and the reader and the writers are symmetric:
+
+    value   '    "    \    newline  tab   leading @ / ?    (\uXXXX is kept as written)
+    raw     \'   \"   \\   \n       \t    \@ / \?
+
+An unescaped " opens or closes a quoted section: the reader drops it (it is not part of the value)
+and keeps the whitespace inside it. A value with leading or trailing spaces is written quoted so
+aapt2 keeps them, and an element whose whole content was quoted ("It's") stays quoted when it is
+rewritten. This escaping is what the file format requires, so it never depends on
+api.normalize_strings, which only cleans up escapes in the model's output
+(see algebras/services/string_normalizer.py).
 """
 
 import html
@@ -17,9 +29,6 @@ import os
 import re
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
-
-# Import Config to check normalization settings
-from algebras.config import Config
 
 PLURALS_SUFFIX = ".__plurals__"
 QUANTITY_ORDER = ["zero", "one", "two", "few", "many", "other"]
@@ -36,6 +45,12 @@ KeyPath = Tuple[str, ...]
 
 # A whole value that only references another resource: @string/app_name, @android:string/ok, ?attr/x.
 _RESOURCE_REFERENCE = re.compile(r"^\s*[@?](?:[A-Za-z_][\w.]*:)?[A-Za-z_][\w]*/[\w.]+\s*$")
+
+# \uXXXX escapes are kept as written in values (the translator masks them as placeholders).
+_UNICODE_ESCAPE = re.compile(r"\\u[0-9A-Fa-f]{4}")
+_BACKSLASH_ESCAPES = {"n": "\n", "t": "\t"}
+# Whitespace aapt2 trims at the ends of a value when it is outside quotes.
+_XML_SPACE = " \t\n\r"
 
 _TAG_TOKEN = re.compile(r"<(/?)([A-Za-z_][\w.\-]*(?::[A-Za-z_][\w.\-]*)?)((?:\s+[^<>]*?)?)\s*(/?)>")
 _ATTRIBUTE = re.compile(r"([A-Za-z_][\w.\-]*(?::[A-Za-z_][\w.\-]*)?)\s*=\s*(?:\"([^\"]*)\"|'([^']*)')")
@@ -105,8 +120,10 @@ def read_android_xml_file(file_path: str) -> Dict[str, Any]:
         if name is None or not _is_translatable(string_elem):
             continue
 
+        if not _has_child_elements(string_elem) and is_resource_reference(string_elem.text or ""):
+            continue  # judged on the raw text: \@string/x is literal text, not a reference
         text = _get_element_text(string_elem, prefixes)
-        if text is not None and not is_resource_reference(text):
+        if text is not None:
             result[name] = text
 
     # Process plurals elements
@@ -241,7 +258,6 @@ def write_android_xml_file(
     markup_paths, source_attributes = _source_info(source_file)
     root = ET.Element('resources')
     namespaces = dict(_DEFAULT_NAMESPACES)
-    normalize = _normalize_strings_enabled()
 
     for key in sorted(content.keys()):
         value = content[key]
@@ -258,14 +274,14 @@ def write_android_xml_file(
                     item_elem.set('quantity', quantity)
                     text = str(value[quantity])
                     _set_element_value(
-                        item_elem, text, _wants_markup((key, quantity), text, markup_paths, None), namespaces, normalize
+                        item_elem, text, _wants_markup((key, quantity), text, markup_paths, None), namespaces
                     )
         else:
             string_elem = ET.SubElement(root, 'string')
             string_elem.set('name', key)
             _copy_source_attributes(string_elem, (key,), source_attributes)
             text = str(value)
-            _set_element_value(string_elem, text, _wants_markup((key,), text, markup_paths, None), namespaces, normalize)
+            _set_element_value(string_elem, text, _wants_markup((key,), text, markup_paths, None), namespaces)
 
     _indent_resources(root)
     tree = ET.ElementTree(root)
@@ -280,14 +296,50 @@ def write_android_xml_file(
 # ---------------------------------------------------------------------------
 
 
-def _decode_text(text: str) -> str:
-    """Unescape one text run: XML entities and Android backslash escapes."""
-    text = html.unescape(text)
-    text = text.replace("\\'", "'")
-    text = text.replace('\\"', '"')
-    text = text.replace('\\n', '\n')
-    text = text.replace('\\t', '\t')
-    return text
+class _ValueDecoder:
+    """
+    Decodes the text runs of one <string> / <item> the way aapt2 does. The quote state carries
+    over child elements, as in aapt2. XML entities are already decoded by the parser.
+
+    Each output piece is marked "kept" when aapt2 keeps it even at the ends of the value (escaped
+    characters, text inside quotes, markup); only unkept whitespace is trimmed.
+    """
+
+    def __init__(self) -> None:
+        self.in_quotes = False
+        self.pieces: List[Tuple[str, bool]] = []
+
+    def text(self, run: str) -> None:
+        i = 0
+        while i < len(run):
+            c = run[i]
+            if c == "\\" and i + 1 < len(run):
+                if _UNICODE_ESCAPE.match(run, i):
+                    self.pieces.append((run[i : i + 6], True))
+                    i += 6
+                    continue
+                nxt = run[i + 1]
+                # \' \" \\ \@ \? decode to the character itself, as do unknown escapes in aapt2.
+                self.pieces.append((_BACKSLASH_ESCAPES.get(nxt, nxt), True))
+                i += 2
+                continue
+            if c == '"':
+                self.in_quotes = not self.in_quotes
+            else:
+                self.pieces.append((c, self.in_quotes))
+            i += 1
+
+    def markup(self, text: str) -> None:
+        self.pieces.append((text, True))
+
+    def value(self) -> str:
+        pieces = self.pieces
+        start, end = 0, len(pieces)
+        while start < end and not pieces[start][1] and pieces[start][0] in _XML_SPACE:
+            start += 1
+        while end > start and not pieces[end - 1][1] and pieces[end - 1][0] in _XML_SPACE:
+            end -= 1
+        return "".join(p for p, _kept in pieces[start:end])
 
 
 def _qualified(name: str, prefixes: Dict[str, str]) -> str:
@@ -299,36 +351,36 @@ def _qualified(name: str, prefixes: Dict[str, str]) -> str:
     return name
 
 
-def _serialize_child(elem: ET.Element, prefixes: Dict[str, str]) -> str:
+def _decode_child(elem: ET.Element, prefixes: Dict[str, str], decoder: _ValueDecoder) -> None:
     if not isinstance(elem.tag, str):
-        return ""  # comment / processing instruction inside a string
+        return  # comment / processing instruction inside a string
     tag = _qualified(elem.tag, prefixes)
     attrs = "".join(
         f' {_qualified(k, prefixes)}="{html.escape(v, quote=True)}"' for k, v in elem.attrib.items()
     )
-    inner = _inner_content(elem, prefixes)
-    if not inner and len(elem) == 0:
-        return f"<{tag}{attrs}/>"
-    return f"<{tag}{attrs}>{inner}</{tag}>"
+    if not elem.text and len(elem) == 0:
+        decoder.markup(f"<{tag}{attrs}/>")
+        return
+    decoder.markup(f"<{tag}{attrs}>")
+    _decode_content(elem, prefixes, decoder)
+    decoder.markup(f"</{tag}>")
 
 
-def _inner_content(elem: ET.Element, prefixes: Dict[str, str]) -> str:
-    parts = []
+def _decode_content(elem: ET.Element, prefixes: Dict[str, str], decoder: _ValueDecoder) -> None:
     if elem.text:
-        parts.append(_decode_text(elem.text))
+        decoder.text(elem.text)
     for child in elem:
-        parts.append(_serialize_child(child, prefixes))
+        _decode_child(child, prefixes, decoder)
         if child.tail:
-            parts.append(_decode_text(child.tail))
-    return "".join(parts)
+            decoder.text(child.tail)
 
 
 def _get_element_text(element: ET.Element, prefixes: Optional[Dict[str, str]] = None) -> str:
     """
     Extract the full inner content of a <string> or <item>.
 
-    Text runs are unescaped; child elements (<xliff:g>, <b>, <a href> ...) are kept as markup,
-    including their own text, with their namespace prefix.
+    Text runs are unescaped (see _ValueDecoder); child elements (<xliff:g>, <b>, <a href> ...)
+    are kept as markup, including their own text, with their namespace prefix.
 
     Args:
         element: The XML element
@@ -339,7 +391,9 @@ def _get_element_text(element: ET.Element, prefixes: Optional[Dict[str, str]] = 
     """
     if prefixes is None:
         prefixes = {uri: prefix for prefix, uri in _DEFAULT_NAMESPACES.items()}
-    return _inner_content(element, prefixes).strip()
+    decoder = _ValueDecoder()
+    _decode_content(element, prefixes, decoder)
+    return decoder.value()
 
 
 # ---------------------------------------------------------------------------
@@ -347,28 +401,75 @@ def _get_element_text(element: ET.Element, prefixes: Optional[Dict[str, str]] = 
 # ---------------------------------------------------------------------------
 
 
-def _normalize_strings_enabled() -> bool:
-    try:
-        config = Config()
-        if config.exists():
-            config.load()
-            return config.get_setting("api.normalize_strings", True)
-        return True  # Default to True if no config
-    except Exception:
-        return True  # Default to True if config fails to load
+def _escape_android_text(text: str, quoted: bool = False) -> str:
+    """
+    Android backslash escapes for one text run (XML escaping is left to the serializer).
+
+    Pure: the escaping is required by the format and never depends on configuration. Inside a
+    quoted section (`quoted`), an apostrophe needs no escape. \\uXXXX escapes are kept as written.
+    A leading @ / ? is handled by the caller, which knows where the value starts.
+    """
+    out = []
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if c == "\\":
+            if _UNICODE_ESCAPE.match(text, i):
+                out.append(text[i : i + 6])
+                i += 6
+                continue
+            out.append("\\\\")
+        elif c == "'":
+            out.append("'" if quoted else "\\'")
+        elif c == '"':
+            out.append('\\"')
+        elif c == "\n":
+            out.append("\\n")
+        elif c == "\t":
+            out.append("\\t")
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
 
 
-def _escape_android_text(text: str, normalize_strings: Optional[bool] = None) -> str:
-    """Android backslash escapes for one text run (XML escaping is left to the serializer)."""
-    if normalize_strings is None:
-        normalize_strings = _normalize_strings_enabled()
-    # Only escape quotes if normalization is disabled
-    if not normalize_strings:
-        text = text.replace("'", "\\'")
-        text = text.replace('"', '\\"')
-    text = text.replace('\n', '\\n')
-    text = text.replace('\t', '\\t')
-    return text
+def _needs_quotes(value: str) -> bool:
+    """aapt2 trims unquoted whitespace at the ends of a value; quoting keeps it."""
+    return bool(value) and (value[0] in " \r" or value[-1] in " \r")
+
+
+def _is_wholly_quoted(elem: Optional[ET.Element]) -> bool:
+    """True if the element's whole content is one quoted section, as in <string>"It's"</string>."""
+    if elem is None:
+        return False
+    # Every text run in document order, with the positions of its unescaped quotes.
+    runs: List[str] = []
+
+    def walk(e: ET.Element) -> None:
+        runs.append(e.text or "")
+        for child in e:
+            if isinstance(child.tag, str):
+                walk(child)
+            runs.append(child.tail or "")
+
+    walk(elem)
+    joined = "\x00".join(runs)  # never split an escape across runs
+    quotes = []
+    i = 0
+    while i < len(joined):
+        if joined[i] == "\\":
+            i += 2
+            continue
+        if joined[i] == '"':
+            quotes.append(i)
+        i += 1
+    stripped = joined.strip(_XML_SPACE)
+    offset = len(joined) - len(joined.lstrip(_XML_SPACE))
+    return (
+        len(quotes) == 2
+        and quotes[0] == offset
+        and quotes[1] == offset + len(stripped) - 1
+    )
 
 
 def _escape_xml_text(text: str) -> str:
@@ -390,14 +491,14 @@ def _element_name(name: str, namespaces: Dict[str, str]) -> Optional[str]:
     return name
 
 
-def _build_mixed_content(elem: ET.Element, value: str, namespaces: Dict[str, str], normalize: bool) -> bool:
+def _build_mixed_content(elem: ET.Element, value: str, namespaces: Dict[str, str], quoted: bool) -> bool:
     """Fill `elem` with text and child elements parsed from `value`. False if the markup is not well-formed."""
     stack: List[Tuple[ET.Element, str]] = [(elem, "")]
 
     def add_text(text: str) -> None:
         if not text:
             return
-        text = _escape_android_text(text, normalize)
+        text = _escape_android_text(text, quoted)
         parent = stack[-1][0]
         if len(parent):
             last = parent[-1]
@@ -433,18 +534,39 @@ def _build_mixed_content(elem: ET.Element, value: str, namespaces: Dict[str, str
 
 
 def _set_element_value(
-    elem: ET.Element, value: str, markup: bool, namespaces: Dict[str, str], normalize: bool
+    elem: ET.Element, value: str, markup: bool, namespaces: Dict[str, str], quoted: bool = False
 ) -> None:
+    """
+    Write `value` (as the reader returns it) into `elem` with the escaping aapt2 requires.
+
+    `quoted` keeps the element's whole content in one quoted section ("It's"); a value with
+    leading or trailing spaces is always quoted, or aapt2 would trim them.
+    """
     for child in list(elem):
         elem.remove(child)
     elem.text = None
+    if is_resource_reference(value):
+        elem.text = value.strip()  # @string/x stays a reference
+        return
+    quoted = quoted or _needs_quotes(value)
+    built = False
     if markup and _TAG_TOKEN.search(value):
-        if _build_mixed_content(elem, value, namespaces, normalize):
-            return
-        for child in list(elem):
-            elem.remove(child)
-        elem.text = None
-    elem.text = _escape_android_text(value, normalize)
+        built = _build_mixed_content(elem, value, namespaces, quoted)
+        if not built:
+            for child in list(elem):
+                elem.remove(child)
+            elem.text = None
+    if not built:
+        elem.text = _escape_android_text(value, quoted)
+    if value[:1] in ("@", "?"):
+        # Not a reference (checked above), so the leading character is escaped as text.
+        elem.text = "\\" + (elem.text or "")
+    if quoted:
+        elem.text = '"' + (elem.text or "")
+        if len(elem):
+            elem[-1].tail = (elem[-1].tail or "") + '"'
+        else:
+            elem.text += '"'
 
 
 def _indent_resources(root: ET.Element, space: str = "    ") -> None:
@@ -507,7 +629,6 @@ def write_android_xml_file_in_place(
         return
 
     keys_to_update = _normalize_keys_to_update(keys_to_update)
-    normalize = _normalize_strings_enabled()
     markup_paths, source_attributes = _source_info(source_file)
 
     # Read the existing file content as text to preserve comments and formatting
@@ -565,7 +686,7 @@ def write_android_xml_file_in_place(
                 new_value,
                 _wants_markup((name,), new_value, markup_paths, string_elem),
                 namespaces,
-                normalize,
+                quoted=_is_wholly_quoted(string_elem),
             )
             updated_keys.add(name)
 
@@ -592,14 +713,14 @@ def write_android_xml_file_in_place(
                         text,
                         _wants_markup((plural_key, quantity), text, markup_paths, item_elem),
                         namespaces,
-                        normalize,
+                        quoted=_is_wholly_quoted(item_elem),
                     )
             # Add the forms the target language needs but the file lacks, in CLDR order.
             for quantity in _sort_quantities(q for q in plural_dict if q not in present):
                 new_item = ET.Element('item', {'quantity': quantity})
                 text = str(plural_dict[quantity])
                 _set_element_value(
-                    new_item, text, _wants_markup((plural_key, quantity), text, markup_paths, None), namespaces, normalize
+                    new_item, text, _wants_markup((plural_key, quantity), text, markup_paths, None), namespaces
                 )
                 _insert_item(plurals_elem, new_item)
             updated_keys.add(plural_key)
@@ -623,14 +744,14 @@ def write_android_xml_file_in_place(
                     item_elem.set('quantity', quantity)
                     text = str(content[key][quantity])
                     _set_element_value(
-                        item_elem, text, _wants_markup((key, quantity), text, markup_paths, None), namespaces, normalize
+                        item_elem, text, _wants_markup((key, quantity), text, markup_paths, None), namespaces
                     )
         elif not isinstance(content[key], dict):
             string_elem = ET.SubElement(root, 'string')
             string_elem.set('name', key)
             _copy_source_attributes(string_elem, (key,), source_attributes)
             text = str(content[key])
-            _set_element_value(string_elem, text, _wants_markup((key,), text, markup_paths, None), namespaces, normalize)
+            _set_element_value(string_elem, text, _wants_markup((key,), text, markup_paths, None), namespaces)
 
     _indent_resources(root)
 
@@ -802,7 +923,6 @@ def update_android_xml_values(file_path: str, values: Dict[KeyPath, str]) -> Lis
     with open(file_path, 'r', encoding='utf-8') as f:
         text = f.read()
     namespaces = _file_namespaces(file_path)
-    normalize = _normalize_strings_enabled()
 
     not_found: List[KeyPath] = []
     for path, new_value in values.items():
@@ -815,14 +935,18 @@ def update_android_xml_values(file_path: str, values: Dict[KeyPath, str]) -> Lis
         new_raw = None
         if old_value is not None and old_value != new_value:
             candidate = _minimal_raw_edit(raw, old_value, new_value)
-            if candidate is not None and _decode_raw(candidate, namespaces) == new_value:
+            if (
+                candidate is not None
+                # An unescaped leading @ / ? would make aapt2 read the value as a reference.
+                and candidate.lstrip(_XML_SPACE)[:1] not in ("@", "?")
+                and _decode_raw(candidate, namespaces) == new_value
+            ):
                 new_raw = candidate
         elif old_value == new_value:
             continue
         if new_raw is None:
-            # Keep the file's quote escaping style (\' / \") for this value.
-            keep_style = normalize and "\\'" not in raw and '\\"' not in raw
-            new_raw = _serialize_value(raw, new_value, namespaces, keep_style)
+            # Escaped as the writers do; a wholly quoted value ("It's") stays quoted.
+            new_raw = _serialize_value(raw, new_value, namespaces)
         text = text[:span[0]] + new_raw + text[span[1]:]
 
     with open(file_path, 'w', encoding='utf-8') as f:
@@ -830,7 +954,7 @@ def update_android_xml_values(file_path: str, values: Dict[KeyPath, str]) -> Lis
     return not_found
 
 
-def _serialize_value(raw: str, value: str, namespaces: Dict[str, str], normalize: bool) -> str:
+def _serialize_value(raw: str, value: str, namespaces: Dict[str, str]) -> str:
     """Raw inner XML for `value`, as markup if the existing raw content has child elements."""
     _register_namespaces(namespaces)
     declarations = " ".join(f'xmlns:{p}="{html.escape(u, quote=True)}"' for p, u in namespaces.items())
@@ -839,7 +963,9 @@ def _serialize_value(raw: str, value: str, namespaces: Dict[str, str], normalize
     except ET.ParseError:
         existing = None
     elem = ET.Element("string")
-    _set_element_value(elem, value, _wants_markup((), value, None, existing), namespaces, normalize)
+    _set_element_value(
+        elem, value, _wants_markup((), value, None, existing), namespaces, quoted=_is_wholly_quoted(existing)
+    )
     serialized = ET.tostring(elem, encoding="unicode")
     # Strip the wrapper element and the namespace declarations ElementTree adds to it.
     inner = re.sub(r"^<string\b[^>]*>", "", serialized)

@@ -23,6 +23,7 @@ from algebras.utils.android_xml_handler import (
     write_android_xml_file,
     write_android_xml_file_in_place,
 )
+from tests.aapt_string_rules import assert_aapt_valid
 
 _LATIN_TO_CYRILLIC = str.maketrans(dict(zip("sdcSDabeiklmnoprtuvxyz", "сдсСДабеиклмнопртувхйз")))
 
@@ -109,6 +110,7 @@ def test_full_write_round_trips_markup_and_escapes(source_xml, tmp_path):
 
     write_android_xml_file(str(target), data, source_file=str(source_xml))
     raw = target.read_text(encoding="utf-8")
+    assert_aapt_valid(target)
 
     assert '<string name="hello">Hello <xliff:g id="name" example="Bob">%1$s</xliff:g>!</string>' in raw
     assert "<b>really</b> 100%% &amp; more" in raw  # no double escaping
@@ -137,6 +139,7 @@ def test_in_place_write_restores_markup_as_elements(source_xml, tmp_path):
         str(target), content, {"hello", "Quiz.points.__plurals__.few"}, source_file=str(source_xml)
     )
     raw = target.read_text(encoding="utf-8")
+    assert_aapt_valid(target)
 
     assert '<string name="hello">Салом <xliff:g id="name" example="Bob">%1$s</xliff:g>!</string>' in raw
     assert "<!-- Greeting shown on the home screen -->" in raw
@@ -158,6 +161,7 @@ def test_update_values_changes_only_the_given_values(source_xml):
         },
     )
     after = source_xml.read_text(encoding="utf-8")
+    assert_aapt_valid(source_xml)
 
     expected = (
         before.replace(">Hello <xliff", ">Hi <xliff")
@@ -284,6 +288,7 @@ def test_translate_never_writes_a_transliterated_placeholder(tmp_path, monkeypat
         translate_command.execute(language=language, force="__all__")
 
     raw = target.read_text(encoding="utf-8")
+    assert_aapt_valid(target)
     data = read_android_xml_file(str(target))
 
     assert "%1$s" in data["code_disclaimer"] and "%2$d" in data["code_disclaimer"]
@@ -326,6 +331,7 @@ def test_translate_missing_keys_in_place_expands_plurals(tmp_path, monkeypatch):
         translate_command.execute(language="ru", only_missing=True)
 
     raw = target.read_text(encoding="utf-8")
+    assert_aapt_valid(target)
     data = read_android_xml_file(str(target))
     assert "<!-- keep me -->" in raw
     assert data["code_disclaimer"].startswith("Мы отправили код")  # untouched
@@ -457,6 +463,7 @@ def test_fix_repairs_only_the_damaged_characters_and_is_idempotent(client_projec
     assert {i["status"] for i in report["issues"]} == {"fixed"}
 
     expected = CLIENT_TARGET.replace("%1$с", "%1$s").replace("%2$д", "%2$d").replace("%1$д", "%1$d")
+    assert_aapt_valid(client_project)
     assert client_project.read_text(encoding="utf-8") == expected
     fixed = read_android_xml_file(str(client_project))
     fixed.pop("Promo.discount")  # formatted="false": never passed to String.format
