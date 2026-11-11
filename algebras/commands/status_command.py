@@ -6,7 +6,7 @@ import os
 import click
 import requests
 from colorama import Fore
-from typing import Optional, Dict, List, Set, Tuple
+from typing import Any, Optional, Dict, List, Set, Tuple
 
 from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
@@ -278,11 +278,24 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
 
 
 
+# Formats whose sources are expanded with the plural forms the target language needs.
+_PLURAL_EXPANDED = ('.stringsdict', '.po', '.yaml', '.yml')
+
+
+def _string_leaf_count(data: Any) -> int:
+    if isinstance(data, dict):
+        return sum(_string_leaf_count(v) for v in data.values())
+    return 1 if isinstance(data, str) else 0
+
+
 def _expected_key_count(source_file: str, lang: str, source_key_counts: Dict[str, int]) -> int:
-    """Source key count, plus the plural forms `lang` needs that a .stringsdict or .po source lacks."""
-    if not source_file.endswith(('.stringsdict', '.po')) or not os.path.isfile(source_file):
+    """Source key count, plus the plural forms `lang` needs that the source lacks."""
+    if not source_file.endswith(_PLURAL_EXPANDED) or not os.path.isfile(source_file):
         return source_key_counts.get(source_file, 0)
-    return len(expand_plural_source_keys(source_file, read_language_file(source_file), lang))
+    expanded = expand_plural_source_keys(source_file, read_language_file(source_file), lang)
+    if source_file.endswith(('.yaml', '.yml')):
+        return _string_leaf_count(expanded)  # nested: count strings, not top-level keys
+    return len(expanded)
 
 
 def execute(language: Optional[str] = None, config_file: str = None) -> None:
@@ -420,7 +433,7 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                                 # Count current translated keys and outdated keys
                                 # For CSV/TSV files, pass language parameters
                                 source_lang = source_language if source_file.endswith(('.csv', '.tsv')) else None
-                                target_lang = lang if resolved_path.endswith(('.csv', '.tsv', '.stringsdict', '.po')) else None
+                                target_lang = lang if resolved_path.endswith(('.csv', '.tsv') + _PLURAL_EXPANDED) else None
                                 current_translated_keys, outdated_keys = count_current_and_outdated_keys(
                                     source_file, resolved_path, source_lang, target_lang, config
                                 )
@@ -466,7 +479,7 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                         # Count current translated keys and outdated keys
                         # For CSV/TSV files, pass language parameters
                         source_lang = source_language if source_file.endswith(('.csv', '.tsv')) else None
-                        target_lang = lang if lang_file.endswith(('.csv', '.tsv', '.stringsdict', '.po')) else None
+                        target_lang = lang if lang_file.endswith(('.csv', '.tsv') + _PLURAL_EXPANDED) else None
                         current_translated_keys, outdated_keys = count_current_and_outdated_keys(
                             source_file, lang_file, source_lang, target_lang, config
                         )

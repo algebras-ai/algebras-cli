@@ -284,3 +284,21 @@ def test_non_rails_target_with_a_locale_like_key_is_not_renamed():
     target = {"ru": {"greeting": "Привет"}}
     assert yaml_locale_root.align_target(source, target, "en", "ru") is target
     assert yaml_locale_root.reroot_for_target(source, source, "en", "ru") is source
+
+
+def test_status_counts_generated_plural_forms_as_current(tmp_path, monkeypatch):
+    """ru needs one/few/many/other: generated few/many must not show up as outdated keys."""
+    from algebras.commands.status_command import _expected_key_count, count_current_and_outdated_keys
+
+    (tmp_path / "config" / "locales").mkdir(parents=True)
+    src = tmp_path / "config" / "locales" / "en.yml"
+    tgt = tmp_path / "config" / "locales" / "ru.yml"
+    src.write_text("en:\n  items:\n    one: '%{count} item'\n    other: '%{count} items'\n  title: Hi\n", encoding="utf-8")
+    tgt.write_text(
+        "ru:\n  items:\n    one: '%{count} товар'\n    few: '%{count} товара'\n"
+        "    many: '%{count} товаров'\n    other: '%{count} товара'\n  title: Привет\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    assert _expected_key_count(str(src), "ru", {}) == 5
+    assert count_current_and_outdated_keys(str(src), str(tgt), None, "ru", None) == (5, 0)
