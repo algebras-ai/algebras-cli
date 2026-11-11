@@ -152,3 +152,23 @@ def test_anchor_skips_damaged_other_translation():
 
     good = anchor_plural_contexts(contexts, ["k.few"], {"k.other": "%d очков"}, source)
     assert "already translated as '%d очков'" in good["k.few"]
+
+
+def test_dict_strategies_forward_placeholder_profile():
+    from algebras.services.placeholders import PlaceholderProfile
+    from algebras.services.strategies.nested_dict_strategy import NestedDictTranslationStrategy
+
+    profile = PlaceholderProfile(name="only-printf", syntax_names=("printf",))
+    batch_processor = MagicMock()
+    batch_processor.process.return_value = BatchResult(
+        translations=["Привет %s"], error_stats={"5xx": [], "429": [], "other": []},
+        failed_batches=[], successful_batches=1, total_batches=1,
+    )
+    normalizer = MagicMock()
+    normalizer.normalize.side_effect = lambda s, t: t
+    for cls in (FlatDictTranslationStrategy, NestedDictTranslationStrategy):
+        batch_processor.process.reset_mock()
+        cls(MagicMock(), batch_processor, normalizer, 10, {}).translate(
+            {"a": "Hi %s"}, "en", "ru", False, "g", None, None, placeholder_profile=profile
+        )
+        assert batch_processor.process.call_args.kwargs["placeholder_profile"] is profile

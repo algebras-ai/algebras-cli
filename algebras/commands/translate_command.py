@@ -73,6 +73,7 @@ from algebras.services.file_scanner import FileScanner
 from algebras.utils.path_utils import determine_target_path, resolve_destination_path
 from algebras.utils.git_utils import is_git_available
 from algebras.utils.file_writer import IncrementalFileWriter
+from algebras.services.placeholders import profile_for_path
 from algebras.services.translator import Translator
 from algebras.utils.file_format_handlers import get_handler
 from algebras.utils.file_format_detector import (
@@ -1094,6 +1095,7 @@ def _process_all_files(
                             glossary_id,
                             on_batch_complete,
                             translate_text_func,
+                            placeholder_profile=profile_for_path(source_file, config),
                         )
 
                         # Wait for all writes to complete

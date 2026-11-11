@@ -400,6 +400,16 @@ class Translator:
 
         return translation
 
+    @staticmethod
+    def _profile_kwarg(strategy, profile) -> Dict[str, Any]:
+        """placeholder_profile kwarg for strategies that accept it (flat and nested dict)."""
+        from algebras.services.strategies.flat_dict_strategy import FlatDictTranslationStrategy
+        from algebras.services.strategies.nested_dict_strategy import NestedDictTranslationStrategy
+
+        if isinstance(strategy, (FlatDictTranslationStrategy, NestedDictTranslationStrategy)):
+            return {"placeholder_profile": profile}
+        return {}
+
     def _translate_masked(
         self,
         text: str,
@@ -513,6 +523,7 @@ class Translator:
 
         # Get appropriate strategy for this file format
         strategy = TranslationStrategyFactory.get_strategy(file_path, self)
+        profile = profile_for_path(file_path, self.config)
 
         # Determine translate_text_func for non-algebras-ai providers
         provider = self.api_config.get("provider", "algebras-ai")
@@ -532,6 +543,7 @@ class Translator:
                 glossary_id,
                 None,
                 translate_text_func,
+                placeholder_profile=profile,
             )
             # Merge back with original content, preserving metadata
             translated = content.copy()
@@ -549,6 +561,7 @@ class Translator:
                 glossary_id,
                 None,
                 translate_text_func,
+                placeholder_profile=profile,
             )
             # For XLIFF, we need to update the target elements
             translated = self._update_xliff_targets(content, translated_strings)
@@ -562,6 +575,7 @@ class Translator:
                 glossary_id,
                 None,
                 translate_text_func,
+                **self._profile_kwarg(strategy, profile),
             )
 
         return translated
@@ -1054,6 +1068,7 @@ class Translator:
                     glossary_id,
                     None,
                     translate_text_func,
+                    placeholder_profile=profile_for_path(source_file_path, self.config),
                 )
 
                 if len(key_parts) == 1:

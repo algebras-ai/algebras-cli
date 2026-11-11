@@ -19,6 +19,7 @@ class NestedDictTranslationStrategy(TranslationStrategy):
         glossary_id: Optional[str] = None,
         on_batch_complete: Optional[Callable[[Dict[str, str], int], None]] = None,
         translate_text_func: Optional[Callable[[str, str, str, bool, str], str]] = None,
+        placeholder_profile=None,
     ) -> Dict[str, Any]:
         """
         Recursively translate a nested dictionary.
@@ -102,6 +103,7 @@ class NestedDictTranslationStrategy(TranslationStrategy):
             glossary_id=glossary_id,
             on_batch_complete=None,  # We'll handle callback after mapping to paths
             translate_text_func=translate_text_func,
+            **({"placeholder_profile": placeholder_profile} if placeholder_profile is not None else {}),
         )
 
         # Map translations back to paths and apply normalization
