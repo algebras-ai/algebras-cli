@@ -24,6 +24,24 @@ _RETRY_NOTE = (
     "Copy every token exactly."
 )
 
+# Default number of placeholder retries: once in a batch with the other failed texts, then once
+# alone with the API cache bypassed. Config: api.placeholder_retries.
+DEFAULT_PLACEHOLDER_RETRIES = 2
+
+
+def _configured_placeholder_retries(api_client: Any) -> int:
+    """api.placeholder_retries from the client's config, else DEFAULT_PLACEHOLDER_RETRIES."""
+    try:
+        value = api_client.config.get_api_config().get("placeholder_retries")
+    except Exception:
+        return DEFAULT_PLACEHOLDER_RETRIES
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return DEFAULT_PLACEHOLDER_RETRIES
+    try:
+        return max(0, int(value))
+    except ValueError:
+        return DEFAULT_PLACEHOLDER_RETRIES
+
 
 @dataclass
 class BatchResult:
@@ -35,8 +53,12 @@ class BatchResult:
     successful_batches: int
     total_batches: int
     # Indices of input texts whose translation was rejected because placeholders were lost or
-    # damaged (after one retry). Their entry in `translations` is "" and must not be written.
+    # damaged (after the retries). Their entry in `translations` is "" and must not be written.
     failed_indices: Set[int] = field(default_factory=set)
+    # Measurement: input texts whose first translation lost placeholders, and how many of those
+    # a retry recovered (first-attempt vs after-retry success rate).
+    first_attempt_failures: int = 0
+    retry_recovered: int = 0
 
 
 class BatchProcessor:
@@ -49,6 +71,7 @@ class BatchProcessor:
         max_parallel_batches: int,
         provider: str,
         verbose: bool = False,
+        placeholder_retries: Optional[int] = None,
     ):
         """
         Initialize BatchProcessor.
@@ -59,6 +82,8 @@ class BatchProcessor:
             max_parallel_batches: Maximum number of parallel batches
             provider: Translation provider name (e.g., "algebras-ai")
             verbose: Whether to enable verbose logging
+            placeholder_retries: How often a text whose placeholders did not survive is retried
+                (None: config api.placeholder_retries, default 2; 0 disables retries)
         """
         self.api_client = api_client
         self.batch_size = batch_size
@@ -66,6 +91,9 @@ class BatchProcessor:
         self.provider = provider
         self.verbose = verbose
         self.icu_service = ICUMessageService()
+        if placeholder_retries is None:
+            placeholder_retries = _configured_placeholder_retries(api_client)
+        self.placeholder_retries = max(0, int(placeholder_retries))
 
     def process(
         self,
@@ -86,7 +114,8 @@ class BatchProcessor:
         Process texts in batches with parallel execution.
 
         Placeholders (%1$s, {name}, <b> …) are replaced by opaque tokens before sending and put back
-        afterwards; a text whose tokens come back lost or changed is retried once, then reported in
+        afterwards; a text whose tokens come back lost or changed is retried (placeholder_retries
+        times: first in a batch, then alone with the API cache bypassed), then reported in
         `BatchResult.failed_indices` instead of being returned damaged.
 
         Args:
@@ -140,45 +169,35 @@ class BatchProcessor:
             warn_dropped_contexts=bool(contexts and any(contexts)),
         )
 
-        # Put placeholders back; retry rejected segments once with a stronger note.
+        # Put placeholders back; retry rejected segments with a stronger note.
         # Segments of failed API batches come back as "" and are skipped by _unmask_all.
         failed_segments = self._unmask_all(result.translations, masked, profile, preprocessed_drop, set())
-        retry = sorted(failed_segments)
-        if retry:
-            print(f"  ⚠ {len(retry)} translation(s) lost or changed placeholders; retrying them once")
-            retry_result = self._process_segments(
-                [api_texts[i] for i in retry],
+        first_failed_segments = set(failed_segments)
+        if failed_segments:
+            failed_segments = self._retry_placeholder_failures(
+                sorted(failed_segments),
+                result,
+                api_texts,
+                api_contexts,
+                masked,
+                preprocessed_texts,
+                preprocessed_drop,
+                profile,
                 source_lang,
                 target_lang,
                 ui_safe,
                 glossary_id,
-                None,
                 translate_text_func,
-                [f"{_RETRY_NOTE} {api_contexts[i] or ''}".strip() for i in retry],
-                warn_dropped_contexts=False,
-                quiet=True,
             )
-            retried = list(retry_result.translations)
-            still_failed = self._unmask_all(
-                retried,
-                [masked[i] for i in retry],
-                profile,
-                [preprocessed_drop[i] for i in retry],
-                set(),
-                key_labels=[preprocessed_texts[i] for i in retry],
-            )
-            failed_segments = set()
-            for local, segment_index in enumerate(retry):
-                if local in still_failed:
-                    failed_segments.add(segment_index)
-                    result.translations[segment_index] = ""
-                else:
-                    result.translations[segment_index] = retried[local]
 
         failed_indices: Set[int] = set()
+        first_failed_indices: Set[int] = set()
         for index, entry in enumerate(icu_mapping):
-            if any(entry.start + o in failed_segments for o in range(entry.count)):
+            segments = range(entry.start, entry.start + entry.count)
+            if any(seg in failed_segments for seg in segments):
                 failed_indices.add(index)
+            if any(seg in first_failed_segments for seg in segments):
+                first_failed_indices.add(index)
 
         if icu_mapping:
             result.translations = self.icu_service.postprocess_translations(
@@ -187,12 +206,96 @@ class BatchProcessor:
         for index in failed_indices:
             result.translations[index] = ""
         result.failed_indices = failed_indices
-        if failed_indices:
+        result.first_attempt_failures = len(first_failed_indices)
+        result.retry_recovered = len(first_failed_indices - failed_indices)
+        if first_failed_indices:
+            # One summary line for all retries.
+            if failed_indices:
+                print(
+                    f"  ✗ {len(first_failed_indices)} translation(s) lost or changed placeholders; "
+                    f"{result.retry_recovered} recovered on retry, {len(failed_indices)} still damaged "
+                    "and not used; they stay untranslated (run again, or check with 'algebras placeholders')"
+                )
+            else:
+                print(
+                    f"  ⚠ {len(first_failed_indices)} translation(s) lost or changed placeholders; "
+                    "all recovered on retry"
+                )
+        # --verbose: first-attempt vs after-retry success (the client follows set_verbose).
+        if self.verbose or getattr(self.api_client, "verbose", False) is True:
+            total = len(texts)
             print(
-                f"  ✗ {len(failed_indices)} translation(s) still had lost or damaged placeholders "
-                "and were not used; they stay untranslated (run again, or check with 'algebras placeholders')"
+                f"  Placeholder check: {total - result.first_attempt_failures}/{total} passed on the "
+                f"first attempt, {total - len(failed_indices)}/{total} after retries "
+                f"({result.retry_recovered} recovered)"
             )
         return result
+
+    def _retry_placeholder_failures(
+        self,
+        retry: List[int],
+        result: BatchResult,
+        api_texts: List[Any],
+        api_contexts: List[Optional[str]],
+        masked: List[Any],
+        preprocessed_texts: List[Any],
+        preprocessed_drop: List[FrozenSet[str]],
+        profile: PlaceholderProfile,
+        source_lang: str,
+        target_lang: str,
+        ui_safe: bool,
+        glossary_id: str,
+        translate_text_func: Optional[Callable[[str, str, str, bool, str], str]],
+    ) -> Set[int]:
+        """
+        Retry segments whose placeholders did not survive; return those still failing.
+
+        Retry 1 resends them in a batch together, with a stronger note. Each further retry sends
+        every still-failing segment alone (a batch of 1), with the note and the API's cache bypassed
+        for that call only, so a cached damaged answer is not served again. Passing translations
+        are written into `result.translations`; segments still failing are set to "".
+        """
+        pending = list(retry)
+        for attempt in range(1, self.placeholder_retries + 1):
+            if not pending:
+                break
+            alone = attempt > 1
+            last = attempt == self.placeholder_retries
+            retry_result = self._process_segments(
+                [api_texts[i] for i in pending],
+                source_lang,
+                target_lang,
+                ui_safe,
+                glossary_id,
+                None,
+                translate_text_func,
+                [f"{_RETRY_NOTE} {api_contexts[i] or ''}".strip() for i in pending],
+                warn_dropped_contexts=False,
+                quiet=True,
+                batch_size=1 if alone else None,
+                ignore_cache=alone,
+            )
+            retried = list(retry_result.translations)
+            still_failed = self._unmask_all(
+                retried,
+                [masked[i] for i in pending],
+                profile,
+                [preprocessed_drop[i] for i in pending],
+                set(),
+                key_labels=[preprocessed_texts[i] for i in pending] if last else None,
+            )
+            next_pending = []
+            for local, segment_index in enumerate(pending):
+                translated = retried[local] if local < len(retried) else ""
+                if local in still_failed or not isinstance(translated, str) or translated == "":
+                    # Still damaged, or the retry call itself failed: keep it pending.
+                    next_pending.append(segment_index)
+                else:
+                    result.translations[segment_index] = translated
+            pending = next_pending
+        for segment_index in pending:
+            result.translations[segment_index] = ""
+        return set(pending)
 
     def _unmask_all(
         self,
@@ -231,8 +334,16 @@ class BatchProcessor:
         contexts: List[Optional[str]],
         warn_dropped_contexts: bool,
         quiet: bool = False,
+        batch_size: Optional[int] = None,
+        ignore_cache: bool = False,
     ) -> BatchResult:
-        """Send already-masked segments through the provider (no ICU or placeholder handling)."""
+        """
+        Send already-masked segments through the provider (no ICU or placeholder handling).
+
+        `batch_size` overrides self.batch_size for this call. `ignore_cache` bypasses the API's
+        translation cache for this call only: it is passed per request, never stored on the
+        shared client, so it cannot leak into later or concurrent calls.
+        """
         preprocessed_texts = texts
         preprocessed_contexts = contexts
 
@@ -262,12 +373,14 @@ class BatchProcessor:
             )
 
         # Split into batches
+        # Other providers translate text by text anyway; the override only applies to algebras-ai.
+        size = (batch_size or self.batch_size) if self.provider == "algebras-ai" else self.batch_size
         total_texts = len(non_empty_texts)
-        num_batches = (total_texts + self.batch_size - 1) // self.batch_size
+        num_batches = (total_texts + size - 1) // size
 
         if not quiet:
             print(
-                f"Processing {total_texts} text items in {num_batches} batches (batch size: {self.batch_size})"
+                f"Processing {total_texts} text items in {num_batches} batches (batch size: {size})"
             )
 
         if self.provider != "algebras-ai" and warn_dropped_contexts:
@@ -290,6 +403,9 @@ class BatchProcessor:
                 index_mapping,
                 len(preprocessed_texts),
                 non_empty_contexts if any(non_empty_contexts) else None,
+                batch_size=size,
+                ignore_cache=ignore_cache,
+                quiet=quiet,
             )
         else:
             result = self._process_other_provider(
@@ -321,18 +437,28 @@ class BatchProcessor:
         index_mapping: List[Optional[int]],
         total_texts: int,
         contexts: Optional[List[Optional[str]]] = None,
+        batch_size: Optional[int] = None,
+        ignore_cache: bool = False,
+        quiet: bool = False,
     ) -> BatchResult:
-        """Process batches using Algebras AI batch API with parallel execution."""
-        print(
-            f"Using parallel batch processing with {self.max_parallel_batches} concurrent batches"
-        )
+        """
+        Process batches using Algebras AI batch API with parallel execution.
+
+        `ignore_cache` is sent with each request of this call only (per-call keyword of
+        translate_batch), so a bypass never leaks into later calls or other threads.
+        """
+        size = batch_size or self.batch_size
+        if not quiet:
+            print(
+                f"Using parallel batch processing with {self.max_parallel_batches} concurrent batches"
+            )
 
         # Create batch data
         batches = []
-        for i in range(0, len(non_empty_texts), self.batch_size):
-            batch_texts = non_empty_texts[i : i + self.batch_size]
-            batch_contexts = contexts[i : i + self.batch_size] if contexts else None
-            batch_idx = i // self.batch_size + 1
+        for i in range(0, len(non_empty_texts), size):
+            batch_texts = non_empty_texts[i : i + size]
+            batch_contexts = contexts[i : i + size] if contexts else None
+            batch_idx = i // size + 1
             batches.append((batch_texts, batch_contexts, batch_idx))
 
         # Process batches in parallel using ThreadPoolExecutor
@@ -348,6 +474,8 @@ class BatchProcessor:
             future_to_batch = {}
             for batch_texts, batch_contexts, batch_idx in batches:
                 submit_kwargs = {"contexts": batch_contexts} if batch_contexts else {}
+                if ignore_cache:
+                    submit_kwargs["ignore_cache"] = True
                 future = executor.submit(
                     self.api_client.translate_batch,
                     batch_texts,
@@ -369,7 +497,7 @@ class BatchProcessor:
                     translated_batch_raw = future.result()
 
                     # Store translations in the correct positions
-                    batch_start_idx = (batch_idx - 1) * self.batch_size
+                    batch_start_idx = (batch_idx - 1) * size
                     for j, translation in enumerate(translated_batch_raw):
                         if batch_start_idx + j < len(all_translations):
                             all_translations[batch_start_idx + j] = translation
@@ -389,9 +517,10 @@ class BatchProcessor:
                             print(f"  ⚠ Error in batch complete callback: {str(e)}")
 
                     successful_batches += 1
-                    print(
-                        f"Completed batch {batch_idx}/{num_batches} ({completed_batches}/{num_batches} total completed)"
-                    )
+                    if not quiet:
+                        print(
+                            f"Completed batch {batch_idx}/{num_batches} ({completed_batches}/{num_batches} total completed)"
+                        )
 
                 except Exception as e:
                     print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
@@ -423,7 +552,7 @@ class BatchProcessor:
                             error_stats["other"].append(batch_idx)
 
                     # Mark failed translations as None
-                    batch_start_idx = (batch_idx - 1) * self.batch_size
+                    batch_start_idx = (batch_idx - 1) * size
                     for j in range(len(batch_texts)):
                         if batch_start_idx + j < len(all_translations):
                             all_translations[batch_start_idx + j] = None
@@ -434,25 +563,27 @@ class BatchProcessor:
             (successful_batches / num_batches * 100) if num_batches > 0 else 0
         )
 
-        print(f"\n  Summary:")
-        print(f"    Total batches: {num_batches}")
-        print(f"    Successful: {successful_batches} ({success_rate:.1f}%)")
-        if total_failed > 0:
-            print(f"    Failed: {total_failed} ({100 - success_rate:.1f}%)")
-            if error_stats["5xx"]:
-                print(
-                    f"      - 5xx errors: {len(error_stats['5xx'])} batches ({', '.join(map(str, error_stats['5xx']))})"
-                )
-            if error_stats["429"]:
-                print(
-                    f"      - 429 errors: {len(error_stats['429'])} batches ({', '.join(map(str, error_stats['429']))})"
-                )
-            if error_stats["other"]:
-                print(
-                    f"      - Other errors: {len(error_stats['other'])} batches ({', '.join(map(str, error_stats['other']))})"
-                )
-        else:
-            print(f"    ✓ All batches completed successfully")
+        # Retries are quiet: errors are printed per batch, process() prints one summary line.
+        if not quiet:
+            print(f"\n  Summary:")
+            print(f"    Total batches: {num_batches}")
+            print(f"    Successful: {successful_batches} ({success_rate:.1f}%)")
+            if total_failed > 0:
+                print(f"    Failed: {total_failed} ({100 - success_rate:.1f}%)")
+                if error_stats["5xx"]:
+                    print(
+                        f"      - 5xx errors: {len(error_stats['5xx'])} batches ({', '.join(map(str, error_stats['5xx']))})"
+                    )
+                if error_stats["429"]:
+                    print(
+                        f"      - 429 errors: {len(error_stats['429'])} batches ({', '.join(map(str, error_stats['429']))})"
+                    )
+                if error_stats["other"]:
+                    print(
+                        f"      - Other errors: {len(error_stats['other'])} batches ({', '.join(map(str, error_stats['other']))})"
+                    )
+            else:
+                print(f"    ✓ All batches completed successfully")
 
         # Reconstruct full result list with empty strings in correct positions
         full_translations = []

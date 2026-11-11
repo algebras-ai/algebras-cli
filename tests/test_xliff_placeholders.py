@@ -319,7 +319,7 @@ def test_translate_retry_keeps_previous_target_and_state(tmp_path, monkeypatch):
     assert "FR FR Save" not in ET.tostring(after["plain"][1], encoding="unicode")
     # Units that were not retranslated keep their translation (not replaced by the source text).
     assert "FR no items" in ET.tostring(after["items"][1], encoding="unicode")
-    assert len(sent) == 2  # first attempt + one retry for the damaged text
+    assert len(sent) == 3  # first attempt + a batch retry + a retry of the damaged text alone
 
 
 def test_translate_xliff20_pc_and_ph(tmp_path, monkeypatch):

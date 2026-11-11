@@ -585,7 +585,7 @@ class Translator:
             # For XLIFF, we need to update the target elements
             translated = self._update_xliff_targets(content, translated_strings)
         else:
-            extra_kwargs: Dict[str, Any] = {}
+            plural_contexts: Dict[str, str] = {}
             if file_path.endswith((".yaml", ".yml")):
                 # Rails plural hashes: every form the target language needs, each translated
                 # from the right source text and with a note on the counts it covers.
@@ -594,20 +594,27 @@ class Translator:
                 content, plural_contexts = yaml_format.prepare_for_translation(
                     content, source_lang, target_lang, profile
                 )
-                if plural_contexts:
-                    extra_kwargs["contexts"] = plural_contexts
-            # Use the strategy for translation
-            translated = strategy.translate(
-                content,
-                source_lang,
-                target_lang,
-                ui_safe,
-                glossary_id,
-                None,
-                translate_text_func,
-                **self._profile_kwarg(strategy, profile),
-                **extra_kwargs,
-            )
+
+            def run_strategy(data, contexts=None):
+                return strategy.translate(
+                    data,
+                    source_lang,
+                    target_lang,
+                    ui_safe,
+                    glossary_id,
+                    None,
+                    translate_text_func,
+                    **self._profile_kwarg(strategy, profile),
+                    **({"contexts": contexts} if contexts else {}),
+                )
+
+            if plural_contexts:
+                # 'other' first, then the other forms anchored to its translation.
+                translated = yaml_format.translate_plural_groups_in_two_passes(
+                    run_strategy, content, plural_contexts
+                )
+            else:
+                translated = run_strategy(content)
 
         if json_plan is not None:
             translated = json_plan.finish(translated)

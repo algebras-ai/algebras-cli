@@ -155,13 +155,46 @@ def expand_plural_source(
     return expanded
 
 
+def plural_index_categories(
+    nplurals: int, expr: str, language: Optional[str]
+) -> Tuple[Optional[str], ...]:
+    """
+    For each msgstr index, the CLDR category (one/few/many/other ...) of the counts it covers,
+    or None when unknown or mixed (the counts fall into several categories, or none).
+    """
+    from algebras.utils.plural_rules import _plural_rule
+
+    rule = _plural_rule(language) if language else None
+    categories: List[Optional[str]] = []
+    for counts in plural_index_samples(nplurals, expr):
+        found = {rule(n) for n in counts} if rule is not None else set()
+        categories.append(found.pop() if len(found) == 1 else None)
+    return tuple(categories)
+
+
+def plural_anchor_index(nplurals: int, expr: str, language: Optional[str]) -> int:
+    """
+    The msgstr index translated first and quoted to the other forms: the one form that maps to
+    CLDR 'other', or the last form when the mapping is ambiguous (Russian: integers 5..20 are
+    'many', so msgstr[2]).
+    """
+    categories = plural_index_categories(nplurals, expr, language)
+    others = [i for i, c in enumerate(categories) if c == "other"]
+    return others[0] if len(others) == 1 else max(nplurals - 1, 0)
+
+
 def build_plural_contexts(
     source_file: str,
     source_language: str,
     target_language: str,
     target_file: Optional[str] = None,
 ) -> Dict[str, str]:
-    """Translator note for every target plural-form key: which counts it covers."""
+    """
+    Translator note for every target plural-form key: which counts it covers. The result's
+    `anchors` (PluralContexts) map each form to its entry's anchor form (plural_anchor_index),
+    which is translated first and quoted in the other forms' notes.
+    """
+    from algebras.utils.ios_stringsdict_handler import PluralContexts
     from algebras.utils.plural_rules import get_language_name
 
     entries = read_po_entries(source_file)
@@ -175,10 +208,12 @@ def build_plural_contexts(
     target_name = get_language_name(target_language)
     source_name = get_language_name(source_language)
 
-    contexts: Dict[str, str] = {}
+    anchor_index = plural_anchor_index(nplurals, expr, target_language)
+    contexts = PluralContexts()
     for entry in plural_entries:
         singular, plural = source_plural_texts(entry, source_forms)
         for index in range(nplurals):
+            contexts.anchors[plural_key(entry["msgid"], index)] = plural_key(entry["msgid"], anchor_index)
             counts = samples[index]
             parts = [
                 f"gettext plural form msgstr[{index}] for {target_name}"

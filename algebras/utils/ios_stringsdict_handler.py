@@ -472,17 +472,61 @@ def build_plural_contexts(
     return contexts
 
 
+class PluralContexts(dict):
+    """
+    Plural notes by key, plus `anchors`: for each plural-form key, the key of the form it is
+    anchored to (translated first and quoted in its context). Formats whose forms have no CLDR
+    names (gettext msgstr[N]) set the anchors explicitly; otherwise a form key "<entry>.<form>"
+    is anchored to "<entry>.other".
+    """
+
+    def __init__(self, notes: Any = (), anchors: Optional[Dict[str, str]] = None):
+        super().__init__(notes)
+        self.anchors: Dict[str, str] = dict(anchors or {})
+
+
+def plural_anchor_key(key: str, contexts: Dict[str, str]) -> Optional[str]:
+    """The key of the form `key` is anchored to, `key` itself for an anchor, None if not plural."""
+    if key not in contexts:
+        return None
+    anchors = getattr(contexts, "anchors", None)
+    if anchors:
+        return anchors.get(key)
+    return f"{key.rsplit('.', 1)[0]}.other"
+
+
+def _lookup(data: Any, key: str) -> Any:
+    """
+    `data[key]`, or for nested content (YAML) the value at the dotted path `key`
+    ("en.inbox.messages.other"); key names that contain dots are matched as a whole.
+    """
+    if not isinstance(data, dict):
+        return None
+    if key in data:
+        return data[key]
+    parts = key.split(".")
+    for i in range(1, len(parts)):
+        head = ".".join(parts[:i])
+        if isinstance(data.get(head), dict):
+            found = _lookup(data[head], ".".join(parts[i:]))
+            if found is not None:
+                return found
+    return None
+
+
 def split_plural_passes(
     keys: List[str], contexts: Dict[str, str]
 ) -> Tuple[List[str], List[str]]:
     """
-    Split keys into (first pass, second pass): plural forms other than 'other' go second,
-    so they can be anchored to their entry's translated 'other' and use the same wording.
+    Split keys into (first pass, second pass): plural forms other than the anchor ('other', or
+    the form PluralContexts.anchors names) go second, so they can be anchored to their entry's
+    translated anchor form and use the same wording.
     """
     first: List[str] = []
     second: List[str] = []
     for key in keys:
-        if key in contexts and not key.endswith(".other"):
+        anchor = plural_anchor_key(key, contexts)
+        if anchor is not None and anchor != key:
             second.append(key)
         else:
             first.append(key)
@@ -497,6 +541,7 @@ def anchor_plural_contexts(
 ) -> Dict[str, str]:
     """
     Contexts for `keys`, each extended with its entry's translated 'other' form when known.
+    `translated` and `source` may be flat or nested (dotted key paths, as for YAML).
 
     With `source`, the translated 'other' is quoted only if its placeholders match the source
     'other': a damaged translation (e.g. "%1$д") must not be shown to the model as the example.
@@ -505,9 +550,11 @@ def anchor_plural_contexts(
 
     anchored = dict(contexts)
     for key in keys:
-        base = key.rsplit(".", 1)[0]
-        other = translated.get(f"{base}.other")
-        source_other = source.get(f"{base}.other") if source else None
+        anchor = plural_anchor_key(key, contexts)
+        if anchor is None or anchor == key:
+            continue
+        other = _lookup(translated, anchor)
+        source_other = _lookup(source, anchor) if source else None
         if isinstance(other, str) and isinstance(source_other, str) and verify(source_other, other):
             continue
         if key in anchored and isinstance(other, str) and other.strip():
