@@ -26,7 +26,7 @@ class XMLHandler(FileFormatHandler):
         **kwargs
     ) -> None:
         """Write Android XML file"""
-        write_android_xml_file(file_path, content)
+        write_android_xml_file(file_path, content, source_file=kwargs.get("source_file"))
     
     def supports_in_place(self) -> bool:
         """XML format supports in-place updates"""
@@ -40,4 +40,6 @@ class XMLHandler(FileFormatHandler):
         **kwargs
     ) -> None:
         """Write Android XML file in-place"""
-        write_android_xml_file_in_place(file_path, content, keys_to_update)
+        write_android_xml_file_in_place(
+            file_path, content, keys_to_update, source_file=kwargs.get("source_file")
+        )

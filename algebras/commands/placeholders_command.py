@@ -18,6 +18,7 @@ from algebras.commands.healthcheck_command import iter_file_pairs
 from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
 from algebras.services.placeholders import profile_for_path, repair, verify
+from algebras.services.placeholders.file_checks import get_file_check
 from algebras.services.placeholders.fix_writers import get_fix_writer
 from algebras.services.placeholders.plurals import drop_allowed_for_key
 from algebras.utils.lang_validator import read_language_file
@@ -65,6 +66,24 @@ def check_file_pair(
     target_language: str,
     config: Config,
 ) -> List[KeyIssue]:
+    file_check = get_file_check(source_file)
+    if file_check is not None:
+        # The format compares its files itself (e.g. .stringsdict plural forms and metadata).
+        return [
+            KeyIssue(
+                language=target_language,
+                source_file=source_file,
+                target_file=target_file,
+                key=f.key,
+                source=f.source,
+                target=f.target,
+                problems=[{"code": p.code, "placeholder": p.placeholder, "message": p.message} for p in f.problems],
+                path=f.path or (f.key,),
+                fixed=f.fixed,
+            )
+            for f in file_check(source_file, target_file, source_language, target_language, config)
+        ]
+
     multi_language = source_file.endswith((".csv", ".tsv"))
     source_data = read_language_file(source_file, source_language if multi_language else None, config)
     target_data = read_language_file(target_file, target_language if multi_language else None, config)
