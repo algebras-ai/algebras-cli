@@ -1010,8 +1010,9 @@ def _process_all_files(
                         )
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     elif source_file.endswith((".csv", ".tsv")):
-                        # For CSV/TSV files, read existing CSV/TSV and add/update language column
-                        existing_csv = read_csv_file(source_file)
+                        # For CSV/TSV files, update the target language column in place. Only
+                        # the translated cells are written: a cell whose placeholders did not
+                        # survive translation keeps its previous value and is reported.
                         translated_content = translator.translate_file(
                             source_file, target_lang, ui_safe, glossary_id
                         )
@@ -1019,13 +1020,21 @@ def _process_all_files(
                         mapped_target_lang = config.get_destination_locale_code(
                             target_lang
                         )
-                        # Extract the translated strings (they come as flat dict from translator)
-                        from algebras.utils.csv_handler import add_language_to_csv
-
-                        updated_csv = add_language_to_csv(
-                            existing_csv, mapped_target_lang, translated_content
+                        target_column = translated_content.get(
+                            "target_column", mapped_target_lang
                         )
-                        write_csv_file(target_file, updated_csv)
+                        translated_cells = {
+                            key: translated_content["translations"][key][target_column]
+                            for key in translated_content.get("translated_keys", [])
+                            if target_column in translated_content["translations"][key]
+                        }
+                        if not os.path.exists(target_file):
+                            import shutil
+
+                            shutil.copyfile(source_file, target_file)
+                        write_csv_file_in_place(
+                            target_file, translated_cells, mapped_target_lang
+                        )
                     elif source_file.endswith((".xlf", ".xliff")):
                         # For XLIFF files, extract strings, translate, then update structure
                         # Don't use translator.translate_file() as it returns structured dict, not flat translations
