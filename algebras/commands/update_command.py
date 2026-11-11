@@ -25,6 +25,23 @@ from algebras.utils.git_utils import (
 )
 
 
+def _matching_android_source(lang_file: str, source_files: List[str], source_language: str) -> Optional[str]:
+    """The source file for an Android values-<qualifier>/*.xml target, if there is one."""
+    if not lang_file.endswith(".xml"):
+        return None
+    parts = os.path.normpath(lang_file).split(os.sep)
+    folders = [i for i, part in enumerate(parts[:-1]) if part.startswith("values-") and len(part) > 7]
+    if not folders:
+        return None
+    index = folders[-1]
+    by_path = {os.path.normpath(f): f for f in source_files}
+    for folder in ("values", f"values-{android_qualifier(source_language)}", f"values-{source_language}"):
+        candidate = os.sep.join(parts[:index] + [folder] + parts[index + 1:])
+        if candidate in by_path:
+            return by_path[candidate]
+    return None
+
+
 def find_matching_source_file(lang_file: str, source_files: List[str], lang: str, source_language: str) -> Optional[str]:
     """
     Find the corresponding source file for a language file.
@@ -41,6 +58,12 @@ def find_matching_source_file(lang_file: str, source_files: List[str], lang: str
     source_file = None
     lang_basename = os.path.basename(lang_file)
     lang_dirname = os.path.dirname(lang_file)
+
+    # Android resources: res/values-ru/strings.xml, values-pt-rBR, values-b+uz+Cyrl -> the
+    # source's res/values/strings.xml (or values-<source qualifier>).
+    android_source = _matching_android_source(lang_file, source_files, source_language)
+    if android_source:
+        return android_source
     
     # iOS-style locale directories, e.g. "en.lproj/Localizable.stringsdict" /
     # "fr.lproj/Localizable.stringsdict" - the language marker is a directory
