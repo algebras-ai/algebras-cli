@@ -238,13 +238,12 @@ def test_translate_end_to_end_keeps_placeholders(ios_project, monkeypatch):
     source = read_ios_strings_file(str(ios_project / "App" / "en.lproj" / "Localizable.strings"))
     target = read_ios_strings_file(str(target_file))
 
-    # The non-positional swap was rejected: the key keeps its source value (untranslated).
-    assert target["sent_by"] == source["sent_by"]
-    assert set(target) == set(source)
+    # The non-positional swap was rejected: the key is left out, so 'status' reports it as missing.
+    assert "sent_by" not in target
+    assert set(target) == set(source) - {"sent_by"}
     for key, value in target.items():
         assert verify(source[key], value, P) == [], key
-        if key != "sent_by":
-            assert value != source[key], key  # translated
+        assert value != source[key], key  # translated
     assert target["files_shared"].index("%2$d") < target["files_shared"].index("%1$@")
     assert target["discount"].count("%%") == 1
     assert '<a href="%@">' in target["link"] and "</a>" in target["link"]

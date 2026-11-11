@@ -559,9 +559,14 @@ class Translator:
                 translate_text_func,
                 placeholder_profile=profile,
             )
-            # Merge back with original content, preserving metadata
-            translated = content.copy()
-            translated.update(translated_strings)
+            # Merge back with original content, preserving metadata. Messages the strategy left
+            # out (placeholders rejected) are dropped, not kept in the source language.
+            translated = {}
+            for key, value in content.items():
+                if key not in translatable_strings:
+                    translated[key] = value
+                elif key in translated_strings:
+                    translated[key] = translated_strings[key]
         elif file_path.endswith((".xlf", ".xliff")):
             # XLIFF files need special handling to extract translatable strings
             translatable_strings = extract_xliff_strings(content)

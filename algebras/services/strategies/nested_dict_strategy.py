@@ -7,6 +7,10 @@ from typing import Dict, Any, Optional, Callable
 from algebras.services.strategies.base import TranslationStrategy
 
 
+# Marks a value rejected by the placeholder check (as opposed to a failed API batch).
+_REJECTED = object()
+
+
 class NestedDictTranslationStrategy(TranslationStrategy):
     """Strategy for translating nested dictionaries."""
 
@@ -146,8 +150,12 @@ class NestedDictTranslationStrategy(TranslationStrategy):
                 raw_translation = result.translations[i]
                 path_key = tuple(path)
 
-                # Check if this translation failed
-                if i in failed_indices:
+                if i in result.failed_indices:
+                    # Placeholders did not survive translation: leave the key out of the
+                    # target so 'status' reports it and the next run retries it.
+                    translated_values[path_key] = _REJECTED
+                    failed_keys_count += 1
+                elif i in failed_indices:
                     # Mark as failed - will use source value in build_result
                     translated_values[path_key] = None
                     failed_keys_count += 1
@@ -171,7 +179,7 @@ class NestedDictTranslationStrategy(TranslationStrategy):
                     if path_key in translated_values:
                         path_str = ".".join(str(p) for p in path)
                         translation = translated_values[path_key]
-                        if translation is not None:
+                        if translation is not None and translation is not _REJECTED:
                             batch_dict[path_str] = translation
 
             # Call callback if provided
@@ -208,23 +216,29 @@ class NestedDictTranslationStrategy(TranslationStrategy):
         # Build the result dictionary with translations
         result_dict = {}
         failed_keys_count = 0
+        rejected_keys_count = 0
 
         def build_result(src_data, dest_data, current_path=None):
-            nonlocal failed_keys_count
+            nonlocal failed_keys_count, rejected_keys_count
             if current_path is None:
                 current_path = []
 
             for key, value in src_data.items():
                 path = current_path + [key]
                 if isinstance(value, dict):
-                    if key not in dest_data:
+                    created = key not in dest_data
+                    if created:
                         dest_data[key] = {}
                     build_result(value, dest_data[key], path)
+                    if created and value and not dest_data[key]:
+                        del dest_data[key]  # every value inside was rejected
                 elif isinstance(value, str):
                     path_key = tuple(path)
                     if path_key in translated_values:
                         translated_value = translated_values[path_key]
-                        if translated_value is None:
+                        if translated_value is _REJECTED:
+                            rejected_keys_count += 1
+                        elif translated_value is None:
                             # Failed translation - use source value
                             dest_data[key] = value
                             failed_keys_count += 1
@@ -240,9 +254,15 @@ class NestedDictTranslationStrategy(TranslationStrategy):
         # Build the translated dictionary
         build_result(data, result_dict)
 
-        if failed_keys_count > 0:
+        source_fallbacks = failed_keys_count - rejected_keys_count
+        if source_fallbacks > 0:
             print(
-                f"  ⚠ {failed_keys_count} keys were not translated and will use source language values"
+                f"  ⚠ {source_fallbacks} keys were not translated and will use source language values"
+            )
+        if rejected_keys_count > 0:
+            print(
+                f"  ⚠ {rejected_keys_count} keys were left out because their placeholders did not "
+                "survive translation; they will be retried on the next run"
             )
 
         return result_dict
