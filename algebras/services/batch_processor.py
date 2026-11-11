@@ -10,6 +10,7 @@ from typing import List, Dict, Optional, Callable, Any, FrozenSet, Set
 
 from algebras.services.api_client import AlgebrasAIClient
 from algebras.services.icu_message_service import ICUMessageService
+from algebras.utils.lang_validator import api_language_code
 from algebras.services.placeholders import (
     GENERIC_PROFILE,
     PlaceholderError,
@@ -43,6 +44,10 @@ def _configured_placeholder_retries(api_client: Any) -> int:
         return DEFAULT_PLACEHOLDER_RETRIES
 
 
+# The platform's answer for a language code it does not support, e.g. 'Invalid language: pt-BR'.
+_INVALID_LANGUAGE = re.compile(r"Invalid language(?:\s*code)?\s*:?\s*['\"]?([A-Za-z0-9_+-]*)")
+
+
 @dataclass
 class BatchResult:
     """Result of batch processing operation."""
@@ -59,6 +64,8 @@ class BatchResult:
     # a retry recovered (first-attempt vs after-retry success rate).
     first_attempt_failures: int = 0
     retry_recovered: int = 0
+    # Positions of input texts whose API batch failed (their entry in `translations` is "").
+    failed_positions: Set[int] = field(default_factory=set)
 
 
 class BatchProcessor:
@@ -94,6 +101,10 @@ class BatchProcessor:
         if placeholder_retries is None:
             placeholder_retries = _configured_placeholder_retries(api_client)
         self.placeholder_retries = max(0, int(placeholder_retries))
+        # Run totals: non-empty texts sent, and texts left out (placeholders rejected or API
+        # batch failed). The translate command uses them for its summary and exit code.
+        self.keys_sent = 0
+        self.keys_left_out = 0
 
     def process(
         self,
@@ -142,6 +153,9 @@ class BatchProcessor:
         preprocessed_texts, icu_mapping = self.icu_service.preprocess_texts(
             texts, target_lang=target_lang, source_lang=source_lang
         )
+        # The API gets the full BCP-47 code, as on the single-text path (Translator.translate_text).
+        source_lang = api_language_code(source_lang)
+        target_lang = api_language_code(target_lang)
         preprocessed_contexts: List[Optional[str]] = [None] * len(preprocessed_texts)
         preprocessed_drop: List[FrozenSet[str]] = [frozenset()] * len(preprocessed_texts)
         for index, entry in enumerate(icu_mapping):
@@ -175,6 +189,9 @@ class BatchProcessor:
             api_contexts,
             warn_dropped_contexts=bool(contexts and any(contexts)),
         )
+
+        # Segments of failed API batches: left out (counted below).
+        api_failed_segments = set(result.failed_positions)
 
         # Put placeholders back; retry rejected segments with a stronger note.
         # Segments of failed API batches come back as "" and are skipped by _unmask_all.
@@ -213,6 +230,12 @@ class BatchProcessor:
         for index in failed_indices:
             result.translations[index] = ""
         result.failed_indices = failed_indices
+        left_out = set(failed_indices)
+        for index, entry in enumerate(icu_mapping):
+            if any(seg in api_failed_segments for seg in range(entry.start, entry.start + entry.count)):
+                left_out.add(index)
+        self.keys_sent += sum(1 for t in texts if isinstance(t, str) and t.strip())
+        self.keys_left_out += len(left_out)
         result.first_attempt_failures = len(first_failed_indices)
         result.retry_recovered = len(first_failed_indices - failed_indices)
         if first_failed_indices:
@@ -473,6 +496,7 @@ class BatchProcessor:
         successful_batches = 0
         error_stats = {"5xx": [], "429": [], "other": []}
         all_translations = [None] * len(non_empty_texts)  # Pre-allocate list
+        failed_non_empty: Set[int] = set()
 
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=self.max_parallel_batches
@@ -530,8 +554,12 @@ class BatchProcessor:
                         )
 
                 except Exception as e:
-                    print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
+                    if not self._report_invalid_language(e, target_lang):
+                        print(f"  ✗ Error processing batch {batch_idx}: {str(e)}")
                     failed_batches.append(batch_idx)
+                    failed_non_empty.update(
+                        range((batch_idx - 1) * size, (batch_idx - 1) * size + len(batch_texts))
+                    )
 
                     # Categorize error by type
                     error_msg = str(e)
@@ -614,7 +642,35 @@ class BatchProcessor:
             failed_batches=failed_batches,
             successful_batches=successful_batches,
             total_batches=num_batches,
+            failed_positions={
+                i for i, mapped in enumerate(index_mapping) if mapped is not None and mapped in failed_non_empty
+            },
         )
+
+    # Languages already reported as unsupported in this run (reset by reset_reported_languages).
+    _reported_invalid_languages: Set[str] = set()
+
+    @classmethod
+    def reset_reported_languages(cls) -> None:
+        cls._reported_invalid_languages = set()
+
+    @classmethod
+    def _report_invalid_language(cls, error: Exception, target_lang: str) -> bool:
+        """
+        The platform answers "Invalid language: X" for codes it does not support (pt-BR, sr-Cyrl).
+        Report that once per language with what to do; return True if the error was one.
+        """
+        match = _INVALID_LANGUAGE.search(str(error))
+        if not match:
+            return False
+        language = match.group(1) or target_lang
+        if language not in cls._reported_invalid_languages:
+            cls._reported_invalid_languages.add(language)
+            print(
+                f"  ✗ The platform does not support the language '{language}'; its keys are left out. "
+                "Map it to a supported code with locale_mapping in .algebras.config, or ask support."
+            )
+        return True
 
     def _process_other_provider(
         self,

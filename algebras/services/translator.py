@@ -17,7 +17,7 @@ import time
 
 from colorama import Fore
 
-from algebras.utils.lang_validator import map_language_code
+from algebras.utils.lang_validator import api_language_code
 from algebras.utils.ts_handler import read_ts_translation_file
 from algebras.utils.android_xml_handler import read_android_xml_file
 from algebras.utils.ios_strings_handler import read_ios_strings_file
@@ -298,6 +298,16 @@ class Translator:
             )
         return self._batch_processor
 
+    @property
+    def keys_sent(self) -> int:
+        """Texts sent for translation so far in this run (batch path)."""
+        return self._batch_processor.keys_sent if self._batch_processor is not None else 0
+
+    @property
+    def keys_left_out(self) -> int:
+        """Texts left out so far: placeholders rejected, or their API batch failed."""
+        return self._batch_processor.keys_left_out if self._batch_processor is not None else 0
+
     def set_custom_prompt(self, prompt: str) -> None:
         """
         Set a custom prompt to be used for translations.
@@ -368,9 +378,9 @@ class Translator:
         if glossary_id is None:
             glossary_id = self.config.get_setting("api.glossary_id", "")
 
-        # Map language codes to ISO 2-letter format
-        source_lang = map_language_code(source_lang)
-        target_lang = map_language_code(target_lang)
+        # The full BCP-47 code (uz-Cyrl, pt-BR), the same as the batch path sends.
+        source_lang = api_language_code(source_lang)
+        target_lang = api_language_code(target_lang)
 
         profile = GENERIC_PROFILE
 
