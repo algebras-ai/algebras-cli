@@ -407,11 +407,12 @@ class Translator:
 
     @staticmethod
     def _profile_kwarg(strategy, profile) -> Dict[str, Any]:
-        """placeholder_profile kwarg for strategies that accept it (flat and nested dict)."""
+        """placeholder_profile kwarg for strategies that accept it (flat and nested dict, CSV)."""
+        from algebras.services.strategies.csv_strategy import CsvTranslationStrategy
         from algebras.services.strategies.flat_dict_strategy import FlatDictTranslationStrategy
         from algebras.services.strategies.nested_dict_strategy import NestedDictTranslationStrategy
 
-        if isinstance(strategy, (FlatDictTranslationStrategy, NestedDictTranslationStrategy)):
+        if isinstance(strategy, (FlatDictTranslationStrategy, NestedDictTranslationStrategy, CsvTranslationStrategy)):
             return {"placeholder_profile": profile}
         return {}
 
