@@ -21,6 +21,7 @@ from algebras.utils.po_handler import (
     read_po_file,
     write_po_file,
 )
+from algebras.utils import android_plurals
 from algebras.utils.android_xml_handler import (
     read_android_xml_file,
     write_android_xml_file,
@@ -922,6 +923,37 @@ def _process_all_files(
                                 updated_content, source_content_raw, target_lang
                             ),
                         )
+                    elif detect_format(source_file) == FileFormat.XML:
+                        # Android: strings plus every plural form the target language needs,
+                        # with plural notes, 'other' translated first.
+                        handler = get_handler(source_file, config)
+                        source_content = handler.read_for_translation(
+                            source_file, source_language, config
+                        )
+                        translated_content = _translate_plural_aware(
+                            translator.translate_missing_keys_batch,
+                            source_content,
+                            {},
+                            list(source_content),
+                            target_lang,
+                            ui_safe,
+                            glossary_id,
+                            source_file_path=source_file,
+                            contexts=android_plurals.build_plural_contexts(
+                                source_content, source_language, target_lang
+                            ),
+                        )
+                        _write_translated_content(
+                            target_file,
+                            translated_content,
+                            handler,
+                            set(translated_content),
+                            use_in_place=False,
+                            source_file=source_file,
+                            source_language=source_language,
+                            target_language=target_lang,
+                        )
+                        click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     elif source_file.endswith((".csv", ".tsv")):
                         # For CSV/TSV files, read existing CSV/TSV and add/update language column
                         existing_csv = read_csv_file(source_file)
@@ -1752,6 +1784,16 @@ def _load_file_contents(
             if os.path.exists(target_file)
             else {}
         )
+    elif format_type == FileFormat.XML:
+        source_content = handler.read_for_translation(source_file, source_language, config)
+        plural_contexts = android_plurals.build_plural_contexts(
+            source_content, source_language, target_language
+        )
+        target_content = (
+            handler.read_for_translation(target_file, target_language, config)
+            if os.path.exists(target_file)
+            else {}
+        )
     elif format_type in (FileFormat.CSV, FileFormat.TSV):
         # CSV needs language-specific reading
         source_content = handler.read_for_translation(
@@ -1798,6 +1840,17 @@ def _translate_plural_aware(
     the remaining forms with that 'other' translation (or the one already in the target) added to
     their context, so every form of an entry uses the same wording.
     """
+    if android_plurals.has_android_plurals(source_content) and args:
+        # Android <plurals>: translate each form as its own flat key (adding the forms the
+        # target language needs), then fold the result back into the nested structure.
+        return android_plurals.translate_plurals(
+            lambda s, t, k, c: _translate_plural_aware(translate_fn, s, t, k, *args, contexts=c, **kwargs),
+            source_content,
+            target_content,
+            keys,
+            target_lang=args[0],
+            contexts=contexts,
+        )
     if not contexts:
         return translate_fn(source_content, target_content, list(keys), *args, contexts=contexts, **kwargs)
 
@@ -1889,6 +1942,8 @@ def _write_translated_content(
         if source_file is None:
             raise ValueError("HTML write requires source_file")
         kwargs["source_file"] = source_file
+    elif format_type == FileFormat.XML:
+        kwargs["source_file"] = source_file  # markup and formatted="false" come from the source
     elif format_type in (FileFormat.CSV, FileFormat.TSV):
         if target_language is None:
             raise ValueError("CSV/TSV write requires target_language")
