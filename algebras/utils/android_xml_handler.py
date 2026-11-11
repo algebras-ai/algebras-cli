@@ -920,7 +920,7 @@ def update_android_xml_values(file_path: str, values: Dict[KeyPath, str]) -> Lis
     `values` maps key paths (("name",) or ("name.__plurals__", quantity)) to the new value as
     read_android_xml_file would return it. Returns the key paths that were not found.
     """
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, 'r', encoding='utf-8', newline='') as f:
         text = f.read()
     namespaces = _file_namespaces(file_path)
 
@@ -930,31 +930,38 @@ def update_android_xml_values(file_path: str, values: Dict[KeyPath, str]) -> Lis
         if span is None:
             not_found.append(path)
             continue
-        raw = text[span[0]:span[1]]
-        old_value = _decode_raw(raw, namespaces)
-        new_raw = None
-        if old_value is not None and old_value != new_value:
-            candidate = _minimal_raw_edit(raw, old_value, new_value)
-            if (
-                candidate is not None
-                # An unescaped leading @ / ? would make aapt2 read the value as a reference.
-                and candidate.lstrip(_XML_SPACE)[:1] not in ("@", "?")
-                and _decode_raw(candidate, namespaces) == new_value
-            ):
-                new_raw = candidate
-        elif old_value == new_value:
-            continue
-        if new_raw is None:
-            # Escaped as the writers do; a wholly quoted value ("It's") stays quoted.
-            new_raw = _serialize_value(raw, new_value, namespaces)
-        text = text[:span[0]] + new_raw + text[span[1]:]
+        new_raw = _changed_raw(text[span[0]:span[1]], new_value, namespaces)
+        if new_raw is not None:
+            text = text[:span[0]] + new_raw + text[span[1]:]
 
-    with open(file_path, 'w', encoding='utf-8') as f:
+    with open(file_path, 'w', encoding='utf-8', newline='') as f:
         f.write(text)
     return not_found
 
 
-def _serialize_value(raw: str, value: str, namespaces: Dict[str, str]) -> str:
+def _changed_raw(raw: str, new_value: str, namespaces: Dict[str, str], markup: bool = False) -> Optional[str]:
+    """
+    New raw inner content for an element whose raw content is `raw`, or None if it already
+    holds `new_value`. The smallest edit when it decodes right, else the value escaped as the
+    writers do (a wholly quoted value stays quoted). `markup` writes tags in the value as child
+    elements even if `raw` has none (the source string has markup).
+    """
+    old_value = _decode_raw(raw, namespaces)
+    if old_value == new_value:
+        return None
+    if old_value is not None:
+        candidate = _minimal_raw_edit(raw, old_value, new_value)
+        if (
+            candidate is not None
+            # An unescaped leading @ / ? would make aapt2 read the value as a reference.
+            and candidate.lstrip(_XML_SPACE)[:1] not in ("@", "?")
+            and _decode_raw(candidate, namespaces) == new_value
+        ):
+            return candidate
+    return _serialize_value(raw, new_value, namespaces, markup)
+
+
+def _serialize_value(raw: str, value: str, namespaces: Dict[str, str], markup: bool = False) -> str:
     """Raw inner XML for `value`, as markup if the existing raw content has child elements."""
     _register_namespaces(namespaces)
     declarations = " ".join(f'xmlns:{p}="{html.escape(u, quote=True)}"' for p, u in namespaces.items())
@@ -964,10 +971,381 @@ def _serialize_value(raw: str, value: str, namespaces: Dict[str, str]) -> str:
         existing = None
     elem = ET.Element("string")
     _set_element_value(
-        elem, value, _wants_markup((), value, None, existing), namespaces, quoted=_is_wholly_quoted(existing)
+        elem,
+        value,
+        markup or _wants_markup((), value, None, existing),
+        namespaces,
+        quoted=_is_wholly_quoted(existing),
     )
     serialized = ET.tostring(elem, encoding="unicode")
     # Strip the wrapper element and the namespace declarations ElementTree adds to it.
     inner = re.sub(r"^<string\b[^>]*>", "", serialized)
     inner = re.sub(r"</string>$", "", inner)
     return "" if serialized.endswith("/>") else inner
+
+
+# ---------------------------------------------------------------------------
+# Layout-preserving writes (translate / update)
+# ---------------------------------------------------------------------------
+
+_OPEN_RESOURCES = re.compile(r"<!--.*?-->|<resources\b(?P<attrs>[^>]*?)(?P<selfclose>/?)>", re.DOTALL)
+_CLOSE_RESOURCES = re.compile(r"</resources\s*>")
+# Children of <resources>. <string-array> is not a <string> (hence the lookahead).
+_BODY_TOKEN = re.compile(
+    r"<!--.*?-->"
+    r"|<(?P<tag>string|plurals)(?=[\s/>])(?P<attrs>[^>]*?)(?:/>|>(?P<inner>.*?)</(?P=tag)\s*>)"
+    r"|<(?P<otag>[A-Za-z_][\w.\-:]*)(?=[\s/>])[^>]*?(?:/>|>.*?</(?P=otag)\s*>)"
+    r"|<!\[CDATA\[.*?\]\]>|<\?.*?\?>",
+    re.DOTALL,
+)
+_ITEM_TOKEN = re.compile(
+    r"<!--.*?-->|<item(?=[\s/>])(?P<attrs>[^>]*?)(?:/>|>(?P<inner>.*?)</item\s*>)", re.DOTALL
+)
+_TOOLS_LOCALE = re.compile(r"\s+tools:locale\s*=\s*(?:\"[^\"]*\"|'[^']*')")
+_XMLNS = re.compile(r"xmlns:([A-Za-z_][\w.\-]*)\s*=\s*(?:\"([^\"]*)\"|'([^']*)')")
+
+
+def _attr(attrs: Optional[str], name: str) -> Optional[str]:
+    for a in _ATTRIBUTE.finditer(attrs or ""):
+        if a.group(1) == name:
+            return html.unescape(a.group(2) if a.group(2) is not None else a.group(3))
+    return None
+
+
+class _XmlLayout:
+    """The <resources> children of an Android XML text, as layout_merge items."""
+
+    def __init__(self, text: str):
+        from algebras.utils.layout_merge import COMMENT, ENTRY, OTHER, Item
+
+        self.text = text
+        self.open = None
+        for m in _OPEN_RESOURCES.finditer(text):
+            if m.group("attrs") is not None:
+                self.open = m
+                break
+        if self.open is None or self.open.group("selfclose"):
+            raise ValueError("no <resources> element to merge into")
+        close = None
+        for close in _CLOSE_RESOURCES.finditer(text, self.open.end()):
+            pass
+        if close is None:
+            raise ValueError("no </resources>")
+        self.items = []
+        self.matches = []
+        for m in _BODY_TOKEN.finditer(text, self.open.end(), close.start()):
+            if m.group(0).startswith("<!--"):
+                item = Item(COMMENT, m.start(), m.end())
+            elif m.group("tag") and _attr(m.group("attrs"), "name") is not None:
+                name = _attr(m.group("attrs"), "name")
+                key = name + PLURALS_SUFFIX if m.group("tag") == "plurals" else name
+                item = Item(ENTRY, m.start(), m.end(), key)
+            else:
+                item = Item(OTHER, m.start(), m.end())
+            self.items.append(item)
+            self.matches.append(m)
+
+    def declared(self) -> Dict[str, str]:
+        """prefix -> uri declared on <resources>."""
+        return {
+            m.group(1): (m.group(2) if m.group(2) is not None else m.group(3))
+            for m in _XMLNS.finditer(self.open.group("attrs") or "")
+        }
+
+    def namespaces(self) -> Dict[str, str]:
+        found = dict(_DEFAULT_NAMESPACES)
+        found.update(self.declared())
+        return found
+
+
+def _quantity_rank(quantity: Optional[str]) -> int:
+    return QUANTITY_ORDER.index(quantity) if quantity in QUANTITY_ORDER else len(QUANTITY_ORDER)
+
+
+def _content_edit(
+    m: "re.Match[str]", tag: str, value: str, namespaces: Dict[str, str], markup: bool
+) -> Optional[Tuple[int, int, str]]:
+    """Edit giving the <string> / <item> match `m` this value, or None if it already has it."""
+    if m.group("inner") is None:
+        # <string name="x"/>: write it out with content.
+        open_tag = m.group(0)[:-2].rstrip() + ">"
+        return (m.start(), m.end(), f"{open_tag}{_serialize_value('', value, namespaces, markup)}</{tag}>")
+    new_raw = _changed_raw(m.group("inner"), value, namespaces, markup)
+    if new_raw is None:
+        return None
+    return (m.start("inner"), m.end("inner"), new_raw)
+
+
+def _shares_line(text: str, pos: int) -> bool:
+    """True if something other than whitespace comes before `pos` on its line."""
+    return bool(text[text.rfind("\n", 0, pos) + 1:pos].strip())
+
+
+def _indent_of(text: str, pos: int) -> str:
+    ls = text.rfind("\n", 0, pos) + 1
+    before = text[ls:pos]
+    return before if not before.strip() else ""
+
+
+def _plurals_edits(
+    m: "re.Match[str]",
+    forms: Dict[str, Any],
+    namespaces: Dict[str, str],
+    markup_quantities: Set[str],
+    nl: str,
+    drop_missing: bool,
+) -> List[Tuple[int, int, str]]:
+    """
+    Edits (positions in m.string) that give the <plurals> match `m` these forms: items already
+    there get the new value if it changed, in their order; forms it lacks are added in CLDR order,
+    indented like their neighbours. drop_missing leaves out items whose form is not in `forms`.
+    """
+    from algebras.utils import layout_merge
+    from algebras.utils.layout_merge import COMMENT, ENTRY, Item
+
+    text = m.string
+    if m.group("inner") is None:
+        return []
+    body_start, body_end = m.span("inner")
+    items: List[Item] = []
+    item_matches = []
+    for im in _ITEM_TOKEN.finditer(text, body_start, body_end):
+        if im.group(0).startswith("<!--"):
+            items.append(Item(COMMENT, im.start(), im.end()))
+        else:
+            items.append(Item(ENTRY, im.start(), im.end(), _attr(im.group("attrs"), "quantity")))
+        item_matches.append(im)
+
+    edits: List[Tuple[int, int, str]] = []
+    kept = []
+    for i, (item, im) in enumerate(zip(items, item_matches)):
+        if item.kind != ENTRY:
+            continue
+        if item.key not in forms:
+            if drop_missing:
+                edits.append(layout_merge.deletion_span(text, items, i) + ("",))
+            else:
+                kept.append((i, item, im))
+            continue
+        kept.append((i, item, im))
+        edit = _content_edit(im, "item", str(forms[item.key]), namespaces, item.key in markup_quantities)
+        if edit:
+            edits.append(edit)
+
+    present = {item.key for item in items if item.kind == ENTRY}
+    missing = sorted((q for q in forms if q not in present), key=_quantity_rank)
+    if not missing:
+        return edits
+
+    default_indent = _indent_of(text, m.start()) + "    "
+    groups: Dict[int, List[str]] = {}
+    for q in missing:
+        markup = q in markup_quantities or "other" in markup_quantities
+        new_item = f'<item quantity="{q}">{_serialize_value("", str(forms[q]), namespaces, markup)}</item>'
+        later = next((e for e in kept if _quantity_rank(e[1].key) > _quantity_rank(q)), None)
+        if later is not None:
+            # Before the first item that comes later in CLDR order.
+            i, _item, im = later
+            if _shares_line(text, im.start()):
+                groups.setdefault(im.start(), []).append(new_item)
+            else:
+                pos = layout_merge.block_span(text, items, i)[0]
+                groups.setdefault(pos, []).append(_indent_of(text, im.start()) + new_item + nl)
+        elif kept:
+            i, _item, im = kept[-1]
+            if _shares_line(text, im.start()):
+                groups.setdefault(im.end(), []).append(new_item)
+            else:
+                pos = layout_merge.block_span(text, items, i)[1]
+                groups.setdefault(pos, []).append(nl + _indent_of(text, im.start()) + new_item)
+        elif "\n" in text[body_start:body_end]:
+            groups.setdefault(body_start, []).append(nl + default_indent + new_item)
+        else:
+            groups.setdefault(body_start, []).append(new_item)  # <plurals ...></plurals> on one line
+    for pos, parts in groups.items():
+        edits.append((pos, pos, "".join(parts)))
+    return edits
+
+
+def _markup_quantities(markup_paths: Set[KeyPath], key: str) -> Set[str]:
+    return {p[1] for p in markup_paths if len(p) == 2 and p[0] == key}
+
+
+def _render_source_element(
+    source: "_XmlLayout",
+    index: int,
+    value: Any,
+    namespaces: Dict[str, str],
+    markup_paths: Set[KeyPath],
+    nl: str,
+) -> str:
+    """Source element `index` with the translated value(s): attributes and layout as in the source."""
+    from algebras.utils import layout_merge
+
+    m = source.matches[index]
+    key = source.items[index].key
+    if m.group("tag") == "plurals":
+        forms = value if isinstance(value, dict) else {}
+        edits = _plurals_edits(m, forms, namespaces, _markup_quantities(markup_paths, key), nl, drop_missing=True)
+    else:
+        edit = _content_edit(m, "string", str(value), namespaces, (key,) in markup_paths)
+        edits = [edit] if edit else []
+    shifted = [(s - m.start(), e - m.start(), t) for s, e, t in edits]
+    return layout_merge.apply_edits(m.group(0), shifted)
+
+
+def _wants_value(key: str, value: Any) -> bool:
+    if key.endswith(PLURALS_SUFFIX):
+        return isinstance(value, dict) and bool(value)
+    return value is not None and not isinstance(value, (dict, list))
+
+
+def write_android_xml_preserving_layout(
+    file_path: str,
+    content: Dict[str, Any],
+    source_file: str,
+    keys_to_update: Optional[Set[str]] = None,
+) -> None:
+    """
+    Write translations keeping the file's layout.
+
+    Target exists: only values that changed are replaced; strings / plurals new to the target are
+    added at their source position, copied from the source element (attributes such as formatted,
+    translatable and tools:*, attached comments). Plural forms the file lacks are added in CLDR
+    order. Keys the source no longer has stay. Comments, order, blank lines, escaping of untouched
+    values, line endings and the trailing newline are kept.
+
+    Target does not exist: the source file is the template (prolog, xmlns declarations, order,
+    comments, blank lines, plural item order), each value replaced by its translation. Strings
+    missing from `content` (left untranslated, translatable="false", references) and resources
+    that are not strings are left out. tools:locale on <resources> names the source language, so
+    it is not copied.
+
+    Falls back to the element-tree writers if a file cannot be handled as text.
+
+    Args:
+        file_path: Target strings.xml
+        content: {name: value, "name.__plurals__": {quantity: value}}
+        source_file: Source-language strings.xml (template and positions of new keys)
+        keys_to_update: Keys to write; None for every key in content
+    """
+    from algebras.utils import layout_merge
+
+    keys_to_update = _normalize_keys_to_update(keys_to_update)
+    keys = set(content) if keys_to_update is None else {k for k in keys_to_update if k in content}
+    keys = {k for k in keys if _wants_value(k, content[k])}
+    exists = os.path.exists(file_path)
+
+    def fallback() -> None:
+        if exists:
+            write_android_xml_file_in_place(file_path, content, keys, source_file)
+        else:
+            write_android_xml_file(file_path, {k: content[k] for k in keys}, source_file)
+
+    try:
+        with open(source_file, 'r', encoding='utf-8', newline='') as f:
+            source = _XmlLayout(f.read())
+        target = None
+        if exists:
+            with open(file_path, 'r', encoding='utf-8', newline='') as f:
+                target = _XmlLayout(f.read())
+    except (OSError, ValueError):
+        fallback()
+        return
+
+    markup_paths = android_markup_paths(source_file)
+    source_text = source.text
+    source_keys = {it.key for it in source.items if it.kind == layout_merge.ENTRY}
+
+    if target is None:
+        namespaces = source.namespaces()
+        nl = layout_merge.newline_of(source_text)
+        extra_edits = []
+        locale = _TOOLS_LOCALE.search(source.open.group("attrs") or "")
+        if locale:
+            start = source.open.start("attrs") + locale.start()
+            extra_edits.append((start, start + len(locale.group(0)), ""))
+        output = layout_merge.build_from_template(
+            source_text,
+            source.items,
+            keep=lambda i: source.items[i].key in keys,
+            render_item=lambda i: _render_source_element(
+                source, i, content[source.items[i].key], namespaces, markup_paths, nl
+            ),
+            extra_edits=extra_edits,
+        )
+        orphans = {k: content[k] for k in keys if k not in source_keys}
+    else:
+        target_text = target.text
+        namespaces = source.namespaces()
+        namespaces.update(target.namespaces())
+        nl = layout_merge.newline_of(target_text, layout_merge.newline_of(source_text))
+
+        edits = []
+        present = set()
+        for item, m in zip(target.items, target.matches):
+            if item.kind != layout_merge.ENTRY:
+                continue
+            present.add(item.key)
+            if item.key not in keys:
+                continue
+            value = content[item.key]
+            if m.group("tag") == "plurals":
+                if isinstance(value, dict):
+                    edits.extend(
+                        _plurals_edits(
+                            m, value, namespaces, _markup_quantities(markup_paths, item.key), nl, drop_missing=False
+                        )
+                    )
+            elif not isinstance(value, dict):
+                edit = _content_edit(m, "string", str(value), namespaces, (item.key,) in markup_paths)
+                if edit:
+                    edits.append(edit)
+
+        new_keys = keys - present
+        new_indices = []
+        placed = set()
+        for i, item in enumerate(source.items):
+            if item.kind == layout_merge.ENTRY and item.key in new_keys and item.key not in placed:
+                new_indices.append(i)
+                placed.add(item.key)
+        orphans = {k: content[k] for k in new_keys - placed}
+        if not edits and not new_indices and not orphans:
+            return
+
+        # A copied element may use a prefix (tools:) the target does not declare yet.
+        inserted = "".join(source.matches[i].group(0) for i in new_indices)
+        target_declared = target.declared()
+        declarations = "".join(
+            f' xmlns:{prefix}="{html.escape(uri, quote=True)}"'
+            for prefix, uri in source.declared().items()
+            if prefix not in target_declared and re.search(rf"[\s<]{re.escape(prefix)}:", inserted)
+        )
+        if declarations:
+            pos = target.open.end("attrs")
+            edits.append((pos, pos, declarations))
+
+        output = layout_merge.merge(
+            target_text,
+            target.items,
+            source_text,
+            source.items,
+            new_indices,
+            render_item=lambda i: _render_source_element(
+                source, i, content[source.items[i].key], namespaces, markup_paths, nl
+            ),
+            edits=edits,
+            # An empty <resources></resources> on one line: the closing tag gets its own line.
+            empty_insert=(target.open.end(), nl, "" if "\n" in target_text[target.open.end():] else nl),
+        )
+
+    try:
+        ET.fromstring(output.encode("utf-8"))
+    except ET.ParseError:
+        fallback()
+        return
+    with open(file_path, 'w', encoding='utf-8', newline='') as f:
+        f.write(output)
+    if orphans:
+        # Keys the source does not have (not expected): appended by the element-tree writer.
+        write_android_xml_file_in_place(file_path, orphans, set(orphans), source_file)

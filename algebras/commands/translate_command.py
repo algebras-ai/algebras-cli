@@ -957,16 +957,42 @@ def _process_all_files(
                                 source_content, source_language, target_lang
                             ),
                         )
-                        _write_translated_content(
+                        _write_layout_preserving(
                             target_file,
                             translated_content,
                             handler,
-                            set(translated_content),
-                            use_in_place=False,
-                            source_file=source_file,
-                            source_language=source_language,
-                            target_language=target_lang,
-                            config=config,
+                            source_file,
+                            source_language,
+                            target_lang,
+                            config,
+                            regenerate_from_scratch,
+                        )
+                        click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
+                    elif detect_format(source_file) == FileFormat.STRINGS:
+                        # iOS .strings: translated key by key (failed keys are left out), then
+                        # written keeping the target's layout, or the source's for a new file.
+                        handler = get_handler(source_file, config)
+                        source_content = handler.read_for_translation(
+                            source_file, source_language, config
+                        )
+                        translated_content = translator.translate_missing_keys_batch(
+                            source_content,
+                            {},
+                            list(source_content),
+                            target_lang,
+                            ui_safe,
+                            glossary_id,
+                            source_file_path=source_file,
+                        )
+                        _write_layout_preserving(
+                            target_file,
+                            translated_content,
+                            handler,
+                            source_file,
+                            source_language,
+                            target_lang,
+                            config,
+                            regenerate_from_scratch,
                         )
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     elif detect_format(source_file) == FileFormat.PO:
@@ -1756,6 +1782,37 @@ def _process_outdated_keys_files(
             )
 
 
+def _write_layout_preserving(
+    target_file: str,
+    content: Dict[str, Any],
+    handler,
+    source_file: str,
+    source_language: str,
+    target_language: str,
+    config,
+    regenerate_from_scratch: bool,
+) -> None:
+    """
+    Full translation of a .strings / Android strings.xml file. An existing target keeps its
+    layout (changed values replaced, new keys at their source position); a new one is built from
+    the source as a template. --regenerate-from-scratch writes the file sorted by key.
+    """
+    if regenerate_from_scratch:
+        handler.write(target_file, content, source_file=source_file)
+        return
+    _write_translated_content(
+        target_file,
+        content,
+        handler,
+        set(content),
+        use_in_place=os.path.exists(target_file),
+        source_file=source_file,
+        source_language=source_language,
+        target_language=target_language,
+        config=config,
+    )
+
+
 def _should_use_in_place(target_file: str, regenerate_from_scratch: bool) -> bool:
     """
     Determine if we should use in-place updates or regenerate from scratch.
@@ -2105,8 +2162,12 @@ def _write_translated_content(
         if source_file is None:
             raise ValueError("HTML write requires source_file")
         kwargs["source_file"] = source_file
-    elif format_type == FileFormat.XML:
-        kwargs["source_file"] = source_file  # markup and formatted="false" come from the source
+    elif format_type in (FileFormat.XML, FileFormat.STRINGS):
+        # XML: markup and formatted="false" come from the source. Both: the source is the layout
+        # template of a new file and gives new keys their position. Writing an existing file
+        # without in-place is --regenerate-from-scratch: sorted, as before.
+        kwargs["source_file"] = source_file
+        kwargs["preserve_layout"] = not os.path.exists(target_file)
     elif format_type == FileFormat.TS:
         kwargs["source_file"] = source_file  # quote style of each value ('…', "…" or `…`)
     elif format_type in (FileFormat.CSV, FileFormat.TSV):
