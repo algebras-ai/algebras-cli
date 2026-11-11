@@ -3,6 +3,7 @@ XLIFF (XML Localization Interchange File Format) file handler
 """
 
 import os
+import re
 import logging
 import xml.etree.ElementTree as ET
 from typing import Dict, Any, List, Optional
@@ -76,6 +77,10 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
     
     logger.debug(f"Writing XLIFF file with version {version}, target_state={target_state}")
     
+    # Inner XML of <source>/<target> elements, keyed by a marker set as their text while the
+    # document is pretty-printed (pretty-printing must not add whitespace inside mixed content).
+    inline_xml: Dict[str, str] = {}
+
     # Create XLIFF structure
     xliff_root = ET.Element('xliff')
     xliff_root.set('version', version)
@@ -130,13 +135,13 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                         unit_elem.set('id', unit['id'])
                         segment = ET.SubElement(unit_elem, 'segment')
                         source_elem = ET.SubElement(segment, 'source')
-                        source_elem.text = unit['source']
+                        _set_inline(source_elem, unit['source'], inline_xml)
                         target_elem = ET.SubElement(segment, 'target')
-                        target_elem.text = unit.get('target', unit['source'])
+                        target_ok = _set_inline(target_elem, unit.get('target', unit['source']), inline_xml, is_target=True)
                         # For XLIFF 2.0, state goes on segment, not target
                         # Only add state if unit explicitly has one and it's not empty
                         unit_state = unit.get('state')
-                        if unit_state and unit_state.strip():
+                        if target_ok and unit_state and unit_state.strip():
                             segment.set('state', unit_state)
                             logger.debug(f"Added state '{unit_state}' to segment for unit {unit.get('id', 'unknown')} (XLIFF 2.0)")
                     else:
@@ -144,13 +149,13 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                         trans_unit = ET.SubElement(container, 'trans-unit')
                         trans_unit.set('id', unit['id'])
                         source_elem = ET.SubElement(trans_unit, 'source')
-                        source_elem.text = unit['source']
+                        _set_inline(source_elem, unit['source'], inline_xml)
                         target_elem = ET.SubElement(trans_unit, 'target')
-                        target_elem.text = unit.get('target', unit['source'])
+                        target_ok = _set_inline(target_elem, unit.get('target', unit['source']), inline_xml, is_target=True)
                         # For XLIFF 1.2, state goes on target
                         # Only add state if unit explicitly has one and it's not empty
                         unit_state = unit.get('state')
-                        if unit_state and unit_state.strip():
+                        if target_ok and unit_state and unit_state.strip():
                             target_elem.set('state', unit_state)
                             logger.debug(f"Added state '{unit_state}' to target for unit {unit.get('id', 'unknown')} (XLIFF 1.2)")
     else:
@@ -164,11 +169,11 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
                 trans_unit = ET.SubElement(container, 'trans-unit')
                 trans_unit.set('id', key)
                 source_elem = ET.SubElement(trans_unit, 'source')
-                source_elem.text = value
+                _set_inline(source_elem, value, inline_xml)
                 target_elem = ET.SubElement(trans_unit, 'target')
-                target_elem.text = value
+                target_ok = _set_inline(target_elem, value, inline_xml, is_target=True)
                 # Add state if target_state is provided (for flat dict structure from new file creation)
-                if target_state:
+                if target_ok and target_state:
                     target_elem.set('state', target_state)
                     logger.debug(f"Added state '{target_state}' to target for unit {key} from flat dict (XLIFF 1.2)")
     
@@ -177,6 +182,11 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
     rough_string = ET.tostring(xliff_root, encoding='unicode', xml_declaration=True)
     reparsed = minidom.parseString(rough_string)
     pretty_xml = reparsed.toprettyxml(indent="  ", encoding='utf-8')
+    if inline_xml:
+        pretty_text = pretty_xml.decode('utf-8')
+        for marker, xml in inline_xml.items():
+            pretty_text = pretty_text.replace(marker, xml, 1)
+        pretty_xml = pretty_text.encode('utf-8')
     
     # Ensure the file is written correctly
     with open(file_path, 'wb') as f:
@@ -195,6 +205,29 @@ def write_xliff_file(file_path: str, content: Dict[str, Any],
     except Exception:
         # If verification fails, it's not critical - the file was still written
         pass
+
+
+def _set_inline(element: ET.Element, value: Optional[str], inline_xml: Dict[str, str], is_target: bool = False) -> bool:
+    """
+    Set a <source>/<target> from a flat string, turning inline markup back into elements.
+    Returns False if a target was left empty because its inline markup is malformed.
+    """
+    if not value:
+        element.text = value
+        return True
+    try:
+        xml = flat_to_file_xml(value)
+    except ValueError as e:
+        if is_target:
+            # Never write broken inline markup into a target: leave it empty (untranslated).
+            logger.warning(f"Not writing target with malformed inline elements: {e}")
+            element.text = ''
+            return False
+        xml = _escape_text(value)
+    marker = f"\ue000{len(inline_xml)}\ue001"
+    inline_xml[marker] = xml
+    element.text = marker
+    return True
 
 
 def extract_translatable_strings(xliff_content: Dict[str, Any]) -> Dict[str, str]:
@@ -257,6 +290,13 @@ def create_xliff_from_translations(translations: Dict[str, str],
     }
 
 
+def _translation_problem(source: str, translation: str) -> Optional[str]:
+    """Why `translation` must not be written as the target of `source` (None = OK)."""
+    from algebras.services.placeholders.formats.xliff import translation_problem
+
+    return translation_problem(source, translation)
+
+
 def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, str], 
                          source_content: Optional[Dict[str, Any]] = None,
                          target_state: Optional[str] = None,
@@ -294,6 +334,7 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
     
     # Track which unit IDs already exist in target
     existing_unit_ids = set()
+    source_by_id = extract_translatable_strings(source_content) if source_content else {}
     
     # Ensure 'files' structure exists
     if 'files' not in updated_content:
@@ -327,8 +368,20 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
                                 # Preserve existing target when in only-missing mode
                                 pass
                             else:
-                                # Update target (either not only-missing mode, or target is empty)
-                                unit['target'] = translations[unit_id]
+                                # Update target (either not only-missing mode, or target is empty),
+                                # unless the translation damaged inline elements or placeholders:
+                                # then the previous target (and state) stays.
+                                new_value = translations[unit_id]
+                                problem = None
+                                if new_value != unit.get('target'):
+                                    problem = _translation_problem(
+                                        source_by_id.get(unit_id, unit.get('source', '')), new_value
+                                    )
+                                if problem:
+                                    logger.warning(f"Not writing translation of unit {unit_id}: {problem}")
+                                    print(f"  ⚠ Kept the previous target of '{unit_id}': {problem}")
+                                else:
+                                    unit['target'] = new_value
                             
                             # For existing units, preserve existing state if present
                             # DO NOT add new state to existing units
@@ -360,6 +413,11 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
                             # This is a new unit from source, add it to target
                             # Check if we have a translation, otherwise use empty string (not source)
                             target_value = translations.get(source_unit_id, '')
+                            problem = _translation_problem(source_unit.get('source', ''), target_value) if target_value else None
+                            if problem:
+                                logger.warning(f"Not writing translation of unit {source_unit_id}: {problem}")
+                                print(f"  ⚠ Left '{source_unit_id}' untranslated: {problem}")
+                                target_value = ''
                             if not target_value:
                                 # No translation provided - this is important to detect
                                 logger.warning(f"No translation provided for new unit {source_unit_id}, using empty target")
@@ -369,8 +427,8 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
                                 'source': source_unit.get('source', ''),
                                 'target': target_value
                             }
-                            # Add state attribute if provided
-                            if target_state:
+                            # Add state attribute if provided (an untranslated unit gets none)
+                            if target_state and target_value:
                                 new_unit['state'] = target_state
                                 logger.debug(f"Added state '{target_state}' to new unit {source_unit_id} from source")
                             target_file_data['trans-units'].append(new_unit)
@@ -378,39 +436,212 @@ def update_xliff_targets(xliff_content: Dict[str, Any], translations: Dict[str, 
     return updated_content
 
 
+# ---------------------------------------------------------------------------
+# Inline content: <source>/<target> with inline elements <-> flat string
+# ---------------------------------------------------------------------------
+#
+# A <source> or <target> is read into one flat string: text runs as plain text (unescaped) and
+# inline elements as XML markup without namespace prefixes, e.g.
+#
+#     Hello <x id="INTERPOLATION" equiv-text="{{ name }}"/>, <g id="1">welcome</g>!
+#
+# (inside attribute values the braces are stored as private-use characters; see _FLAT_ATTR_CHARS). The
+# placeholder profile in algebras/services/placeholders/formats/xliff.py masks each inline element
+# (or each open/close tag of a paired element) as one opaque token, so the model never sees its
+# attributes. The writer turns the markup back into elements (build_inline_content), so <target>
+# never contains escaped "&lt;x .../&gt;".
+
+# Standalone inline elements (XLIFF 1.2 and 2.x).
+INLINE_STANDALONE = ("x", "bx", "ex", "ph", "bpt", "ept", "it", "sc", "ec", "sm", "em", "cp", "g", "pc", "mrk")
+# Elements whose content is native code (XLIFF 1.2), never translatable: masked whole.
+INLINE_NATIVE_CODE = ("ph", "bpt", "ept", "it", "sub")
+# Elements whose content is translatable text: open and close tags are masked separately.
+INLINE_PAIRED = ("g", "pc", "mrk")
+
+_NAME_END = r"(?=[\s/>])"
+# A whole element whose content is not translatable: 1.2 native code, or protected markers.
+INLINE_ATOMIC_PATTERN = (
+    r"<(?P<native>ph|bpt|ept|it)" + _NAME_END + r"[^<>]*(?<!/)>.*?</(?P=native)\s*>"
+    r"|<mrk" + _NAME_END + r"[^<>]*\b(?:mtype=\"protected\"|translate=\"no\")[^<>]*(?<!/)>.*?</mrk\s*>"
+    r"|<(?:" + "|".join(INLINE_STANDALONE) + r")" + _NAME_END + r"[^<>]*/>"
+)
+INLINE_OPEN_PATTERN = r"<(?:" + "|".join(INLINE_PAIRED) + r")" + _NAME_END + r"[^<>]*(?<!/)>"
+INLINE_CLOSE_PATTERN = r"</(?:" + "|".join(INLINE_PAIRED) + r")\s*>"
+
+_INLINE_TOKEN_RE = re.compile(
+    r"(?P<atomic>" + INLINE_ATOMIC_PATTERN + r")"
+    r"|(?P<open>" + INLINE_OPEN_PATTERN + r")"
+    r"|(?P<close>" + INLINE_CLOSE_PATTERN + r")",
+    re.DOTALL,
+)
+
+# Characters that mean something to ICU MessageFormat ("{", "}" and "#" in plural branches) are
+# replaced inside attribute values and native code in the flat string, so an Angular
+# equiv-text="{{ count }}" is never parsed as ICU syntax. Private-use characters are used because
+# every XML character reference contains "#". The writer maps them back.
+_FLAT_ATTR_CHARS = {"{": "\ue07b", "}": "\ue07d", "#": "\ue023"}
+# Whitespace in attribute values would otherwise be normalized to spaces when the markup is parsed.
+_FLAT_ATTR_WHITESPACE = {"\n": "\ue00a", "\t": "\ue009", "\r": "\ue00d"}
+_FLAT_ATTR_DECODE = {v: k for k, v in {**_FLAT_ATTR_CHARS, **_FLAT_ATTR_WHITESPACE}.items()}
+_XML_NS = "http://www.w3.org/XML/1998/namespace"
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else str(tag)
+
+
+def _attr_name(name: str) -> str:
+    if name.startswith("{" + _XML_NS + "}"):
+        return "xml:" + name.split("}", 1)[1]
+    return _local_name(name)
+
+
+def _escape_text(text: str, flat_native: bool = False) -> str:
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    if flat_native:
+        text = text.replace("'", "&apos;")
+        for ch, sub in _FLAT_ATTR_CHARS.items():
+            text = text.replace(ch, sub)
+    return text
+
+
+def _escape_attr(value: str, flat: bool) -> str:
+    value = _escape_text(value, flat_native=flat).replace('"', "&quot;")
+    if flat:
+        for ch, sub in _FLAT_ATTR_WHITESPACE.items():
+            value = value.replace(ch, sub)
+        return value
+    return value.replace("\n", "&#10;").replace("\t", "&#9;").replace("\r", "&#13;")
+
+
+def decode_flat(value: str) -> str:
+    """Undo the private-use substitution of the flat form (for display and attribute values)."""
+    for sub, ch in _FLAT_ATTR_DECODE.items():
+        value = value.replace(sub, ch)
+    return value
+
+
+def _open_tag(element: ET.Element, flat: bool, self_closing: bool = False) -> str:
+    attrs = "".join(f' {_attr_name(k)}="{_escape_attr(v, flat)}"' for k, v in element.attrib.items())
+    return f"<{_local_name(element.tag)}{attrs}{'/' if self_closing else ''}>"
+
+
+def serialize_inline(element: ET.Element, flat: bool = True, native: bool = False) -> str:
+    """
+    One inline element (without its tail) as markup.
+
+    flat=True gives the form used in the flat string: text inside paired elements stays plain
+    (it is translatable), attributes and native code are escaped and ICU-neutral.
+    flat=False gives normal XML for the file.
+    """
+    name = _local_name(element.tag)
+    native = native or name in INLINE_NATIVE_CODE or (
+        name == "mrk" and (element.get("mtype") == "protected" or element.get("translate") == "no")
+    )
+    if element.text is None and len(element) == 0 and name not in INLINE_PAIRED:
+        return _open_tag(element, flat, self_closing=True)
+    parts = [_open_tag(element, flat)]
+    parts.append(_serialize_runs(element, flat, native))
+    parts.append(f"</{name}>")
+    return "".join(parts)
+
+
+def _serialize_runs(element: ET.Element, flat: bool, native: bool) -> str:
+    """Text and children of `element` (not the element itself)."""
+
+    def text(value: Optional[str]) -> str:
+        if not value:
+            return ""
+        if flat and not native:
+            return value  # translatable text: plain
+        return _escape_text(value, flat_native=flat and native)
+
+    parts = [text(element.text)]
+    for child in element:
+        parts.append(serialize_inline(child, flat, native))
+        parts.append(text(child.tail))
+    return "".join(parts)
+
+
+def _decode_element(element: ET.Element) -> ET.Element:
+    for el in element.iter():
+        for k, v in list(el.attrib.items()):
+            el.set(k, decode_flat(v))
+        if el.text:
+            el.text = decode_flat(el.text)
+        if el.tail and el is not element:
+            el.tail = decode_flat(el.tail)
+    return element
+
+
+def _parse_markup(markup: str) -> ET.Element:
+    # The flat form may use the xml: prefix on attributes; it is predeclared in XML.
+    return _decode_element(ET.fromstring(markup))
+
+
+def build_inline_content(value: str) -> ET.Element:
+    """
+    Parse a flat string into a container element whose text/children are the inline content.
+
+    Raises ValueError if the inline markup is malformed or not properly nested.
+    """
+    root = ET.Element("content")
+    stack = [root]
+
+    def add_text(text: str) -> None:
+        if not text:
+            return
+        parent = stack[-1]
+        if len(parent):
+            parent[-1].tail = (parent[-1].tail or "") + text
+        else:
+            parent.text = (parent.text or "") + text
+
+    pos = 0
+    for m in _INLINE_TOKEN_RE.finditer(value or ""):
+        add_text(value[pos : m.start()])
+        pos = m.end()
+        markup = m.group(0)
+        try:
+            if m.group("atomic"):
+                stack[-1].append(_parse_markup(markup))
+            elif m.group("open"):
+                name = re.match(r"<([A-Za-z]+)", markup).group(1)
+                element = _parse_markup(markup + f"</{name}>")
+                stack[-1].append(element)
+                stack.append(element)
+            else:
+                name = re.match(r"</([A-Za-z]+)", markup).group(1)
+                if len(stack) == 1 or _local_name(stack[-1].tag) != name:
+                    raise ValueError(f"Unexpected closing tag {markup}")
+                stack.pop()
+        except ET.ParseError as e:
+            raise ValueError(f"Malformed inline element {markup}: {e}")
+    add_text((value or "")[pos:])
+    if len(stack) != 1:
+        raise ValueError(f"Unclosed inline element <{_local_name(stack[-1].tag)}>")
+    return root
+
+
+def flat_to_file_xml(value: str) -> str:
+    """Flat string -> inner XML of <source>/<target> (text escaped, inline elements as elements)."""
+    return _serialize_runs(build_inline_content(value), flat=False, native=False)
+
+
 def _extract_full_text_from_element(element: ET.Element) -> str:
     """
-    Extract full text content from an XML element including all child elements.
-    
-    This function recursively extracts text from an element and all its children,
-    preserving the structure of child elements like <ph>, <pc>, <sc>, <ec>, <mrk>.
-    
+    Read a <source>/<target> element into one flat string: plain text plus inline elements
+    (<x/>, <ph/>, <g>…</g>, <pc>…</pc>, <sc/>, <ec/>, <mrk>…</mrk> …) as markup.
+
     Args:
         element: XML element to extract text from
-        
+
     Returns:
         Full text content including child element representations
     """
     if element is None:
         return ''
-    
-    # Start with direct text content
-    text_parts = []
-    if element.text:
-        text_parts.append(element.text)
-    
-    # Process all child elements
-    for child in element:
-        # For XLIFF-specific tags, preserve them as XML strings
-        # This allows placeholders to be detected and validated
-        child_xml = ET.tostring(child, encoding='unicode')
-        text_parts.append(child_xml)
-        
-        # Add tail text after child
-        if child.tail:
-            text_parts.append(child.tail)
-    
-    return ''.join(text_parts).strip()
+    return _serialize_runs(element, flat=True, native=False).strip()
 
 
 def _parse_xliff_root(root: ET.Element) -> Dict[str, Any]:

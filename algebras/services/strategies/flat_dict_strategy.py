@@ -19,6 +19,7 @@ class FlatDictTranslationStrategy(TranslationStrategy):
         glossary_id: Optional[str] = None,
         on_batch_complete: Optional[Callable[[Dict[str, str], int], None]] = None,
         translate_text_func: Optional[Callable[[str, str, str, bool, str], str]] = None,
+        placeholder_profile=None,
     ) -> Dict[str, str]:
         """
         Translate a flat dictionary (key-value pairs where values are strings).
@@ -30,6 +31,7 @@ class FlatDictTranslationStrategy(TranslationStrategy):
             ui_safe: If True, ensures translation will be no more characters than original text
             glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
             on_batch_complete: Optional callback function called after each batch completes
+            placeholder_profile: Placeholder syntaxes to protect (default: generic profile)
 
         Returns:
             Translated dictionary
@@ -69,6 +71,7 @@ class FlatDictTranslationStrategy(TranslationStrategy):
             glossary_id=glossary_id,
             on_batch_complete=None,  # We'll handle callback after mapping to keys
             translate_text_func=translate_text_func,
+            **({"placeholder_profile": placeholder_profile} if placeholder_profile is not None else {}),
         )
 
         # Apply normalization to each translation and map back to keys

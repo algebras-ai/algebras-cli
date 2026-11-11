@@ -223,6 +223,13 @@ def verify(
     if _tags_balanced(src) and not _tags_balanced(tgt):
         problems.append(Problem("tags_unbalanced", "", "Markup tags are not properly opened/closed"))
 
+    checks = []
+    for syntax in profile.syntaxes:
+        if syntax.check is not None and syntax.check not in checks:
+            checks.append(syntax.check)
+    for check in checks:
+        problems = check(src, tgt, problems)
+
     return problems
 
 

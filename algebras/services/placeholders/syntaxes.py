@@ -8,7 +8,7 @@ can find and repair them.
 
 import re
 from dataclasses import dataclass
-from typing import Dict, Optional, Pattern
+from typing import Callable, Dict, Optional, Pattern
 
 # Kinds whose relative order must stay the same when they are not positional
 # (printf-style "%s ... %d" fills arguments by position in the string).
@@ -21,6 +21,10 @@ class Syntax:
     kind: str
     pattern: Pattern[str]
     lenient: Optional[Pattern[str]] = None
+    # Optional format-specific check run by verify() when the profile uses this syntax:
+    # (source placeholders, target placeholders, problems so far) -> problems. It may add problems
+    # (e.g. XLIFF pairing/nesting) or refine existing ones (missing + extra -> attribute changed).
+    check: Optional[Callable] = None
 
 
 _PRINTF_FLAGS = r"[-+0#,]*"
