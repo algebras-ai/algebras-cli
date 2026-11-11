@@ -284,3 +284,19 @@ def test_profile_resolver_is_used_and_cached(tmp_path):
     assert profile_for_path(str(f)).name == "resolved"
     assert profile_for_path(str(f)).name == "resolved"
     assert len(calls) == 1
+
+
+def test_healthcheck_reports_codes_added_by_format_checks():
+    from algebras.services.placeholders.syntaxes import SYNTAXES, Syntax
+    from algebras.utils.translation_validator import check_placeholders
+    import re
+
+    def check(src, tgt, problems):
+        from algebras.services.placeholders import Problem
+        return problems + [Problem("custom_code", "@@x", "custom problem")]
+
+    SYNTAXES["test_custom"] = Syntax(name="test_custom", kind="named", pattern=re.compile(r"@@\w+"), check=check)
+    profile = PlaceholderProfile(name="t", syntax_names=("test_custom",))
+    issues = check_placeholders("Hi @@x", "Привет @@x", "k", profile)
+    assert [(i.severity, i.message) for i in issues] == [("error", "custom problem")]
+    del SYNTAXES["test_custom"]

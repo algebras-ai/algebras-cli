@@ -192,8 +192,9 @@ def check_placeholders(source: str, target: str, key: Optional[str] = None, prof
 
     issues = []
     for problem in verify(source, target, profile or GENERIC_PROFILE):
-        severity = _PLACEHOLDER_SEVERITY.get(problem.code)
-        if severity is None or problem.placeholder.startswith('<'):
+        # Codes added by format modules (e.g. mf_type_changed, inline_attr_changed) are errors.
+        severity = _PLACEHOLDER_SEVERITY.get(problem.code, 'error')
+        if problem.code == 'tags_unbalanced' or problem.placeholder.startswith('<'):
             continue  # tags: reported by check_html_xml_tags
         if problem.code == 'missing':
             message = f'Missing placeholder in translation: {problem.placeholder}'
