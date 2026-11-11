@@ -391,8 +391,9 @@ def find_outdated_keys(
             source_value = get_key_value(source_data, key)
             target_value = get_key_value(target_data, key)
 
-            # Only consider keys with different values
-            if source_value != target_value:
+            # Only leaf string keys with different values: a parent mapping (`en`, `en.nav`)
+            # differs whenever anything under it does, but it is not a key to retranslate.
+            if isinstance(source_value, str) and source_value != target_value:
                 different_value_keys.append(key)
 
         # If there are no keys with different values, we're done
