@@ -760,7 +760,8 @@ class TestTranslateCommand:
 
             # Verify translation was attempted
             assert mock_translator.translate_missing_keys_batch.called, "Translation should be attempted for missing keys"
-            assert mock_handler.write.called
+            # The target exists, so it is updated in place (its layout is kept).
+            assert mock_handler.write_in_place.called
 
     def test_default_mode_skips_complete_files_with_newer_mtime(self):
         """
