@@ -340,7 +340,9 @@ def test_non_ascii_target_with_unicode_escapes_keeps_placeholders(source_file, m
 
     text = open(target, encoding="utf-8").read()
     assert text.isascii() and "\\u" in text  # the file keeps its \uXXXX convention
-    assert text.startswith("# translated\nplain=\\u0425")
+    assert text.startswith("# translated\n")
+    # The existing entry stays as written; new keys go to their source position (before it).
+    assert text.endswith("\nplain=\\u0425\\u043E\\u0440\\u043E\\u0448\\u043E\n")
     written = read_properties_file(target)
     assert "{0}" in written["welcome"] and re.search("[А-я]", written["welcome"])
     assert written["price"].startswith("{0,number,#.##}")

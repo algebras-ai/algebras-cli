@@ -265,13 +265,87 @@ def _top_level_entries(text: str) -> Tuple[List[Tuple[str, int, int, int]], int,
         raise ValueError(f"Expected ',' or '}}' at position {i}")
 
 
+def target_locale(file_path: str, target_language: Optional[str]) -> Optional[str]:
+    """The "@@locale" of a target file: the locale in its name, else the target language code."""
+    return locale_from_filename(file_path) or (target_language.replace("-", "_") if target_language else None)
+
+
+def _messages(content: Dict[str, Any], keys=None) -> Dict[str, str]:
+    """Translated messages to write: strings of non-`@` keys. An empty value is a message left out
+    (placeholders rejected), unless its source text is empty too (checked by the caller)."""
+    return {
+        k: v
+        for k, v in content.items()
+        if not k.startswith("@") and isinstance(v, str) and (keys is None or k in keys)
+    }
+
+
+def update_arb_preserving(
+    file_path: str,
+    content: Dict[str, Any],
+    keys_to_update=None,
+    source_file: Optional[str] = None,
+) -> None:
+    """
+    Set the translated messages of an existing ARB file, changing only those values. A message the
+    file lacks is inserted at its position in the source, with the source's `@key` metadata after
+    it. Everything else (other entries, metadata, order, indentation, line endings) stays as is.
+    """
+    from algebras.utils.json_layout import merge_json_file
+
+    data = read_arb_file(file_path)
+    source = read_arb_file(source_file) if source_file and os.path.exists(source_file) else None
+    desired = dict(data)
+    for key, value in _messages(content, keys_to_update).items():
+        if value or (source is not None and source.get(key) == ""):
+            desired[key] = value
+    if source is not None:
+        for key in list(desired):
+            meta = "@" + key
+            if not key.startswith("@") and key not in data and meta in source and meta not in desired:
+                desired[meta] = source[meta]
+    merge_json_file(file_path, desired, order=source)
+
+
+def write_arb_from_template(
+    file_path: str,
+    content: Dict[str, Any],
+    source_file: str,
+    target_language: Optional[str] = None,
+) -> None:
+    """
+    Write a new ARB file in the layout of the source: same order, indentation and `@key` metadata,
+    "@@locale" set to the target locale. Messages left untranslated are left out, with their metadata.
+    """
+    from algebras.utils.json_layout import merge_json_file
+
+    source = read_arb_file(source_file)
+    messages = _messages(content)
+    kept = {k for k, v in messages.items() if k in source and (v or source.get(k) == "")}
+    desired: Dict[str, Any] = {}
+    for key, value in source.items():
+        if key == "@@locale":
+            desired[key] = target_locale(file_path, target_language) or value
+        elif key.startswith("@@"):
+            desired[key] = value
+        elif key.startswith("@"):
+            message = key[1:]
+            if message in kept or not isinstance(source.get(message), str):
+                desired[key] = value
+        elif key in kept:
+            desired[key] = messages[key]
+        elif not isinstance(value, str):
+            desired[key] = value
+    merge_json_file(file_path, desired, order=source, template_path=source_file)
+
+
 def update_arb_values(file_path: str, values: Dict[str, str], add_missing: bool = True) -> List[str]:
     """
     Set string values in an existing ARB file, changing only those values: key order, indentation,
     the escaping of other entries and `@` metadata stay byte for byte. Keys not in the file are
     appended at the end (add_missing) or returned as not found.
     """
-    with open(file_path, "r", encoding="utf-8") as f:
+    with open(file_path, "r", encoding="utf-8", newline="") as f:
         text = f.read()
     entries, open_brace, close_brace = _top_level_entries(text)
     positions = {key: (start, end) for key, _, start, end in entries}
@@ -308,6 +382,6 @@ def update_arb_values(file_path: str, values: Dict[str, str], add_missing: bool 
     if edits:
         for start, end, replacement in sorted(edits, key=lambda e: e[0], reverse=True):
             text = text[:start] + replacement + text[end:]
-        with open(file_path, "w", encoding="utf-8") as f:
+        with open(file_path, "w", encoding="utf-8", newline="") as f:
             f.write(text)
     return not_found

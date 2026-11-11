@@ -383,11 +383,158 @@ def _normalize_key(key: str) -> str:
     return key.strip()
 
 
-def write_csv_file_in_place(file_path: str, translations: Dict[str, str], 
-                            target_language: str, keys_to_update: Optional[Set[str]] = None) -> None:
+class _LayoutMismatch(ValueError):
+    """The file's cells could not be mapped to what csv.reader reads: rewrite it instead."""
+
+
+def write_csv_file_in_place(file_path: str, translations: Dict[str, str],
+                            target_language: str, keys_to_update: Optional[Set[str]] = None,
+                            key_order: Optional[List[str]] = None) -> None:
     """
-    Update an existing CSV file in-place, preserving structure, formatting, and other language columns.
-    
+    Update an existing CSV file in place, changing only the cells whose value changed.
+
+    The delimiter, the quoting of every cell, line endings, blank lines, the trailing newline, the
+    encoding and every other cell stay byte for byte. A missing language column is added at the
+    end of each row. A key the file lacks is added as a row at its position in `key_order` (the
+    source's keys), else at the end. Files whose cells cannot be mapped are rewritten.
+
+    Args:
+        file_path: Path to the CSV file to update
+        translations: Dictionary of key-value translation pairs to update
+        target_language: Language code for the column to update
+        keys_to_update: Optional set of keys to update. If None, all keys in translations will be updated.
+        key_order: Optional source key order, for placing new rows
+    """
+    if os.path.exists(file_path):
+        try:
+            _write_csv_cells(file_path, translations, target_language, keys_to_update, key_order)
+            return
+        except _LayoutMismatch:
+            pass
+    rewrite_csv_file_in_place(file_path, translations, target_language, keys_to_update)
+
+
+def _write_csv_cells(file_path: str, translations: Dict[str, str], target_language: str,
+                     keys_to_update: Optional[Set[str]], key_order: Optional[List[str]]) -> None:
+    import io
+
+    from algebras.services.placeholders.formats.csv_format import _read_text, _render, cell_spans
+
+    text, encoding = _read_text(file_path)
+    delimiter = _get_delimiter(file_path)
+    spans = [row for row in cell_spans(text, delimiter) if row]
+    parsed = [row for row in csv.reader(io.StringIO(text, newline=""), delimiter=delimiter) if row]
+    if not parsed or len(spans) != len(parsed) or any(len(s) != len(p) for s, p in zip(spans, parsed)):
+        raise _LayoutMismatch(file_path)
+    headers = parsed[0]
+    if len(headers) < 2:
+        raise _LayoutMismatch(file_path)
+
+    newline = "\r\n" if "\r\n" in text else ("\r" if "\r" in text and "\n" not in text else "\n")
+    cells = [cell for row in spans for cell in row if cell.end > cell.start]
+    all_quoted = bool(cells) and all(cell.quoted for cell in cells)
+
+    def render(value: str) -> str:
+        return _render(value, delimiter, all_quoted)
+
+    matching = _find_matching_column(headers[1:], target_language)
+    new_column = matching is None
+    column = len(headers) if new_column else headers.index(matching, 1)
+    width = len(headers) + (1 if new_column else 0)
+
+    # Last row wins for duplicate keys, as csv.reader-based reading does.
+    row_of: Dict[str, int] = {}
+    for index, row in enumerate(parsed[1:], start=1):
+        key = _normalize_key(row[0])
+        if key:
+            row_of[key] = index
+
+    values: Dict[str, str] = {}
+    for original_key, value in translations.items():
+        key = _normalize_key(original_key)
+        if not key:
+            continue
+        if keys_to_update is not None and key not in keys_to_update and original_key not in keys_to_update:
+            continue
+        values[key] = value
+
+    # (position, priority, end, replacement); at one position a new row goes after a new cell.
+    edits: List[Tuple[int, int, int, str]] = []
+
+    def extend_row(index: int, value: str) -> None:
+        """Pad row `index` with empty cells up to the target column and append `value` there."""
+        row_end = spans[index][-1].end
+        missing = column - len(spans[index])
+        edits.append((row_end, 0, row_end, delimiter * (missing + 1) + (render(value) if value else "")))
+
+    if new_column:
+        header_cell = render(target_language)
+        row_end = spans[0][-1].end
+        edits.append((row_end, 0, row_end, delimiter * (column - len(spans[0]) + 1) + header_cell))
+
+    for index in range(1, len(parsed)):
+        row = parsed[index]
+        key = _normalize_key(row[0])
+        value = values.get(key) if key and row_of.get(key) == index else None
+        if len(row) <= column:
+            if new_column or value is not None:
+                extend_row(index, value or "")
+            continue
+        if new_column or value is None or row[column] == value or row[column].strip() == value:
+            continue
+        cell = spans[index][column]
+        raw = text[cell.start : cell.end]
+        current = next(csv.reader(io.StringIO(raw, newline=""), delimiter=delimiter), [""])
+        if (current[0] if current else "") != row[column]:
+            raise _LayoutMismatch(file_path)
+        edits.append((cell.start, 0, cell.end, _render(value, delimiter, cell.quoted)))
+
+    # Keys the file lacks: new rows at their source position.
+    new_keys = [k for k in values if k not in row_of]
+    if new_keys:
+        order = [_normalize_key(k) for k in (key_order or [])]
+        positions = {k: i for i, k in enumerate(order)}
+        new_keys.sort(key=lambda k: (k not in positions, positions.get(k, 0)))
+        after: Dict[int, List[str]] = {}
+        before: Dict[int, List[str]] = {}
+        for key in new_keys:
+            row_cells = [key] + [""] * (width - 1)
+            row_cells[column] = values[key]
+            rendered = delimiter.join(render(c) if c else "" for c in row_cells)
+            index = None
+            if key in positions:
+                prev = next((k for k in reversed(order[: positions[key]]) if k in row_of), None)
+                nxt = next((k for k in order[positions[key] + 1 :] if k in row_of), None)
+                if prev is not None:
+                    after.setdefault(row_of[prev], []).append(rendered)
+                    continue
+                if nxt is not None:
+                    index = row_of[nxt]
+                    before.setdefault(index, []).append(rendered)
+                    continue
+            after.setdefault(len(parsed) - 1, []).append(rendered)
+        for index, rows in after.items():
+            position = spans[index][-1].end
+            edits.append((position, 1, position, "".join(newline + r for r in rows)))
+        for index, rows in before.items():
+            position = spans[index][0].start
+            edits.append((position, 2, position, "".join(r + newline for r in rows)))
+
+    if not edits:
+        return
+    # Apply from the end; at one position: the cell appended to a row, then rows inserted after it.
+    for start, _, end, replacement in sorted(edits, key=lambda e: (e[0], e[1]), reverse=True):
+        text = text[:start] + replacement + text[end:]
+    with open(file_path, "w", encoding=encoding, newline="") as f:
+        f.write(text)
+
+
+def rewrite_csv_file_in_place(file_path: str, translations: Dict[str, str],
+                              target_language: str, keys_to_update: Optional[Set[str]] = None) -> None:
+    """
+    Update a CSV file by rewriting it with csv.writer (regenerate-from-scratch, and files whose
+    cells cannot be mapped): other language columns and row order are kept, formatting is not.
+
     Args:
         file_path: Path to the CSV file to update
         translations: Dictionary of key-value translation pairs to update
