@@ -2222,6 +2222,8 @@ def _write_translated_content(
         # without in-place is --regenerate-from-scratch: sorted, as before.
         kwargs["source_file"] = source_file
         kwargs["preserve_layout"] = not regenerate_from_scratch and not os.path.exists(target_file)
+        if format_type == FileFormat.XML:
+            kwargs["target_language"] = target_language  # tools:locale of a new file
     elif format_type == FileFormat.TS:
         kwargs["source_file"] = source_file  # quote style of each value ('…', "…" or `…`)
     elif format_type == FileFormat.YAML:

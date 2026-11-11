@@ -276,7 +276,7 @@ XML_SOURCE = (
 XML_EXPECTED_RU = (
     '<?xml version="1.0" encoding="utf-8"?>\r\n'
     '<resources xmlns:tools="http://schemas.android.com/tools"\r\n'
-    '    xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">\r\n'
+    '    xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2" tools:locale="ru">\r\n'
     "    <!-- Login -->\r\n"
     '    <string name="login_title">SIGN IN</string>\r\n'
     '    <string name="login_hint" tools:ignore="MissingTranslation">IT\\\'S YOUR E-MAIL</string>\r\n'

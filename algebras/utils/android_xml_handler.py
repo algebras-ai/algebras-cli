@@ -1200,11 +1200,25 @@ def _wants_value(key: str, value: Any) -> bool:
     return value is not None and not isinstance(value, (dict, list))
 
 
+def target_tools_locale(file_path: str, language: Optional[str]) -> Optional[str]:
+    """
+    tools:locale for a new target: the qualifier of its values-<qualifier> folder ("ru",
+    "pt-rBR", "b+zh+Hans"), else the qualifier for `language`, else None.
+    """
+    from algebras.utils.path_utils import android_qualifier
+
+    folder = os.path.basename(os.path.dirname(os.path.abspath(file_path)))
+    if folder.startswith("values-") and len(folder) > len("values-"):
+        return folder[len("values-"):]
+    return android_qualifier(language) if language else None
+
+
 def write_android_xml_preserving_layout(
     file_path: str,
     content: Dict[str, Any],
     source_file: str,
     keys_to_update: Optional[Set[str]] = None,
+    language: Optional[str] = None,
 ) -> None:
     """
     Write translations keeping the file's layout.
@@ -1219,7 +1233,8 @@ def write_android_xml_preserving_layout(
     comments, blank lines, plural item order), each value replaced by its translation. Strings
     missing from `content` (left untranslated, translatable="false", references) and resources
     that are not strings are left out. tools:locale on <resources> names the source language, so
-    it is not copied.
+    it is set to the target's locale (see target_tools_locale), or dropped when that is unknown.
+    An existing target's tools:locale is left as it is.
 
     Falls back to the element-tree writers if a file cannot be handled as text.
 
@@ -1228,6 +1243,7 @@ def write_android_xml_preserving_layout(
         content: {name: value, "name.__plurals__": {quantity: value}}
         source_file: Source-language strings.xml (template and positions of new keys)
         keys_to_update: Keys to write; None for every key in content
+        language: Target language (for tools:locale of a new file)
     """
     from algebras.utils import layout_merge
 
@@ -1264,7 +1280,10 @@ def write_android_xml_preserving_layout(
         locale = _TOOLS_LOCALE.search(source.open.group("attrs") or "")
         if locale:
             start = source.open.start("attrs") + locale.start()
-            extra_edits.append((start, start + len(locale.group(0)), ""))
+            target_locale = target_tools_locale(file_path, language)
+            whitespace = re.match(r"\s+", locale.group(0)).group(0)
+            replacement = f'{whitespace}tools:locale="{html.escape(target_locale, quote=True)}"' if target_locale else ""
+            extra_edits.append((start, start + len(locale.group(0)), replacement))
         output = layout_merge.build_from_template(
             source_text,
             source.items,
