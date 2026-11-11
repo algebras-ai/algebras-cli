@@ -72,7 +72,8 @@ PYTHON_PERCENT = Syntax(
 RUBY = Syntax(
     name="ruby",
     kind="named",
-    pattern=re.compile(r"%\{[^{}\s]+\}|%<[^<>\s]+>[-+ 0#]*\d*(?:\.\d+)?[a-zA-Z]"),
+    # %<name>s: the name is an identifier, so "50%</b> off" is not a reference.
+    pattern=re.compile(r"%\{[^{}\s]+\}|%<[A-Za-z_][A-Za-z0-9_]*>[-+ 0#]*\d*(?:\.\d+)?[a-zA-Z]"),
     lenient=re.compile(r"[%％]\s?\{\s*[^{}]+?\s*\}"),
 )
 
@@ -116,6 +117,8 @@ CHROME = Syntax(
     name="chrome",
     kind="named",
     pattern=re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*\$|\$[1-9]"),
+    # A translated or transliterated name ("$ПОЛЬЗОВАТЕЛЬ$"), fullwidth "＄", non-ASCII digits.
+    lenient=re.compile(r"[$＄]\s?[^\W\d]\w*\s?[$＄]|[$＄][^\x00-\x7f\D]|＄[1-9]"),
 )
 
 # Opening, closing and self-closing markup tags (HTML, <b>, <xliff:g>, <x/>, <ph/> ...).
