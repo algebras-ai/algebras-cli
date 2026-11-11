@@ -102,6 +102,26 @@ def read_language_file(
         raise ValueError(f"Unsupported file format: {file_path}")
 
 
+def align_target_data(
+    source_file: str,
+    source_data: Any,
+    target_data: Any,
+    source_language: Optional[str] = None,
+    target_language: Optional[str] = None,
+    config: Optional[Any] = None,
+) -> Any:
+    """
+    Target data with keys comparable to the source's. For a Rails-style YAML pair (`en:` / `ru:`
+    root key) the target is keyed under the source root, so `en.greeting` matches `ru.greeting`;
+    see algebras.utils.yaml_locale_root. Any other file is returned as it is.
+    """
+    if not source_file.lower().endswith((".yaml", ".yml")):
+        return target_data
+    from algebras.utils.yaml_locale_root import align_target
+
+    return align_target(source_data, target_data, source_language, target_language, config)
+
+
 def extract_all_keys(data: Dict[str, Any], prefix: str = "") -> Set[str]:
     """
     Extract all keys from a nested dictionary, including nested keys and array elements.
@@ -259,6 +279,9 @@ def validate_language_files(
             target_data = read_language_file(target_file, target_language, config)
         else:
             target_data = read_language_file(target_file)
+        target_data = align_target_data(
+            source_file, source_data, target_data, source_language, target_language, config
+        )
 
         # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff, .csv, .tsv)
         # These formats return flat key-value dictionaries rather than nested structures
@@ -310,7 +333,13 @@ def validate_language_files(
         return False, set()
 
 
-def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[str]]:
+def find_outdated_keys(
+    source_file: str,
+    target_file: str,
+    source_language: Optional[str] = None,
+    target_language: Optional[str] = None,
+    config: Optional[Any] = None,
+) -> Tuple[bool, Set[str]]:
     """
     Find keys that exist in both source and target files but might be outdated.
     This checks if the value is different and if the source key was modified more recently than the target.
@@ -318,6 +347,8 @@ def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[st
     Args:
         source_file: Path to the source language file
         target_file: Path to the target language file
+        source_language / target_language / config: Optional; pair Rails-style YAML root keys
+            (`en:` / `ru:`) strictly by locale. Keys are returned in source terms (`en.greeting`).
 
     Returns:
         Tuple of (has_outdated_keys, outdated_keys)
@@ -329,7 +360,10 @@ def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[st
             return False, set()
 
         source_data = read_language_file(source_file)
-        target_data = read_language_file(target_file)
+        raw_target_data = read_language_file(target_file)
+        target_data = align_target_data(
+            source_file, source_data, raw_target_data, source_language, target_language, config
+        )
 
         source_keys = extract_all_keys(source_data)
         target_keys = extract_all_keys(target_data)
@@ -360,9 +394,17 @@ def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[st
         source_dates = get_keys_last_modifications_batch(
             source_file, different_value_keys
         )
-        target_dates = get_keys_last_modifications_batch(
-            target_file, different_value_keys
+        # A Rails target names its keys under its own root (ru.greeting for en.greeting).
+        target_names = {key: key for key in different_value_keys}
+        if target_data is not raw_target_data:
+            from algebras.utils.yaml_locale_root import locale_root, target_key
+
+            s_root, t_root = locale_root(source_data), locale_root(raw_target_data)
+            target_names = {key: target_key(key, s_root, t_root) for key in different_value_keys}
+        target_dates_by_name = get_keys_last_modifications_batch(
+            target_file, list(target_names.values())
         )
+        target_dates = {key: target_dates_by_name.get(name) for key, name in target_names.items()}
 
         # Compare the dates for each key - this is O(n) but very fast since it's just dict lookups
         for key in different_value_keys:

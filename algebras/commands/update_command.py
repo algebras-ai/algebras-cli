@@ -100,6 +100,13 @@ def _plural_target(source_file: str, lang: str) -> Optional[str]:
     return lang if source_file.endswith(".stringsdict") else None
 
 
+def _yaml_pair_kwargs(source_file: str, source_language: str, lang: str, config) -> Dict:
+    # Rails-style YAML (`en:` / `ru:` root key): the languages and locale mapping pair the roots.
+    if not source_file.lower().endswith((".yaml", ".yml")):
+        return {}
+    return {"source_language": source_language, "target_language": lang, "config": config}
+
+
 def identify_translation_issues(
     languages: List[str], 
     source_language: str, 
@@ -108,7 +115,8 @@ def identify_translation_issues(
     check_missing_keys: bool = True, 
     check_git_outdated_keys: bool = True,
     concurrent_processing: bool = False,
-    verbose: bool = False
+    verbose: bool = False,
+    config=None,
 ) -> Tuple[Dict[str, List[Tuple[str, str]]], Dict[str, List[Tuple[str, Set[str], str]]], Dict[str, List[Tuple[str, Set[str], str]]]]:
     """
     Identify all translation issues across specified languages.
@@ -122,6 +130,7 @@ def identify_translation_issues(
         check_git_outdated_keys: Whether to check for outdated keys using git
         concurrent_processing: Whether to use concurrent processing
         verbose: Whether to show detailed logs
+        config: Config (locale mapping for Rails-style YAML root keys)
         
     Returns:
         Tuple containing dictionaries of:
@@ -187,14 +196,21 @@ def identify_translation_issues(
             if check_missing_keys:
                 # #endregion
                 is_valid, missing_keys = validate_language_files(
-                    src_file, tgt_file, target_language=_plural_target(src_file, lang)
+                    src_file,
+                    tgt_file,
+                    **{
+                        "target_language": _plural_target(src_file, lang),
+                        **_yaml_pair_kwargs(src_file, source_language, lang, config),
+                    },
                 )
                 if not is_valid:
                     results["missing_keys"] = missing_keys
             
             # Check for outdated keys using git history
             if check_git_outdated_keys and git_available and is_git_repository(os.path.dirname(src_file)):
-                has_outdated_keys, outdated_keys = find_outdated_keys(src_file, tgt_file)
+                has_outdated_keys, outdated_keys = find_outdated_keys(
+                    src_file, tgt_file, **_yaml_pair_kwargs(src_file, source_language, lang, config)
+                )
                 if has_outdated_keys:
                     results["outdated_keys"] = outdated_keys
             
@@ -283,7 +299,12 @@ def identify_translation_issues(
                         if verbose:
                             click.echo(f"{Fore.BLUE}Validating language file for missing keys...\x1b[0m")
                         is_valid, missing_keys = validate_language_files(
-                            source_file, lang_file, target_language=_plural_target(source_file, lang)
+                            source_file,
+                            lang_file,
+                            **{
+                                "target_language": _plural_target(source_file, lang),
+                                **_yaml_pair_kwargs(source_file, source_language, lang, config),
+                            },
                         )
                         if not is_valid:
                             if verbose:
@@ -296,7 +317,9 @@ def identify_translation_issues(
                     if check_git_outdated_keys and git_available and is_git_repository(os.path.dirname(source_file)):
                         if verbose:
                             click.echo(f"{Fore.BLUE}Checking for outdated keys using git history...\x1b[0m")
-                        has_outdated_keys, outdated_keys = find_outdated_keys(source_file, lang_file)
+                        has_outdated_keys, outdated_keys = find_outdated_keys(
+                            source_file, lang_file, **_yaml_pair_kwargs(source_file, source_language, lang, config)
+                        )
                         if has_outdated_keys:
                             if verbose:
                                 click.echo(f"{Fore.YELLOW}Found {len(outdated_keys)} outdated keys based on git history\x1b[0m")
@@ -409,7 +432,8 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
             check_missing_keys=True,
             check_git_outdated_keys=git_validation,
             concurrent_processing=False,  # Keep sequential for backward compatibility
-            verbose=verbose
+            verbose=verbose,
+            config=config,
         )
         
         # Count outdated and missing keys files
@@ -629,7 +653,8 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False, only_missi
             check_missing_keys=True,
             check_git_outdated_keys=not only_missing,
             concurrent_processing=True,  # Use concurrent processing for CI
-            verbose=verbose
+            verbose=verbose,
+            config=config,
         )
         
         # Count missing and outdated keys files

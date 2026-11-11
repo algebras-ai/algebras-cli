@@ -44,8 +44,8 @@ FORMATS = {
         "config/locales/en.yml",
         "config/locales/%algebras_locale_code%.yml",
         "en:\n  ok: Hello\n  bad: \"Hi %{name}\"\n",
-        ("en", "ok"),
-        ("en", "bad"),
+        ("uz", "ok"),  # paths in the target file: Rails roots it at its own locale
+        ("uz", "bad"),
     ),
     "ts": (
         "src/i18n/en.ts",

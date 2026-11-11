@@ -11,7 +11,12 @@ from collections import defaultdict
 
 from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
-from algebras.utils.lang_validator import read_language_file, extract_all_keys, get_key_value
+from algebras.utils.lang_validator import (
+    align_target_data,
+    extract_all_keys,
+    get_key_value,
+    read_language_file,
+)
 from algebras.utils.html_handler import read_html_file
 from algebras.utils.translation_validator import validate_translation, Issue
 from algebras.utils.path_utils import resolve_destination_path
@@ -258,6 +263,10 @@ def validate_file_pair(source_file: str, target_file: str, source_language: str,
             
             source_data = read_language_file(source_file, source_lang, config)
             target_data = read_language_file(target_file, target_lang, config)
+            # Rails-style YAML: compare under each file's own root key (en.greeting ~ ru.greeting)
+            target_data = align_target_data(
+                source_file, source_data, target_data, source_language, target_language, config
+            )
             
             # Handle flat dictionary formats
             if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv', '.arb', '.properties', '.xlsx')):
