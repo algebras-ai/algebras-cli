@@ -181,6 +181,7 @@ class AlgebrasAIClient:
         ui_safe: bool = False,
         glossary_id: str = "",
         contexts: Optional[List[Optional[str]]] = None,
+        ignore_cache: Optional[bool] = None,
     ) -> List[str]:
         """
         Translate multiple texts using the Algebras AI batch API.
@@ -196,6 +197,9 @@ class AlgebrasAIClient:
             ui_safe: If True, ensures translation will be no more characters than original text
             glossary_id: Glossary ID to use for translation
             contexts: Optional per-text translator notes, aligned by index with texts
+            ignore_cache: Bypass the API's translation cache for this call only (None: use the
+                client's ignore_cache setting). It is not stored on the client, so it never
+                affects later or concurrent calls.
 
         Returns:
             List of translated texts (raw, without normalization)
@@ -206,10 +210,10 @@ class AlgebrasAIClient:
         """
         if self.sync_batch:
             return self._translate_batch_sync(
-                texts, source_lang, target_lang, ui_safe, glossary_id, contexts
+                texts, source_lang, target_lang, ui_safe, glossary_id, contexts, ignore_cache
             )
         return self._translate_batch_async(
-            texts, source_lang, target_lang, ui_safe, glossary_id, contexts
+            texts, source_lang, target_lang, ui_safe, glossary_id, contexts, ignore_cache
         )
 
     @staticmethod
@@ -327,6 +331,7 @@ class AlgebrasAIClient:
         ui_safe: bool = False,
         glossary_id: str = "",
         contexts: Optional[List[Optional[str]]] = None,
+        ignore_cache: Optional[bool] = None,
     ) -> List[str]:
         """Legacy blocking batch translation call (translate-batch)."""
         api_key = os.environ.get("ALGEBRAS_API_KEY")
@@ -358,7 +363,7 @@ class AlgebrasAIClient:
             "glossaryId": glossary_id,
             "prompt": self.custom_prompt,
             "flag": ui_safe,
-            "ignoreCache": self.ignore_cache,
+            "ignoreCache": self.ignore_cache if ignore_cache is None else ignore_cache,
         }
         non_empty_contexts = self._align_contexts(contexts, index_mapping)
         if non_empty_contexts:
@@ -409,6 +414,7 @@ class AlgebrasAIClient:
         ui_safe: bool = False,
         glossary_id: str = "",
         contexts: Optional[List[Optional[str]]] = None,
+        ignore_cache: Optional[bool] = None,
     ) -> List[str]:
         """
         Submit a batch translation job (translate-batch-async) and poll for
@@ -442,7 +448,7 @@ class AlgebrasAIClient:
             "glossaryId": glossary_id,
             "prompt": self.custom_prompt,
             "flag": ui_safe,
-            "ignoreCache": self.ignore_cache,
+            "ignoreCache": self.ignore_cache if ignore_cache is None else ignore_cache,
         }
         non_empty_contexts = self._align_contexts(contexts, index_mapping)
         if non_empty_contexts:

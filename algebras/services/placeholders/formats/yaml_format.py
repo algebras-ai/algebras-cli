@@ -245,6 +245,66 @@ def prepare_for_translation(
     )
 
 
+def _split_plural_forms(content: Any, contexts: Dict[str, str]) -> Tuple[Any, Any, List[str]]:
+    """
+    (first-pass content, second-pass content, second-pass dotted keys) of expanded `content`:
+    the second pass holds each plural group's forms other than 'other', the first everything else.
+    """
+    first = copy.deepcopy(content)
+    second: Dict[str, Any] = {}
+    second_keys: List[str] = []
+    for path, group in find_plural_groups(content):
+        dotted = ".".join(str(k) for k in path)
+        later = [f for f in group if f != "other" and f"{dotted}.{f}" in contexts]
+        if not later:
+            continue
+        first_group, second_group = first, second
+        for key in path:
+            first_group = first_group[key]
+            second_group = second_group.setdefault(key, {})
+        for form in later:
+            second_group[form] = first_group.pop(form)
+            second_keys.append(f"{dotted}.{form}")
+    return first, second, second_keys
+
+
+def _merge_in_order(template: Any, first: Any, second: Any) -> Any:
+    """`first` and `second` (translated parts of `template`) merged, keys in `template`'s order."""
+    if not isinstance(first, dict) or not isinstance(second, dict):
+        return second
+    merged: Dict[Any, Any] = {}
+    order = list(template) if isinstance(template, dict) else []
+    order += [k for k in list(first) + list(second) if k not in order]
+    for key in order:
+        if key in first and key in second:
+            merged[key] = _merge_in_order(
+                template.get(key) if isinstance(template, dict) else None, first[key], second[key]
+            )
+        elif key in first:
+            merged[key] = first[key]
+        elif key in second:
+            merged[key] = second[key]
+    return merged
+
+
+def translate_plural_groups_in_two_passes(translate, content: Any, contexts: Dict[str, str]) -> Any:
+    """
+    Translate expanded YAML `content` (prepare_for_translation) with `translate(data, contexts)`
+    in two passes, as the flat formats do: first everything but the plural forms other than
+    'other', then those forms, each with its group's translated 'other' quoted in its note so
+    every form uses the same wording. A damaged 'other' translation is not quoted.
+    """
+    from algebras.utils.ios_stringsdict_handler import anchor_plural_contexts
+
+    first, second, second_keys = _split_plural_forms(content, contexts)
+    if not second_keys:
+        return translate(content, contexts)
+    translated_first = translate(first, contexts)
+    anchored = anchor_plural_contexts(contexts, second_keys, translated_first, content)
+    translated_second = translate(second, anchored)
+    return _merge_in_order(content, translated_first, translated_second)
+
+
 # ---------------------------------------------------------------------------
 # Check
 # ---------------------------------------------------------------------------

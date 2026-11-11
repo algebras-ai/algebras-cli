@@ -88,7 +88,7 @@ def test_text_that_keeps_losing_tokens_is_rejected_not_returned_damaged():
     assert result.failed_indices == {0}
     assert result.translations[0] == ""
     assert result.translations[1] == "Plain"
-    assert api.translate_batch.call_count == 2
+    assert api.translate_batch.call_count == 3  # first attempt, batch retry, retry alone
     retry_context = api.translate_batch.call_args_list[1].kwargs["contexts"][0]
     assert retry_context.startswith("IMPORTANT")
 
