@@ -237,7 +237,8 @@ def test_rails_translation_keeps_every_placeholder(tmp_path, monkeypatch):
     for locale, forms in (("ru", ["one", "few", "many", "other"]), ("de", ["one", "other"]), ("uz_Cyrl", ["one", "other"])):
         path = tmp_path / "config" / "locales" / f"{locale}.yml"
         data = yaml.safe_load(path.read_text(encoding="utf-8"))  # re-parses
-        body = data["en"]
+        assert list(data) == [locale]  # Rails loads the file by its root key
+        body = data[locale]
         assert body["greeting"].count("%{name}") == 1
         assert body["unread"].startswith("%{count}")  # survived quoting
         assert "%<price>.2f" in body["price"]
@@ -266,11 +267,11 @@ def test_rails_missing_plural_forms_are_added_with_only_missing(tmp_path, monkey
     )
     target = _write(
         tmp_path / "config" / "locales" / "ru.yml",
-        "en:\n  greeting: 'Привет, %{name}!'\n",
+        "ru:\n  greeting: 'Привет, %{name}!'\n",
     )
     sent = []
     _translate(["ru"], sent, only_missing=True)
-    data = yaml.safe_load(target.read_text(encoding="utf-8"))["en"]
+    data = yaml.safe_load(target.read_text(encoding="utf-8"))["ru"]
     assert data["greeting"] == "Привет, %{name}!"
     assert sorted(data["inbox"]["messages"]) == ["few", "many", "one", "other"]
     assert all("%{count}" in t for t in data["inbox"]["messages"].values())
@@ -297,7 +298,7 @@ def test_symfony_translation_keeps_percent_placeholders(tmp_path, monkeypatch):
 
 CORRUPTED_RU = """\
 # Storefront strings (ru)
-en:
+ru:
   greeting: "Привет, %{имя}!"
   unread: '%{ count } непрочитанных'
   price: "Цена: %<цена>.2f"
@@ -358,7 +359,7 @@ def test_fix_repairs_in_place_keeps_comments_and_is_idempotent(ru_project, capsy
     assert code == 0
     assert {i["status"] for i in report["issues"]} == {"fixed"}
     assert ru_project.read_text(encoding="utf-8") == EXPECTED_FIXED
-    assert yaml.safe_load(EXPECTED_FIXED)["en"]["confirm"] == "yes"
+    assert yaml.safe_load(EXPECTED_FIXED)["ru"]["confirm"] == "yes"
 
     code, report = _report(capsys)
     assert (code, report["issues"]) == (0, [])
@@ -388,9 +389,10 @@ def test_plural_single_count_exemption_and_missing_forms(tmp_path):
     )
     findings = yaml_format.check_file(str(source), str(ru), "en", "ru")
     assert [(f.key, [p.code for p in f.problems], f.path) for f in findings] == [
-        ("ru.inbox.messages.one", ["missing"], ("ru", "inbox", "messages", "one")),
-        ("ru.inbox.messages.few", ["missing_form"], ("ru", "inbox", "messages", "few")),
-        ("ru.inbox.messages.many", ["missing_form"], ("ru", "inbox", "messages", "many")),
+        # Keys in source terms, as status and 'translate --force' name them.
+        ("en.inbox.messages.one", ["missing"], ("en", "inbox", "messages", "one")),
+        ("en.inbox.messages.few", ["missing_form"], ("en", "inbox", "messages", "few")),
+        ("en.inbox.messages.many", ["missing_form"], ("en", "inbox", "messages", "many")),
     ]
     assert findings[0].source == "%{count} messages"
     assert all(f.fixed is None for f in findings)
@@ -441,7 +443,7 @@ def test_retranslate_adds_missing_plural_forms_per_key(tmp_path, monkeypatch, ca
     )
     target = _write(
         tmp_path / "config" / "locales" / "ru.yml",
-        "en:\n  greeting: 'Привет, %{name}!'\n  inbox:\n    messages:\n"
+        "ru:\n  greeting: 'Привет, %{name}!'\n  inbox:\n    messages:\n"
         "      one: '%{count} сообщение'\n      other: '%{count} сообщения'\n",
     )
     sent = []
@@ -455,7 +457,7 @@ def test_retranslate_adds_missing_plural_forms_per_key(tmp_path, monkeypatch, ca
         "en.inbox.messages.few": "fixed",
         "en.inbox.messages.many": "fixed",
     }
-    data = yaml.safe_load(target.read_text(encoding="utf-8"))["en"]
+    data = yaml.safe_load(target.read_text(encoding="utf-8"))["ru"]
     assert data["greeting"] == "Привет, %{name}!"  # only the requested keys were retranslated
     assert data["inbox"]["messages"]["one"] == "%{count} сообщение"
     assert all("%{count}" in data["inbox"]["messages"][f] for f in ("few", "many"))

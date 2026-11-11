@@ -738,6 +738,7 @@ def _process_all_files(
                                 source_file=source_file,
                                 source_language=source_language,
                                 target_language=target_lang,
+                                config=config,
                                 xlf_target_state=xlf_target_state,
                                 xlf_version=xlf_version,
                                 po_mark_fuzzy=po_mark_fuzzy,
@@ -870,6 +871,7 @@ def _process_all_files(
                                 source_file=source_file,
                                 source_language=source_language,
                                 target_language=target_lang,
+                                config=config,
                                 xlf_target_state=xlf_target_state,
                                 xlf_version=xlf_version,
                                 po_mark_fuzzy=po_mark_fuzzy,
@@ -964,6 +966,7 @@ def _process_all_files(
                             source_file=source_file,
                             source_language=source_language,
                             target_language=target_lang,
+                            config=config,
                         )
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     elif detect_format(source_file) == FileFormat.PO:
@@ -1006,6 +1009,7 @@ def _process_all_files(
                             source_file=source_file,
                             source_language=source_language,
                             target_language=target_lang,
+                            config=config,
                             po_mark_fuzzy=po_mark_fuzzy,
                         )
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
@@ -1183,6 +1187,7 @@ def _process_all_files(
                             source_file=source_file,
                             source_language=source_language,
                             target_language=target_lang,
+                            config=config,
                             xlf_target_state=xlf_target_state,
                             xlf_version=xlf_version,
                             po_mark_fuzzy=po_mark_fuzzy,
@@ -1435,6 +1440,7 @@ def _process_outdated_files(
                         source_file=source_file,
                         source_language=source_language,
                         target_language=target_lang,
+                        config=config,
                         xlf_target_state=xlf_target_state,
                         xlf_version=xlf_version,
                         po_mark_fuzzy=po_mark_fuzzy,
@@ -1585,6 +1591,7 @@ def _process_missing_keys_files(
                         source_file=source_file,
                         source_language=source_language,
                         target_language=target_lang,
+                        config=config,
                         xlf_target_state=xlf_target_state,
                         xlf_version=xlf_version,
                         po_mark_fuzzy=po_mark_fuzzy,
@@ -1731,6 +1738,7 @@ def _process_outdated_keys_files(
                         source_file=source_file,
                         source_language=source_language,
                         target_language=target_lang,
+                        config=config,
                         xlf_target_state=xlf_target_state,
                         xlf_version=xlf_version,
                         po_mark_fuzzy=po_mark_fuzzy,
@@ -1893,10 +1901,18 @@ def _load_file_contents(
             profile_for_path(source_file, config),
         )
         plural_contexts = plural_contexts or None
-        target_content = (
+        # Rails-style files (`en:` / `ru:` root key): the target is keyed under the source root, so
+        # keys compare and are named in source terms; _write_translated_content re-roots it.
+        from algebras.utils.yaml_locale_root import align_target
+
+        target_content = align_target(
+            source_content,
             handler.read_for_translation(target_file, target_language, config)
             if os.path.exists(target_file)
-            else {}
+            else {},
+            source_language,
+            target_language,
+            config,
         )
     elif format_type in (FileFormat.CSV, FileFormat.TSV):
         # CSV needs language-specific reading
@@ -1986,6 +2002,44 @@ def _warn_plural_issues(target_file: str, warnings: List[str]) -> None:
         click.echo(f"    - {warning}")
 
 
+def _reroot_yaml_target(
+    target_file: str,
+    content: Dict[str, Any],
+    source_file: str,
+    source_language: Optional[str],
+    target_language: str,
+    config,
+) -> Dict[str, Any]:
+    """
+    Rails-style YAML: content keyed under the source root (`en:`) gets the target's locale root
+    (`ru:`, the destination locale code). A target still rooted at the source locale, as older
+    versions wrote it, is rewritten that way, with a notice.
+    """
+    from algebras.utils import yaml_locale_root
+
+    try:
+        with open(source_file, "r", encoding="utf-8") as f:
+            source_data = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError):
+        return content
+    s_root = yaml_locale_root.source_root(source_data, source_language, config)
+    if s_root is None:
+        return content
+    if os.path.exists(target_file):
+        try:
+            with open(target_file, "r", encoding="utf-8") as f:
+                existing = yaml.safe_load(f)
+        except (OSError, yaml.YAMLError):
+            existing = None
+        if yaml_locale_root.misrooted(existing, s_root, target_language, config):
+            click.echo(
+                f"  {Fore.YELLOW}"
+                f"{yaml_locale_root.migration_notice(target_file, s_root, target_language, config)}"
+                f"{Fore.RESET}"
+            )
+    return yaml_locale_root.reroot_for_target(content, source_data, source_language, target_language, config)
+
+
 def _write_translated_content(
     target_file: str,
     content: Dict[str, Any],
@@ -2001,6 +2055,7 @@ def _write_translated_content(
     source_raw_content: Optional[Dict[str, Any]] = None,
     target_raw_content: Optional[Dict[str, Any]] = None,
     verbose: bool = False,
+    config=None,
 ):
     """
     Write translated content to file using handler.
@@ -2020,8 +2075,12 @@ def _write_translated_content(
         source_raw_content: Raw source content (for XLIFF, StringsDict)
         target_raw_content: Raw target content (for XLIFF, StringsDict)
         verbose: Verbose mode flag
+        config: Config instance (locale mapping for the root key of Rails-style YAML)
     """
     format_type = detect_format(target_file)
+
+    if format_type == FileFormat.YAML and source_file and target_language:
+        content = _reroot_yaml_target(target_file, content, source_file, source_language, target_language, config)
 
     # Prepare kwargs for handler.write()
     kwargs = {}

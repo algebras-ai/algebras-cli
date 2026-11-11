@@ -15,6 +15,7 @@ from algebras.utils.lang_validator import (
     extract_all_keys,
     get_key_value,
     read_language_file,
+    align_target_data,
 )
 from algebras.utils.html_handler import read_html_file
 
@@ -196,6 +197,10 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
             source_data = read_language_file(source_file_path, source_lang, config)
             source_data = expand_plural_source_keys(source_file_path, source_data, target_language)
             target_data = read_language_file(target_file_path, target_lang, config)
+            # Rails-style YAML: compare under each file's own root key (en.greeting ~ ru.greeting)
+            target_data = align_target_data(
+                source_file_path, source_data, target_data, source_language, target_language, config
+            )
             
             # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff, .csv, .tsv)
             if target_file_path.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv')):

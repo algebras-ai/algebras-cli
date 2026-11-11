@@ -159,6 +159,12 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                     source_content = yaml.safe_load(f)
                 with open(target_file, "r", encoding="utf-8") as f:
                     target_content = yaml.safe_load(f)
+                # Rails-style YAML: compare under each file's own root key (en.greeting ~ ru.greeting)
+                from algebras.utils.yaml_locale_root import align_target
+
+                target_content = align_target(
+                    source_content, target_content, source_language, target_language, config
+                )
                 
                 # Review content
                 review_content(source_content, target_content, source_language, target_language)

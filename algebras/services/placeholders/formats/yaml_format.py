@@ -34,6 +34,7 @@ import copy
 import json
 import os
 import re
+import sys
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import yaml
@@ -48,13 +49,12 @@ from algebras.services.placeholders.profiles import (
     register_profile_resolver,
 )
 from algebras.services.placeholders.syntaxes import SYNTAXES
+from algebras.utils import yaml_locale_root
+from algebras.utils.yaml_locale_root import locale_root
 
 _EXTENSIONS = [".yaml", ".yml"]
 
 PLURAL_CATEGORIES = ("zero", "one", "two", "few", "many", "other")
-
-# A top-level key that names a locale: en, pt-BR, zh_Hant, sr-Latn-RS.
-_LOCALE_KEY = re.compile(r"^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*$")
 
 _GENERIC_CANDIDATES = ("xml_tag", "i18next", "ruby", "python_percent", "printf", "js_template", "icu_simple")
 
@@ -78,15 +78,6 @@ def _strings(data: Any) -> Iterator[str]:
             yield from _strings(value)
     elif isinstance(data, str):
         yield data
-
-
-def locale_root(data: Any) -> Optional[Any]:
-    """The top-level locale key of a Rails-style file (`en:` holding everything), or None."""
-    if isinstance(data, dict) and len(data) == 1:
-        (key,) = data
-        if isinstance(key, str) and _LOCALE_KEY.match(key) and isinstance(data[key], dict):
-            return key
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -288,9 +279,11 @@ def check_file(
     """
     Placeholder findings for a target YAML file.
 
-    Values are paired by key path; a Rails top-level locale key (`en:` / `ru:`) is paired with the
-    target's. Plural group forms are checked against plural_source_text with the single-count
-    exemption; forms the target language needs but the group lacks are `missing_form`; values
+    Values are paired by key path; a Rails top-level locale key (`en:` / `ru:`, or a target still
+    rooted at `en:`) is paired with the target's (yaml_locale_root.align_target). Keys and paths
+    are in source terms (`en.greeting`), as status and `translate --force` name them; write_fixes
+    maps them to the target's root. Plural group forms are checked against plural_source_text
+    with the single-count exemption; forms the target language needs but the group lacks are `missing_form`; values
     that load as something other than a string are `yaml_type_coerced`.
     """
     from algebras.services.placeholders.plurals import drop_allowed_for_key
@@ -302,10 +295,13 @@ def check_file(
     if not isinstance(source, dict) or not isinstance(target, dict):
         return []
 
-    source_root, target_root = locale_root(source), locale_root(target)
+    config_source = _config_source_language(config)
+    target = yaml_locale_root.align_target(source, target, config_source, target_language, config)
+    source_root = yaml_locale_root.source_root(source, config_source, config)
+    target_root = locale_root(_load(target_file)) if source_root is not None else None
     prefix: Tuple = ()
-    if source_root is not None and target_root is not None:
-        source, target, prefix = source[source_root], target[target_root], (target_root,)
+    if source_root is not None and source_root in target and isinstance(target[source_root], dict):
+        source, target, prefix = source[source_root], target[source_root], (source_root,)
 
     raw_cache: Dict[str, Any] = {}
 
@@ -313,7 +309,7 @@ def check_file(
         if "nodes" not in raw_cache:
             raw_cache["nodes"] = _compose(target_file)
         text, root = raw_cache["nodes"]
-        node = _find_node(root, tuple(str(k) for k in path))
+        node = _find_node(root, _target_path(tuple(str(k) for k in path), source_root, target_root))
         if node is None:
             return None
         if isinstance(node, yaml.ScalarNode):
@@ -390,6 +386,23 @@ def check_file(
 # ---------------------------------------------------------------------------
 
 
+def _config_source_language(config) -> Optional[str]:
+    if config is None:
+        return None
+    try:
+        language = config.get_source_language()
+    except Exception:
+        return None
+    return language if isinstance(language, str) else None
+
+
+def _target_path(path: KeyPath, source_root: Optional[str], target_root: Optional[str]) -> KeyPath:
+    """A key path in source terms (("en", "greeting")) as it is named in the target file."""
+    if source_root and target_root and path and path[0] == source_root:
+        return (target_root,) + tuple(path[1:])
+    return tuple(path)
+
+
 def _compose(file_path: str) -> Tuple[str, Any]:
     with open(file_path, "r", encoding="utf-8", newline="") as f:
         text = f.read()
@@ -459,11 +472,38 @@ def write_fixes(target_file: str, fixes: Dict[KeyPath, str], language: Optional[
     Each value is located by its node marks from yaml.compose and its span is replaced by a
     re-rendered scalar (see render_scalar). The result is re-parsed and every fixed path must
     load as the fixed string, otherwise nothing is written.
+
+    Paths may name a Rails root in source terms (("en", "greeting") for ru.yml): they are mapped
+    to the target's root. A target still rooted at the source locale (`en:` inside ru.yml) gets
+    its root key rewritten as the target's locale code, with a notice (yaml_locale_root).
     """
     text, root = _compose(target_file)
     replacements: List[Tuple[int, int, str]] = []
     not_found: List[KeyPath] = []
+
+    loaded = yaml.safe_load(text)
+    target_root = locale_root(loaded)
+    source_root = None
+    new_root = None
+    if target_root is not None:
+        source_language = _config_source_language(config)
+        roots = {p[0] for p in fixes if p}
+        source_root = next(
+            (r for r in roots if r != target_root and yaml_locale_root.source_root({r: {}}, source_language, config)),
+            None,
+        )
+        if language and yaml_locale_root.misrooted(loaded, target_root, language, config) and (
+            source_language is not None and yaml_locale_root.source_root(loaded, source_language, config)
+        ):
+            new_root = yaml_locale_root.root_code(language, config)
+            key_node = root.value[0][0]
+            replacements.append((key_node.start_mark.index, key_node.end_mark.index, new_root))
+
+    mapped_fixes: Dict[KeyPath, str] = {}
     for path, value in fixes.items():
+        mapped_fixes[_target_path(tuple(path), source_root, target_root)] = value
+
+    for path, value in mapped_fixes.items():
         node = _find_node(root, tuple(path))
         if node is None:
             not_found.append(path)
@@ -487,13 +527,18 @@ def write_fixes(target_file: str, fixes: Dict[KeyPath, str], language: Optional[
         new_text = new_text[:start] + rendered + new_text[end:]
 
     reloaded = yaml.safe_load(new_text)
-    for path, value in fixes.items():
+    for path, value in mapped_fixes.items():
+        if new_root is not None and path and path[0] == target_root:
+            path = (new_root,) + tuple(path[1:])
         node = reloaded
         for part in path:
             node = next((v for k, v in node.items() if str(k) == part), None) if isinstance(node, dict) else None
         if node != value:
             raise ValueError(f"Writing {'.'.join(path)} to {target_file} would not keep the value; not written")
 
+    if new_root is not None:
+        # stderr: `algebras placeholders --format json` keeps stdout for the report.
+        print(yaml_locale_root.migration_notice(target_file, target_root, language, config), file=sys.stderr)
     with open(target_file, "w", encoding="utf-8", newline="") as f:
         f.write(new_text)
 
