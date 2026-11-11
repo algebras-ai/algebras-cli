@@ -22,6 +22,7 @@ class FileFormat(Enum):
     TSV = "tsv"
     ARB = "arb"
     PROPERTIES = "properties"
+    XLSX = "xlsx"
     UNKNOWN = "unknown"
 
 
@@ -67,6 +68,8 @@ def detect_format(file_path: str) -> FileFormat:
         return FileFormat.ARB
     elif file_path_lower.endswith(".properties"):
         return FileFormat.PROPERTIES
+    elif file_path_lower.endswith(".xlsx"):
+        return FileFormat.XLSX
     else:
         return FileFormat.UNKNOWN
 
@@ -86,5 +89,6 @@ def is_flat_format(format: FileFormat) -> bool:
         FileFormat.XLIFF,
         FileFormat.CSV,
         FileFormat.TSV,
+        FileFormat.XLSX,
     }
     return format in flat_formats
