@@ -11,7 +11,10 @@ i18next plural keys
     A target form that covers several counts (Russian "one" = 1, 21, 31 …) needs {{count}}, so when
     the source form lacks it, the form is translated from (and checked against) the `_other` text —
     the same rule as Android <plurals> and .stringsdict (see android_plurals.plural_source_text).
-    Target-only suffixes (`_few`, `_many`) are not generated here.
+    When the file's profile is i18next (detected from its {{…}} placeholders, or pinned in the
+    config), each group also gets the CLDR forms the target language needs but the source lacks
+    (ru `_few`, `_many`), translated from the `_other` text and placed next to the group in CLDR
+    order (expand_i18next_plurals). Other JSON whose keys happen to end in `_one` is left alone.
 """
 
 import copy
@@ -133,18 +136,118 @@ def i18next_plural_context(forms: Dict[str, str], form: str, source_lang: str, t
     return " ".join(parts)
 
 
-def iter_i18next_plural_keys(content: Any, prefix: KeyPath = ()) -> Iterator[Tuple[KeyPath, Dict[str, str], str]]:
-    """(key path, forms of its group, form) for every i18next plural key in `content`."""
+def iter_i18next_plural_keys(
+    content: Any, prefix: KeyPath = (), target_lang: Optional[str] = None
+) -> Iterator[Tuple[KeyPath, Dict[str, str], str]]:
+    """
+    (key path, forms of its group, form) for every i18next plural key in `content`; with
+    `target_lang`, also for the forms that language needs but an expandable group lacks.
+    """
     if not isinstance(content, dict):
         return
     groups = i18next_plural_groups(content)
     for key, value in content.items():
         if isinstance(value, dict):
-            yield from iter_i18next_plural_keys(value, prefix + (str(key),))
+            yield from iter_i18next_plural_keys(value, prefix + (str(key),), target_lang)
             continue
         parsed = i18next_plural_form(str(key)) if isinstance(value, str) else None
         if parsed and parsed[0] in groups:
             yield prefix + (str(key),), groups[parsed[0]], parsed[1]
+    if target_lang:
+        for base, forms in groups.items():
+            for form in missing_i18next_forms(forms, target_lang):
+                yield prefix + (f"{base}_{form}",), forms, form
+
+
+# ---------------------------------------------------------------------------
+# i18next plural expansion: the CLDR forms the target language needs
+# ---------------------------------------------------------------------------
+
+
+def is_i18next_profile(profile) -> bool:
+    """
+    True when a JSON file's placeholder profile is i18next: detected from the file's own values
+    (json_format.resolve_profile) or pinned in the config. The generic fallback profile, which
+    lists every syntax, does not count.
+    """
+    return profile is not None and profile.name != "generic" and "i18next" in profile.syntax_names
+
+
+def missing_i18next_forms(forms: Dict[str, str], target_lang: str) -> List[str]:
+    """
+    CLDR forms `target_lang` needs that a plural group lacks, in CLDR order. Only groups with
+    `_other` and at least one other form are expanded: a lone `contact_other` is more likely an
+    ordinary key than a plural.
+    """
+    if "other" not in forms or len(forms) < 2:
+        return []
+    return [f for f in get_plural_categories(target_lang) if f not in forms]
+
+
+def _rank(form: str) -> int:
+    return PLURAL_CATEGORY_ORDER.index(form)
+
+
+def _expand_level(level: Dict[str, Any], target_lang: str) -> Dict[str, Any]:
+    keys = list(level)
+    added: Dict[str, Any] = {}
+    for base, forms in i18next_plural_groups(level).items():
+        for form in missing_i18next_forms(forms, target_lang):
+            members = [(i, i18next_plural_form(k)[1]) for i, k in enumerate(keys) if _group_member(k, base, level, added)]
+            before = [(i, f) for i, f in members if _rank(f) < _rank(form)]
+            if before:
+                at = max(before, key=lambda m: _rank(m[1]))[0] + 1
+            else:
+                at = min(members, key=lambda m: _rank(m[1]))[0]
+            new_key = f"{base}_{form}"
+            keys.insert(at, new_key)
+            added[new_key] = forms["other"]
+    result: Dict[str, Any] = {}
+    for key in keys:
+        value = added[key] if key in added else level[key]
+        result[key] = _expand_level(value, target_lang) if isinstance(value, dict) else copy.deepcopy(value)
+    return result
+
+
+def _group_member(key: str, base: str, level: Dict[str, Any], added: Dict[str, Any]) -> bool:
+    value = added.get(key, level.get(key))
+    parsed = i18next_plural_form(str(key)) if isinstance(value, str) else None
+    return bool(parsed) and parsed[0] == base
+
+
+def expand_i18next_plurals(content: Any, target_lang: Optional[str], profile) -> Any:
+    """
+    Copy of `content` in which every i18next plural group also has the forms `target_lang` needs
+    but the source lacks (en item_one/item_other -> ru item_one/item_few/item_many/item_other),
+    each new key holding the `_other` text and placed next to its group in CLDR order. `content`
+    itself is returned when nothing changes: no target language, a profile other than i18next
+    (is_i18next_profile), a Chrome messages.json, or no group missing a form.
+    """
+    if not target_lang or not isinstance(content, dict) or not is_i18next_profile(profile):
+        return content
+    if is_chrome_messages(content):
+        return content
+    if not any(True for _ in _missing_paths(content, target_lang)):
+        return content
+    return _expand_level(content, target_lang)
+
+
+def _missing_paths(content: Dict[str, Any], target_lang: str, prefix: KeyPath = ()) -> Iterator[KeyPath]:
+    for base, forms in i18next_plural_groups(content).items():
+        for form in missing_i18next_forms(forms, target_lang):
+            yield prefix + (f"{base}_{form}",)
+    for key, value in content.items():
+        if isinstance(value, dict):
+            yield from _missing_paths(value, target_lang, prefix + (str(key),))
+
+
+def expand_i18next_source_file(source_file: Optional[str], content: Any, target_lang: Optional[str], config=None) -> Any:
+    """expand_i18next_plurals for a JSON source file, with the file's detected (or pinned) profile."""
+    if not source_file or not target_lang or not str(source_file).lower().endswith(".json"):
+        return content
+    from algebras.services.placeholders import profile_for_path
+
+    return expand_i18next_plurals(content, target_lang, profile_for_path(source_file, config))
 
 
 # ---------------------------------------------------------------------------
@@ -209,11 +312,18 @@ def plan_json_translation(
     if not isinstance(source_content, dict):
         return None
     chrome = is_chrome_messages(source_content)
-    plural_keys = [] if chrome else list(iter_i18next_plural_keys(source_content))
+    expand = not chrome and is_i18next_profile(profile)
+    plural_keys = [] if chrome else list(iter_i18next_plural_keys(source_content, target_lang=target_lang if expand else None))
     if not chrome and not plural_keys:
         return None
 
-    source = chrome_messages_only(source_content) if chrome else copy.deepcopy(source_content)
+    if chrome:
+        source = chrome_messages_only(source_content)
+    elif expand:
+        # The forms the target language needs, next to their group (values set below).
+        source = copy.deepcopy(expand_i18next_plurals(source_content, target_lang, profile))
+    else:
+        source = copy.deepcopy(source_content)
     contexts: Dict[str, str] = {}
     for path, forms, form in plural_keys:
         _set(source, path, i18next_plural_source_text(forms, form, target_lang, profile))

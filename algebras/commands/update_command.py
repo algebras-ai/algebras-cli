@@ -97,7 +97,8 @@ def find_matching_source_file(lang_file: str, source_files: List[str], lang: str
 
 def _plural_target(source_file: str, lang: str) -> Optional[str]:
     # Other formats use target_language to pick CSV columns, so only pass it where plurals need it.
-    return lang if source_file.endswith(".stringsdict") else None
+    # JSON: i18next plural groups get the forms `lang` needs (json_i18n.expand_i18next_plurals).
+    return lang if source_file.endswith((".stringsdict", ".json")) else None
 
 
 def _yaml_pair_kwargs(source_file: str, source_language: str, lang: str, config) -> Dict:

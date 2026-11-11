@@ -64,10 +64,13 @@ def check_file(
     - strings with formatted="false" are checked without printf (their % signs are literal);
     - every target plural item is checked against the text it is translated from: the source
       'other' for forms the source lacks (ru few/many) and for multi-count forms whose source
-      text has no count placeholder (en one = "One point" -> ru one = "%1$d очко").
+      text has no count placeholder (en one = "One point" -> ru one = "%1$d очко");
+    - a translated <plurals> that lacks a CLDR form the target language needs is `missing_form`
+      (not fixable in place; --retranslate regenerates the group with every form).
     """
-    from algebras.services.placeholders.plurals import drop_allowed_for_key
+    from algebras.services.placeholders.plurals import drop_allowed_for_key, missing_form_problem
     from algebras.utils.android_plurals import PLURALS_SUFFIX, plural_source_text
+    from algebras.utils.plural_rules import get_plural_categories
     from algebras.utils.android_xml_handler import read_android_string_attributes, read_android_xml_file
 
     source = read_android_xml_file(source_file)
@@ -80,6 +83,7 @@ def check_file(
         return _unformatted(file_profile) if formatted == "false" else file_profile
 
     pairs = []  # (key path, source text, target text)
+    missing_forms: List[Finding] = []
     for key, value in source.items():
         if isinstance(value, dict) and key.endswith(PLURALS_SUFFIX):
             target_dict = target.get(key)
@@ -89,6 +93,19 @@ def check_file(
                 source_text = plural_source_text(value, form, target_language)
                 if source_text is not None:
                     pairs.append(((key, form), source_text, target_text))
+            present = [f for f, t in target_dict.items() if isinstance(t, str) and t.strip()]
+            if present:
+                for form in get_plural_categories(target_language):
+                    if form not in present:
+                        missing_forms.append(
+                            Finding(
+                                key=f"{key}.{form}",
+                                source=plural_source_text(value, form, target_language) or "",
+                                target="",
+                                problems=[missing_form_problem(form, target_language)],
+                                path=(key, form),
+                            )
+                        )
         elif isinstance(value, str):
             pairs.append(((key,), value, target.get(key)))
 
@@ -111,7 +128,7 @@ def check_file(
                     fixed=repair(source_text, target_text, profile, drop),
                 )
             )
-    return findings
+    return findings + missing_forms
 
 
 def write_fixes(target_file: str, fixes: Dict[tuple, str], language: str = None, config=None) -> None:

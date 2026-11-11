@@ -28,3 +28,15 @@ def drop_allowed_for_key(
     if form in PLURAL_CATEGORY_ORDER and form != "other" and covers_single_count(target_lang, form):
         return count_drop_allowed(source_text, profile)
     return frozenset()
+
+
+def missing_form_problem(form: str, target_lang: str):
+    """`missing_form`: a plural group lacks a CLDR form the target language needs (as YAML reports it)."""
+    from algebras.services.placeholders.engine import Problem
+    from algebras.utils.plural_rules import get_plural_categories
+
+    return Problem(
+        "missing_form",
+        form,
+        f"Plural form '{form}' is missing ({target_lang} needs {', '.join(get_plural_categories(target_lang))})",
+    )

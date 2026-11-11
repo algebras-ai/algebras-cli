@@ -586,6 +586,9 @@ class Translator:
             translated = self._update_xliff_targets(content, translated_strings)
         else:
             extra_kwargs: Dict[str, Any] = {}
+            if json_plan is not None and json_plan.contexts:
+                # i18next plural notes: the counts each form covers (ru few = 2, 3, 4 …).
+                extra_kwargs["contexts"] = json_plan.contexts
             if file_path.endswith((".yaml", ".yml")):
                 # Rails plural hashes: every form the target language needs, each translated
                 # from the right source text and with a note on the counts it covers.
