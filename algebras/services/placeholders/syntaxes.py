@@ -42,8 +42,8 @@ PRINTF = Syntax(
     lenient=re.compile(
         r"[%％]\s?(?:[0-9０-９]+\s?[$＄]\s?)" + _PRINTF_FLAGS + r"\d*(?:\.\d+)?" + _PRINTF_LENGTH + r"[^\W\d_]"
         r"|％(?:\d+\$)?" + _PRINTF_FLAGS + r"\d*(?:\.\d+)?" + _PRINTF_LENGTH + r"[^\W\d_@]"
-        r"|[%％]\s?[＠@]"
-        r"|%" + _PRINTF_LENGTH + r"[^\W\d_a-zA-Z]"
+        r"|[%％]\s?(?:[0-9０-９]+\s?[$＄]\s?)?[＠@]"
+        r"|%\d*(?:\.\d+)?" + _PRINTF_LENGTH + r"[^\W\d_a-zA-Z]"
     ),
 )
 
