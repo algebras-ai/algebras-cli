@@ -270,3 +270,25 @@ def test_placeholders_reports_missing_form_and_retranslate_fills_it(tmp_path, mo
     assert _keywords(written["items"]) == ["one", "few", "many", "other"]
     assert written["cart"] == old["cart"]  # only the reported key was retranslated
     assert placeholders_command.execute(output_format="json") == 0
+
+
+def test_source_branch_without_count_is_seeded_from_other_when_target_covers_several_counts():
+    from algebras.services.icu_message_service import ICUMessageService
+
+    svc = ICUMessageService()
+    msg = "{count, plural, =0{No items} one{One item} other{{count} items}}"
+    # ru one also covers 21, 31 …: translate it from 'other', which shows the count.
+    assert svc.prepare(msg, "ru", "en").translatable_segments == ["No items", "items", "items", "items", "items"]
+    # de one is exactly 1: "One item" is right as written.
+    assert svc.prepare(msg, "de", "en").translatable_segments == ["No items", "One item", "items"]
+
+
+def test_healthcheck_accepts_added_branches_and_reseeded_one():
+    from algebras.utils.translation_validator import check_placeholders
+
+    source = "{count, plural, one{One item for {name}} other{{count} items for {name}}}"
+    target = (
+        "{count, plural, one{{count} товар для {name}} few{{count} товара для {name}} "
+        "many{{count} товаров для {name}} other{{count} товара для {name}}}"
+    )
+    assert check_placeholders(source, target, "k") == []

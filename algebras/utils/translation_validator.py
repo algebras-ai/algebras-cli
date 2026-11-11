@@ -188,8 +188,11 @@ def check_placeholders(source: str, target: str, key: Optional[str] = None, prof
     Returns:
         List of placeholder issues
     """
+    from algebras.services.icu_message_service import align_source_branches
     from algebras.services.placeholders import GENERIC_PROFILE, verify
 
+    # ICU plurals: branches the target language added (ru few/many) repeat {count}/{name}.
+    source = align_source_branches(source, target)
     issues = []
     for problem in verify(source, target, profile or GENERIC_PROFILE):
         # Codes added by format modules (e.g. mf_type_changed, inline_attr_changed) are errors.

@@ -328,6 +328,20 @@ class ICUMessageService:
                 or "other" not in options
             ):
                 continue
+            # A source branch without the count that the target fills with it (en "one {One
+            # item}" -> ru "one {# товар}", since ru one also covers 21, 31 …) was translated
+            # from 'other': compare it with 'other'.
+            name = s.get("name")
+            for key in list(options):
+                if (
+                    key != "other"
+                    and key in target_options
+                    and not _mentions_count(options[key], name)
+                    and _mentions_count(target_options[key], name)
+                    and _mentions_count(options["other"], name)
+                ):
+                    options[key] = deepcopy(options["other"])
+                    changed = True
             added = [key for key in target_options if key not in options]
             if not added:
                 continue
@@ -372,6 +386,7 @@ class ICUMessageService:
             self._expand_node(option_tokens, target_lang, plural_sources)
         if node.get("type") != "plural" or "other" not in options:
             return
+        _reseed_multi_count_branches(node, target_lang)
         missing = missing_plural_categories(list(options), target_lang)
         if not missing:
             return
@@ -581,6 +596,44 @@ def _plural_nodes(node: Any) -> List[Dict[str, Any]]:
             for value in options.values():
                 found.extend(_plural_nodes(value))
     return found
+
+
+def _mentions_count(tokens: Any, name: Optional[str]) -> bool:
+    """True if a branch shows the count: '#' or the plural's own argument ({count})."""
+    if isinstance(tokens, list):
+        return any(_mentions_count(t, name) for t in tokens)
+    if isinstance(tokens, dict):
+        if tokens.get("hash") or (name and tokens.get("name") == name):
+            return True
+        options = tokens.get("options")
+        if isinstance(options, dict):
+            return any(_mentions_count(v, name) for v in options.values())
+    return False
+
+
+def _reseed_multi_count_branches(node: Dict[str, Any], target_lang: str) -> None:
+    """
+    A source branch without the count ("one {One item}") becomes a copy of 'other' when the
+    target's category covers several counts (ru one: 1, 21, 31 …): translated as written, it
+    would say "one" for 21 items.
+    """
+    from algebras.utils.plural_rules import covers_single_count, get_plural_categories, is_known_language
+
+    if not target_lang or not is_known_language(target_lang):
+        return
+    options = node["options"]
+    name = node.get("name")
+    if not _mentions_count(options["other"], name):
+        return
+    needed = get_plural_categories(target_lang)
+    for key in list(options):
+        if (
+            key in needed
+            and key != "other"
+            and not covers_single_count(target_lang, key)
+            and not _mentions_count(options[key], name)
+        ):
+            options[key] = deepcopy(options["other"])
 
 
 def _explicitly_covered(category: str, keywords: Sequence[str], target_lang: str) -> bool:

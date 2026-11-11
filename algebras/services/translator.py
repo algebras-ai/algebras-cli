@@ -380,7 +380,7 @@ class Translator:
         # ICU MVP: protect plural/select/selectordinal syntax by translating
         # only literal segments and rebuilding from parsed structure.
         if self.icu_service.is_icu(text):
-            prepared = self.icu_service.prepare(text)
+            prepared = self.icu_service.prepare(text, target_lang, source_lang)
             translated_segments = [
                 self._translate_masked(
                     segment, source_lang, target_lang, ui_safe, glossary_id, profile
