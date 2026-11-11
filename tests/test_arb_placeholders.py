@@ -204,7 +204,13 @@ def test_transliterating_model_keeps_icu_structure(arb_project, monkeypatch):
             continue
         assert key in written, key
         assert _parses(written[key]), (key, written[key])
-        assert _structure(written[key]) == _structure(value), key
+        # Same structure as the source, plus the plural branches Russian needs (few, many).
+        expanded = ICUMessageService().prepare(value, "ru")
+        if expanded.has_target_icu:
+            value_ru = ICUMessageService().rebuild(expanded, expanded.translatable_segments)
+        else:
+            value_ru = value
+        assert _structure(written[key]) == _structure(value_ru), key
         assert message_problems(value, written[key], "ru") == [], key
     assert "'{name}'" in written["braces"] and "'{'" in written["braces"]
     assert written["greeting"].count("{name}") == 1
@@ -388,5 +394,5 @@ def test_declared_placeholders_are_known_names():
 def test_branch_without_count_is_reported_for_multi_count_forms():
     source = "{count, plural, one{# item} other{# items}}"
     assert message_problems(source, "{count, plural, one{Ein Element} other{# Elemente}}", "de") == []
-    problems = message_problems(source, "{count, plural, one{элемент} few{# элемента} other{# элементов}}", "ru")
+    problems = message_problems(source, "{count, plural, one{элемент} few{# элемента} many{# элементов} other{# элемента}}", "ru")
     assert [(p.code, p.placeholder) for p in problems] == [("missing", "{count}")]

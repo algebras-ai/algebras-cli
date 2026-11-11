@@ -386,8 +386,13 @@ def message_problems(
 ) -> List[Problem]:
     """
     Structural problems of an ICU target message compared with its source. `declared` are the
-    names from `@key.placeholders`; they count as known argument names.
+    names from `@key.placeholders`; they count as known argument names. A plural that lacks a
+    CLDR category the target language needs (ru few/many) is `missing_form`: only retranslation
+    can add it, so repair_message leaves it alone.
     """
+    from algebras.services.icu_message_service import missing_plural_categories
+    from algebras.utils.plural_rules import get_language_name
+
     if not isinstance(target, str) or not target.strip() or _parse_error(source) is not None:
         return []
     problems: List[Problem] = []
@@ -448,6 +453,23 @@ def message_problems(
             problems.append(
                 Problem("icu_keyword_changed", " ".join(bad + lost), f"{{{s.name}, {s.type}}}: " + "; ".join(details))
             )
+        if (s.type or "").lower() == "plural":
+            # Source branches the target dropped are already reported by icu_keyword_changed.
+            source_keywords = {o.keyword for o in s.options}
+            needed = [
+                c
+                for c in missing_plural_categories([o.keyword for o in t.options], target_language)
+                if c not in source_keywords
+            ]
+            if needed:
+                problems.append(
+                    Problem(
+                        "missing_form",
+                        " ".join(needed),
+                        f"{{{s.name}, {s.type}}}: missing plural branch(es) {', '.join(needed)} "
+                        f"that {get_language_name(target_language)} needs; retranslate to add them",
+                    )
+                )
 
         # Every target branch keeps the arguments of the branch it is translated from.
         src_options = {o.keyword: o for o in s.options}
@@ -483,6 +505,11 @@ def _fmt_types(types: Set[Tuple[str, str]]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _repairable(problems: List[Problem]) -> List[Problem]:
+    """Problems a deterministic repair can address (a missing plural branch needs retranslation)."""
+    return [p for p in problems if p.code != "missing_form"]
+
+
 def repair_message(
     source: str,
     target: str,
@@ -494,7 +521,7 @@ def repair_message(
     unique slot), changed argument types/styles, and translated branch keywords (by branch position,
     or a last branch back to `other`). Returns None when the result would still have problems.
     """
-    if not message_problems(source, target, target_language, declared):
+    if not _repairable(message_problems(source, target, target_language, declared)):
         return None
 
     src_nodes, tgt_nodes = scan(source), scan(target)
@@ -552,13 +579,13 @@ def repair_message(
     if not edits:
         # Plain messages: the generic lookalike / unique-slot repair (e.g. a damaged quoted '{').
         fixed = repair(source, target, ARB_PROFILE)
-        if fixed is None or message_problems(source, fixed, target_language, declared):
+        if fixed is None or _repairable(message_problems(source, fixed, target_language, declared)):
             return None
         return fixed
     fixed = target
     for (start, end), value in sorted(edits.items(), reverse=True):
         fixed = fixed[:start] + value + fixed[end:]
-    if message_problems(source, fixed, target_language, declared):
+    if _repairable(message_problems(source, fixed, target_language, declared)):
         return None
     return fixed
 
@@ -599,6 +626,8 @@ def check_file(
             declared = declared_placeholders(source, key)
             problems = message_problems(source_text, target_text, target_language, declared)
             fixed = repair_message(source_text, target_text, target_language, declared) if problems else None
+            if any(p.code == "missing_form" for p in problems):
+                fixed = None  # needs --retranslate, which also redoes whatever repair could fix
         else:  # per-file `placeholders:` override in the config
             problems = verify(source_text, target_text, profile)
             fixed = repair(source_text, target_text, profile) if problems else None

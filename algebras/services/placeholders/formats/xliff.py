@@ -222,6 +222,16 @@ XLIFF_PROFILE = PlaceholderProfile(
 # ---------------------------------------------------------------------------
 
 
+def _aligned_source(source: str, target: str) -> str:
+    """
+    The source an ICU target is compared with: plural branches the target added for its language
+    (ru few/many) are copies of the source 'other', so their inline elements are expected.
+    """
+    from algebras.services.icu_message_service import align_source_branches
+
+    return align_source_branches(source, target)
+
+
 def translation_problem(
     source: str, translation: str, profile: PlaceholderProfile = XLIFF_PROFILE
 ) -> Optional[str]:
@@ -232,7 +242,7 @@ def translation_problem(
         build_inline_content(translation)
     except ValueError as e:
         return str(e)
-    problems = verify(source or "", translation, profile)
+    problems = verify(_aligned_source(source or "", translation), translation, profile)
     if problems:
         return "; ".join(p.message for p in problems)
     return None
@@ -244,6 +254,7 @@ def repair_unit(source: str, target: str, profile: PlaceholderProfile = XLIFF_PR
     core repair (lookalike placeholders, a unique corrupted slot such as a changed id).
     Returns the fixed target, or None when it cannot be fixed without retranslating.
     """
+    source = _aligned_source(source, target)
     fixed = target
     by_identity: Dict[Tuple[str, str], str] = {}
     for p in extract(source, profile):
@@ -290,7 +301,7 @@ def check_file(
         if not target.strip():
             continue  # untranslated: 'status' reports it
         source = sources.get(unit["id"], unit.get("source", ""))
-        problems = verify(source, target, profile)
+        problems = verify(_aligned_source(source, target), target, profile)
         try:
             build_inline_content(target)
         except ValueError as e:

@@ -243,6 +243,7 @@ def check_file(
     are translated from (the `_other` text for multi-count forms whose source lacks {{count}}, and
     for target-only forms such as ru `_few`).
     """
+    from algebras.services.icu_message_service import align_source_branches
     from algebras.services.placeholders.plurals import drop_allowed_for_key
 
     profile = profile_for_path(source_file, config)
@@ -251,6 +252,8 @@ def check_file(
         if not isinstance(target_text, str) or not target_text.strip():
             continue  # untranslated: 'status' reports it
         key = ".".join(path)
+        # FormatJS: plural branches the target added (ru few/many) are compared as copies of 'other'.
+        source_text = align_source_branches(source_text, target_text)
         drop = drop_allowed_for_key(key, source_text, target_language, profile)
         problems = verify(source_text, target_text, profile, drop)
         if problems:

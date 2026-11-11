@@ -286,6 +286,7 @@ def check_file(
     with the single-count exemption; forms the target language needs but the group lacks are `missing_form`; values
     that load as something other than a string are `yaml_type_coerced`.
     """
+    from algebras.services.icu_message_service import align_source_branches
     from algebras.services.placeholders.plurals import drop_allowed_for_key
     from algebras.utils.plural_rules import get_plural_categories
 
@@ -328,6 +329,8 @@ def check_file(
             return
         if not target_value.strip():
             return
+        if not plural:  # ICU YAML: plural branches the target added are copies of 'other'
+            source_text = align_source_branches(source_text, target_value)
         drop = drop_allowed_for_key(key, source_text, target_language, profile) if plural else frozenset()
         problems = verify(source_text, target_value, profile, drop)
         if problems:
