@@ -406,13 +406,26 @@ def split_plural_passes(
 
 
 def anchor_plural_contexts(
-    contexts: Dict[str, str], keys: List[str], translated: Dict[str, Any]
+    contexts: Dict[str, str],
+    keys: List[str],
+    translated: Dict[str, Any],
+    source: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
-    """Contexts for `keys`, each extended with its entry's translated 'other' form when known."""
+    """
+    Contexts for `keys`, each extended with its entry's translated 'other' form when known.
+
+    With `source`, the translated 'other' is quoted only if its placeholders match the source
+    'other': a damaged translation (e.g. "%1$д") must not be shown to the model as the example.
+    """
+    from algebras.services.placeholders import verify
+
     anchored = dict(contexts)
     for key in keys:
         base = key.rsplit(".", 1)[0]
         other = translated.get(f"{base}.other")
+        source_other = source.get(f"{base}.other") if source else None
+        if isinstance(other, str) and isinstance(source_other, str) and verify(source_other, other):
+            continue
         if key in anchored and isinstance(other, str) and other.strip():
             anchored[key] += (
                 f" This entry's general plural form is already translated as '{other}'. "

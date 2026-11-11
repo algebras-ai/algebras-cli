@@ -116,6 +116,8 @@ class NestedDictTranslationStrategy(TranslationStrategy):
             batch_end_idx = min(batch_start_idx + self.batch_size, len(string_items))
             for idx in range(batch_start_idx, batch_end_idx):
                 failed_indices.add(idx)
+        # Translations rejected because their placeholders did not survive
+        failed_indices |= result.failed_indices
 
         for i, (source_text, path) in enumerate(zip(string_items, paths)):
             if i < len(result.translations):

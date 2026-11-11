@@ -12,7 +12,7 @@ from algebras.commands import init_command, add_command
 from algebras.commands import translate_command, update_command
 from algebras.commands import review_command, status_command
 from algebras.commands import configure_command, glossary_push_command
-from algebras.commands import healthcheck_command
+from algebras.commands import healthcheck_command, placeholders_command
 
 # Initialize colorama
 init()
@@ -132,6 +132,27 @@ def healthcheck(ctx, language, format, verbose):
     """Check translation quality and validate formatting, placeholders, and tags."""
     config_file = ctx.obj.get('config_file') if ctx.obj else None
     exit_code = healthcheck_command.execute(language=language, output_format=format, verbose=verbose, config_file=config_file)
+    sys.exit(exit_code)
+
+
+@cli.command("placeholders")
+@click.option("--language", "-l", "languages", multiple=True, help="Check only this language (repeatable).")
+@click.option("--fix", is_flag=True, help="Repair damaged placeholders (e.g. %1$с → %1$s) without calling the API.")
+@click.option("--retranslate", is_flag=True, help="With --fix: retranslate values that could not be repaired.")
+@click.option("--dry-run", is_flag=True, help="With --fix: show the changes without writing them.")
+@click.option("--format", "output_format", type=click.Choice(['console', 'json'], case_sensitive=False), default='console', help="Output format (console or json).")
+@click.pass_context
+def placeholders(ctx, languages, fix, retranslate, dry_run, output_format):
+    """Check that translations keep every placeholder (%s, %1$d, {name}, <b> …) and fix them."""
+    config_file = ctx.obj.get('config_file') if ctx.obj else None
+    exit_code = placeholders_command.execute(
+        languages=list(languages) or None,
+        fix=fix,
+        retranslate=retranslate,
+        dry_run=dry_run,
+        output_format=output_format,
+        config_file=config_file,
+    )
     sys.exit(exit_code)
 
 

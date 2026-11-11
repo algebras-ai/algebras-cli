@@ -6,7 +6,7 @@ import os
 import json
 import click
 from colorama import Fore
-from typing import Optional, Dict, List, Tuple, Set
+from typing import Optional, Dict, Iterator, List, Tuple, Set
 from collections import defaultdict
 
 from algebras.config import Config
@@ -15,6 +15,7 @@ from algebras.utils.lang_validator import read_language_file, extract_all_keys, 
 from algebras.utils.html_handler import read_html_file
 from algebras.utils.translation_validator import validate_translation, Issue
 from algebras.utils.path_utils import resolve_destination_path
+from algebras.services.placeholders import profile_for_path
 
 
 def execute(language: Optional[str] = None, output_format: str = 'console', 
@@ -66,9 +67,7 @@ def execute(language: Optional[str] = None, output_format: str = 'console',
         scanner = FileScanner(config=config)
         files_by_language = scanner.group_files_by_language()
         
-        # Get source files
-        source_files = files_by_language.get(source_language, [])
-        if not source_files:
+        if not files_by_language.get(source_language, []):
             click.echo(click.style(f"No source files found for language '{source_language}'.", fg='yellow'))
             return 0
         
@@ -87,65 +86,25 @@ def execute(language: Optional[str] = None, output_format: str = 'console',
                 # Always show which language is being processed
                 click.echo(f"{Fore.BLUE}Checking language: {target_lang}...{Fore.RESET}", nl=False)
             
-            # Get target files
-            target_files = files_by_language.get(target_lang, [])
-            
-            # Match source files with target files
-            source_files_config = config.get_source_files()
-            
             lang_files_checked = 0
             lang_keys_checked = 0
-            
-            if source_files_config:
-                # Use source_files configuration
-                for source_file, source_config in source_files_config.items():
-                    if not os.path.isfile(source_file):
-                        continue
-                    
-                    destination_pattern = source_config.get("destination_path", "")
-                    if not destination_pattern:
-                        continue
-                    
-                    target_file = resolve_destination_path(destination_pattern, target_lang, config)
-                    
-                    if not os.path.isfile(target_file):
-                        if verbose:
-                            click.echo(f"  {Fore.YELLOW}Skipping {source_file} - target file not found: {target_file}{Fore.RESET}")
-                        continue
-                    
-                    # Validate file pair
-                    file_issues, file_keys, file_keys_with_errors, file_keys_with_warnings = validate_file_pair(
-                        source_file, target_file, source_language, target_lang, config, verbose
-                    )
-                    all_issues.extend(file_issues)
-                    keys_checked += file_keys
-                    lang_keys_checked += file_keys
-                    keys_with_errors.update(file_keys_with_errors)
-                    keys_with_warnings.update(file_keys_with_warnings)
-                    if file_keys > 0:
-                        files_checked += 1
-                        lang_files_checked += 1
-            else:
-                # Fallback to filename-based matching
-                for target_file in target_files:
-                    # Find corresponding source file
-                    source_file = find_source_file(target_file, source_files, source_language, target_lang)
-                    if not source_file:
-                        continue
-                    
-                    # Validate file pair
-                    file_issues, file_keys, file_keys_with_errors, file_keys_with_warnings = validate_file_pair(
-                        source_file, target_file, source_language, target_lang, config, verbose
-                    )
-                    all_issues.extend(file_issues)
-                    keys_checked += file_keys
-                    lang_keys_checked += file_keys
-                    keys_with_errors.update(file_keys_with_errors)
-                    keys_with_warnings.update(file_keys_with_warnings)
-                    if file_keys > 0:
-                        files_checked += 1
-                        lang_files_checked += 1
-            
+
+            for source_file, target_file in iter_file_pairs(
+                config, source_language, target_lang, files_by_language, verbose
+            ):
+                # Validate file pair
+                file_issues, file_keys, file_keys_with_errors, file_keys_with_warnings = validate_file_pair(
+                    source_file, target_file, source_language, target_lang, config, verbose
+                )
+                all_issues.extend(file_issues)
+                keys_checked += file_keys
+                lang_keys_checked += file_keys
+                keys_with_errors.update(file_keys_with_errors)
+                keys_with_warnings.update(file_keys_with_warnings)
+                if file_keys > 0:
+                    files_checked += 1
+                    lang_files_checked += 1
+
             # Show progress for each language
             if not verbose:
                 click.echo(f" {lang_files_checked} files, {lang_keys_checked} keys")
@@ -171,6 +130,36 @@ def execute(language: Optional[str] = None, output_format: str = 'console',
             import traceback
             traceback.print_exc()
         return 1
+
+
+def iter_file_pairs(
+    config: Config,
+    source_language: str,
+    target_lang: str,
+    files_by_language: Dict[str, List[str]],
+    verbose: bool = False,
+) -> Iterator[Tuple[str, str]]:
+    """(source file, target file) pairs for one target language that both exist on disk."""
+    source_files_config = config.get_source_files()
+    if source_files_config:
+        for source_file, source_config in source_files_config.items():
+            if not os.path.isfile(source_file):
+                continue
+            destination_pattern = source_config.get("destination_path", "")
+            if not destination_pattern:
+                continue
+            target_file = resolve_destination_path(destination_pattern, target_lang, config)
+            if not os.path.isfile(target_file):
+                if verbose:
+                    click.echo(f"  {Fore.YELLOW}Skipping {source_file} - target file not found: {target_file}{Fore.RESET}")
+                continue
+            yield source_file, target_file
+    else:
+        source_files = files_by_language.get(source_language, [])
+        for target_file in files_by_language.get(target_lang, []):
+            source_file = find_source_file(target_file, source_files, source_language, target_lang)
+            if source_file:
+                yield source_file, target_file
 
 
 def find_source_file(target_file: str, source_files: List[str], 
@@ -220,6 +209,7 @@ def validate_file_pair(source_file: str, target_file: str, source_language: str,
     keys_checked = 0
     keys_with_errors = set()
     keys_with_warnings = set()
+    profile = profile_for_path(source_file, config)
     
     try:
         # Read files based on format
@@ -238,7 +228,7 @@ def validate_file_pair(source_file: str, target_file: str, source_language: str,
                     # Only check if target is translated (non-empty)
                     if target_value and target_value.strip():
                         is_xliff = source_file.endswith(('.xlf', '.xliff'))
-                        key_issues = validate_translation(source_value, target_value, key, is_xliff=is_xliff)
+                        key_issues = validate_translation(source_value, target_value, key, is_xliff=is_xliff, profile=profile)
                         issues.extend(key_issues)
                         keys_checked += 1
                         # Track keys with issues
@@ -271,7 +261,7 @@ def validate_file_pair(source_file: str, target_file: str, source_language: str,
                         # Only check if target is translated (non-empty)
                         if target_value and target_value.strip():
                             is_xliff = target_file.endswith(('.xlf', '.xliff'))
-                            key_issues = validate_translation(source_value, target_value, key, is_xliff=is_xliff)
+                            key_issues = validate_translation(source_value, target_value, key, is_xliff=is_xliff, profile=profile)
                             issues.extend(key_issues)
                             keys_checked += 1
                             # Track keys with issues
@@ -297,7 +287,7 @@ def validate_file_pair(source_file: str, target_file: str, source_language: str,
                         if isinstance(source_value, str) and isinstance(target_value, str):
                             if target_value and target_value.strip():
                                 is_xliff = target_file.endswith(('.xlf', '.xliff'))
-                                key_issues = validate_translation(source_value, target_value, key, is_xliff=is_xliff)
+                                key_issues = validate_translation(source_value, target_value, key, is_xliff=is_xliff, profile=profile)
                                 issues.extend(key_issues)
                                 keys_checked += 1
                                 # Track keys with issues

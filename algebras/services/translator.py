@@ -55,6 +55,16 @@ from algebras.services.batch_processor import BatchProcessor, BatchResult
 from algebras.services.icu_message_service import ICUMessageService
 from algebras.services.string_normalizer import StringNormalizer
 from algebras.services.strategies.strategy_factory import TranslationStrategyFactory
+from algebras.services.placeholders import (
+    GENERIC_PROFILE,
+    PlaceholderError,
+    PlaceholderProfile,
+    mask,
+    profile_for_path,
+    unmask,
+    verify,
+)
+from algebras.services.placeholders.plurals import drop_allowed_for_key
 
 
 def _contexts_kwarg(
@@ -65,6 +75,20 @@ def _contexts_kwarg(
         return {}
     aligned = [contexts.get(key_path) for key_path in key_paths]
     return {"contexts": aligned} if any(aligned) else {}
+
+
+def _plural_drop_allowed(
+    key_paths: List[str],
+    texts: List[str],
+    target_lang: str,
+    profile: PlaceholderProfile,
+) -> Optional[List[frozenset]]:
+    """Per text, the count placeholders a single-count plural form may leave out (None if none)."""
+    allowed = [
+        drop_allowed_for_key(key_path, text, target_lang, profile)
+        for key_path, text in zip(key_paths, texts)
+    ]
+    return allowed if any(allowed) else None
 
 
 def _flatten_translated_subtree(base_key_path: str, subtree: Any) -> Dict[str, str]:
@@ -328,12 +352,17 @@ class Translator:
         source_lang = map_language_code(source_lang)
         target_lang = map_language_code(target_lang)
 
+        profile = GENERIC_PROFILE
+
         # Check cache first, unless the caller asked to bypass it
         cache_key = self.cache.get_cache_key(
             text, source_lang, target_lang, ui_safe, self.custom_prompt
         )
         if not self.ignore_cache:
             cached_translation = self.cache.get(cache_key)
+            if cached_translation and verify(text, cached_translation, profile):
+                # Entries written before placeholder protection may be damaged; don't reuse them.
+                cached_translation = None
             if cached_translation:
                 print(
                     f"Cache hit: Using cached translation for '{text[:30]}...' ({source_lang} → {target_lang})"
@@ -348,8 +377,8 @@ class Translator:
         if self.icu_service.is_icu(text):
             prepared = self.icu_service.prepare(text)
             translated_segments = [
-                self._translate_non_icu_text(
-                    segment, source_lang, target_lang, ui_safe, glossary_id
+                self._translate_masked(
+                    segment, source_lang, target_lang, ui_safe, glossary_id, profile
                 )
                 for segment in prepared.translatable_segments
             ]
@@ -359,8 +388,8 @@ class Translator:
                     "  ⚠ ICU validation failed in translate_text; keeping raw translated output."
                 )
         else:
-            translation = self._translate_non_icu_text(
-                text, source_lang, target_lang, ui_safe, glossary_id
+            translation = self._translate_masked(
+                text, source_lang, target_lang, ui_safe, glossary_id, profile
             )
 
         # Update cache with new translation
@@ -370,6 +399,33 @@ class Translator:
         )
 
         return translation
+
+    def _translate_masked(
+        self,
+        text: str,
+        source_lang: str,
+        target_lang: str,
+        ui_safe: bool,
+        glossary_id: Optional[str],
+        profile: PlaceholderProfile,
+    ) -> str:
+        """
+        Translate with placeholders replaced by tokens, then put them back.
+        Retries once; raises PlaceholderError if the placeholders still don't survive.
+        """
+        masked = mask(text, profile)
+        if not masked.has_tokens:
+            return self._translate_non_icu_text(text, source_lang, target_lang, ui_safe, glossary_id)
+        last_error: Optional[PlaceholderError] = None
+        for _ in range(2):
+            translated = self._translate_non_icu_text(
+                masked.text, source_lang, target_lang, ui_safe, glossary_id
+            )
+            try:
+                return unmask(translated, masked, profile)
+            except PlaceholderError as e:
+                last_error = e
+        raise last_error
 
     def _translate_non_icu_text(
         self,
@@ -877,6 +933,7 @@ class Translator:
 
         num_batches = 0
         if texts_to_translate:
+            profile = profile_for_path(source_file_path, self.config)
             result = batch_processor.process(
                 texts=texts_to_translate,
                 source_lang=source_lang,
@@ -886,6 +943,10 @@ class Translator:
                 on_batch_complete=None,  # We'll handle callback after mapping to keys
                 translate_text_func=translate_text_func,
                 **_contexts_kwarg(contexts, key_paths_list),
+                placeholder_profile=profile,
+                drop_allowed=_plural_drop_allowed(
+                    key_paths_list, texts_to_translate, target_lang, profile
+                ),
             )
 
             # Map translations back to key paths and update content
@@ -899,6 +960,7 @@ class Translator:
                 )
                 for idx in range(batch_start_idx, batch_end_idx):
                     failed_indices.add(idx)
+            failed_indices |= result.failed_indices
 
             for batch_idx in range(1, num_batches + 1):
                 batch_start_idx = (batch_idx - 1) * self.batch_size
@@ -1019,6 +1081,7 @@ class Translator:
         glossary_id: Optional[str] = None,
         on_batch_complete: Optional[Callable[[Dict[str, str], int], None]] = None,
         contexts: Optional[Dict[str, str]] = None,
+        source_file_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Translate outdated keys in batches to avoid overloading the API.
@@ -1091,6 +1154,7 @@ class Translator:
         provider = self.api_config.get("provider", "algebras-ai")
         translate_text_func = None if provider == "algebras-ai" else self.translate_text
 
+        profile = profile_for_path(source_file_path, self.config)
         result = batch_processor.process(
             texts=texts_to_translate,
             source_lang=source_lang,
@@ -1100,6 +1164,10 @@ class Translator:
             on_batch_complete=None,  # We'll handle callback after mapping to keys
             translate_text_func=translate_text_func,
             **_contexts_kwarg(contexts, key_paths_list),
+            placeholder_profile=profile,
+            drop_allowed=_plural_drop_allowed(
+                key_paths_list, texts_to_translate, target_lang, profile
+            ),
         )
 
         # Map translations back to key paths and update content
@@ -1113,6 +1181,7 @@ class Translator:
             )
             for idx in range(batch_start_idx, batch_end_idx):
                 failed_indices.add(idx)
+        failed_indices |= result.failed_indices
 
         for batch_idx in range(1, num_batches + 1):
             batch_start_idx = (batch_idx - 1) * self.batch_size

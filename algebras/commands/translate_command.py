@@ -1810,7 +1810,9 @@ def _translate_plural_aware(
             content,
             second,
             *args,
-            contexts=anchor_plural_contexts(contexts, second, content),
+            contexts=anchor_plural_contexts(
+                contexts, second, content, source_content if isinstance(source_content, dict) else None
+            ),
             **kwargs,
         )
     return content

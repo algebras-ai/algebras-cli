@@ -5,11 +5,24 @@ Handles batch splitting, parallel processing, and error handling.
 
 import concurrent.futures
 import re
-from dataclasses import dataclass
-from typing import List, Dict, Optional, Callable, Any
+from dataclasses import dataclass, field
+from typing import List, Dict, Optional, Callable, Any, FrozenSet, Set
 
 from algebras.services.api_client import AlgebrasAIClient
 from algebras.services.icu_message_service import ICUMessageService
+from algebras.services.placeholders import (
+    GENERIC_PROFILE,
+    PlaceholderError,
+    PlaceholderProfile,
+    combine_context,
+    mask,
+    unmask,
+)
+
+_RETRY_NOTE = (
+    "IMPORTANT: a previous translation of this text lost or changed its placeholder tokens. "
+    "Copy every token exactly."
+)
 
 
 @dataclass
@@ -21,6 +34,9 @@ class BatchResult:
     failed_batches: List[int]  # Indices of failed batches
     successful_batches: int
     total_batches: int
+    # Indices of input texts whose translation was rejected because placeholders were lost or
+    # damaged (after one retry). Their entry in `translations` is "" and must not be written.
+    failed_indices: Set[int] = field(default_factory=set)
 
 
 class BatchProcessor:
@@ -63,9 +79,15 @@ class BatchProcessor:
         ] = None,
         translate_text_func: Optional[Callable[[str, str, str, bool, str], str]] = None,
         contexts: Optional[List[Optional[str]]] = None,
+        placeholder_profile: Optional[PlaceholderProfile] = None,
+        drop_allowed: Optional[List[FrozenSet[str]]] = None,
     ) -> BatchResult:
         """
         Process texts in batches with parallel execution.
+
+        Placeholders (%1$s, {name}, <b> …) are replaced by opaque tokens before sending and put back
+        afterwards; a text whose tokens come back lost or changed is retried once, then reported in
+        `BatchResult.failed_indices` instead of being returned damaged.
 
         Args:
             texts: List of texts to translate
@@ -76,19 +98,143 @@ class BatchProcessor:
             on_batch_complete: Optional callback function called after each batch completes
             translate_text_func: Optional function for translating individual texts (for non-batch providers)
             contexts: Optional per-text translator notes aligned with texts (algebras-ai only)
+            placeholder_profile: Placeholder syntaxes to protect (default: generic profile)
+            drop_allowed: Per-text placeholders that may be left out (count placeholders in
+                plural forms that cover a single count)
 
         Returns:
             BatchResult with translations and statistics
         """
+        profile = placeholder_profile or GENERIC_PROFILE
+
         # Flatten targeted ICU messages into literal segments first.
         # This preserves syntax tokens while translating only literal text.
         preprocessed_texts, icu_mapping = self.icu_service.preprocess_texts(texts)
         preprocessed_contexts: List[Optional[str]] = [None] * len(preprocessed_texts)
-        if contexts:
+        preprocessed_drop: List[FrozenSet[str]] = [frozenset()] * len(preprocessed_texts)
+        for index, entry in enumerate(icu_mapping):
             # An ICU message may be split into several segments; each inherits its context.
-            for entry, context in zip(icu_mapping, contexts):
-                for offset in range(entry.count):
-                    preprocessed_contexts[entry.start + offset] = context
+            for offset in range(entry.count):
+                if contexts and index < len(contexts):
+                    preprocessed_contexts[entry.start + offset] = contexts[index]
+                if drop_allowed and index < len(drop_allowed):
+                    preprocessed_drop[entry.start + offset] = drop_allowed[index] or frozenset()
+
+        # Mask placeholders so the model only sees opaque tokens.
+        masked = [mask(t, profile) if isinstance(t, str) else None for t in preprocessed_texts]
+        api_texts = [m.text if m is not None else t for m, t in zip(masked, preprocessed_texts)]
+        api_contexts = [
+            combine_context(c, m, d) if m is not None else c
+            for c, m, d in zip(preprocessed_contexts, masked, preprocessed_drop)
+        ]
+
+        result = self._process_segments(
+            api_texts,
+            source_lang,
+            target_lang,
+            ui_safe,
+            glossary_id,
+            on_batch_complete,
+            translate_text_func,
+            api_contexts,
+            warn_dropped_contexts=bool(contexts and any(contexts)),
+        )
+
+        # Put placeholders back; retry rejected segments once with a stronger note.
+        # Segments of failed API batches come back as "" and are skipped by _unmask_all.
+        failed_segments = self._unmask_all(result.translations, masked, profile, preprocessed_drop, set())
+        retry = sorted(failed_segments)
+        if retry:
+            print(f"  ⚠ {len(retry)} translation(s) lost or changed placeholders; retrying them once")
+            retry_result = self._process_segments(
+                [api_texts[i] for i in retry],
+                source_lang,
+                target_lang,
+                ui_safe,
+                glossary_id,
+                None,
+                translate_text_func,
+                [f"{_RETRY_NOTE} {api_contexts[i] or ''}".strip() for i in retry],
+                warn_dropped_contexts=False,
+                quiet=True,
+            )
+            retried = list(retry_result.translations)
+            still_failed = self._unmask_all(
+                retried,
+                [masked[i] for i in retry],
+                profile,
+                [preprocessed_drop[i] for i in retry],
+                set(),
+                key_labels=[preprocessed_texts[i] for i in retry],
+            )
+            failed_segments = set()
+            for local, segment_index in enumerate(retry):
+                if local in still_failed:
+                    failed_segments.add(segment_index)
+                    result.translations[segment_index] = ""
+                else:
+                    result.translations[segment_index] = retried[local]
+
+        failed_indices: Set[int] = set()
+        for index, entry in enumerate(icu_mapping):
+            if any(entry.start + o in failed_segments for o in range(entry.count)):
+                failed_indices.add(index)
+
+        if icu_mapping:
+            result.translations = self.icu_service.postprocess_translations(
+                icu_mapping, result.translations
+            )
+        for index in failed_indices:
+            result.translations[index] = ""
+        result.failed_indices = failed_indices
+        if failed_indices:
+            print(
+                f"  ✗ {len(failed_indices)} translation(s) still had lost or damaged placeholders "
+                "and were not used; they stay untranslated (run again, or check with 'algebras placeholders')"
+            )
+        return result
+
+    def _unmask_all(
+        self,
+        translations: List[Any],
+        masked: List[Any],
+        profile: PlaceholderProfile,
+        drop: List[FrozenSet[str]],
+        failed: Set[int],
+        key_labels: Optional[List[Any]] = None,
+    ) -> Set[int]:
+        """Unmask translations in place; return indices whose placeholders did not survive."""
+        for i, m in enumerate(masked):
+            if m is None or i >= len(translations):
+                continue
+            translated = translations[i]
+            if not isinstance(translated, str) or translated == "":
+                continue  # empty source, or failed API batch
+            try:
+                translations[i] = unmask(translated, m, profile, drop[i])
+            except PlaceholderError as e:
+                failed.add(i)
+                if key_labels is not None:
+                    label = str(key_labels[i])[:60]
+                    print(f"    ✗ '{label}': {e}")
+        return failed
+
+    def _process_segments(
+        self,
+        texts: List[Any],
+        source_lang: str,
+        target_lang: str,
+        ui_safe: bool,
+        glossary_id: str,
+        on_batch_complete: Optional[Callable[[Dict[str, str], int], None]],
+        translate_text_func: Optional[Callable[[str, str, str, bool, str], str]],
+        contexts: List[Optional[str]],
+        warn_dropped_contexts: bool,
+        quiet: bool = False,
+    ) -> BatchResult:
+        """Send already-masked segments through the provider (no ICU or placeholder handling)."""
+        preprocessed_texts = texts
+        preprocessed_contexts = contexts
 
         # Filter empty strings and maintain mapping
         non_empty_texts = []
@@ -107,28 +253,24 @@ class BatchProcessor:
 
         # If all texts are empty, return early
         if not non_empty_texts:
-            empty_result = BatchResult(
+            return BatchResult(
                 translations=[""] * len(preprocessed_texts),
                 error_stats={"5xx": [], "429": [], "other": []},
                 failed_batches=[],
                 successful_batches=0,
                 total_batches=0,
             )
-            if icu_mapping:
-                empty_result.translations = self.icu_service.postprocess_translations(
-                    icu_mapping, empty_result.translations
-                )
-            return empty_result
 
         # Split into batches
         total_texts = len(non_empty_texts)
         num_batches = (total_texts + self.batch_size - 1) // self.batch_size
 
-        print(
-            f"Processing {total_texts} text items in {num_batches} batches (batch size: {self.batch_size})"
-        )
+        if not quiet:
+            print(
+                f"Processing {total_texts} text items in {num_batches} batches (batch size: {self.batch_size})"
+            )
 
-        if self.provider != "algebras-ai" and any(non_empty_contexts):
+        if self.provider != "algebras-ai" and warn_dropped_contexts:
             print(
                 f"  ⚠ Plural-form notes are only sent to Algebras AI. With provider "
                 f"'{self.provider}', plural forms such as few/many may come back identical "
@@ -162,11 +304,6 @@ class BatchProcessor:
                 empty_indices,
                 index_mapping,
                 len(preprocessed_texts),
-            )
-
-        if icu_mapping:
-            result.translations = self.icu_service.postprocess_translations(
-                icu_mapping, result.translations
             )
 
         return result

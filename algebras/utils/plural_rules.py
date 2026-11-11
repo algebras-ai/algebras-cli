@@ -64,6 +64,14 @@ def get_category_examples(language_code: str, category: str) -> Optional[str]:
     return None
 
 
+def covers_single_count(language_code: str, category: str) -> bool:
+    """True if `category` is selected by exactly one count in the language (e.g. German "one" = 1)."""
+    if category == "zero":
+        return True  # explicit override for 0
+    examples = get_category_examples(language_code, category)
+    return bool(examples) and examples.isdigit()
+
+
 def get_language_name(language_code: str) -> str:
     try:
         return Locale.parse(language_code.replace("_", "-"), sep="-").english_name

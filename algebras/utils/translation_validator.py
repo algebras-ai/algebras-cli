@@ -163,75 +163,45 @@ def extract_placeholders(text: str) -> Dict[str, List[str]]:
     return placeholders
 
 
-def check_placeholders(source: str, target: str, key: Optional[str] = None) -> List[Issue]:
+_PLACEHOLDER_SEVERITY = {
+    'missing': 'error',
+    'count_mismatch': 'error',
+    'corrupted': 'error',
+    'reordered': 'error',
+    'extra': 'warning',
+}
+
+
+def check_placeholders(source: str, target: str, key: Optional[str] = None, profile=None) -> List[Issue]:
     """
     Check placeholder consistency between source and target.
-    
+
+    Uses the same engine as translation and 'algebras placeholders', so all three agree.
+    Markup tags are left to check_html_xml_tags.
+
     Args:
         source: Source string
         target: Target translation string
         key: Optional key for context
-        
+        profile: Placeholder profile of the file (default: generic)
+
     Returns:
         List of placeholder issues
     """
+    from algebras.services.placeholders import GENERIC_PROFILE, verify
+
     issues = []
-    
-    source_placeholders = extract_placeholders(source)
-    target_placeholders = extract_placeholders(target)
-    
-    # Check each placeholder type
-    for ptype in ['printf', 'python', 'qt', 'icu', 'other']:
-        source_pl = source_placeholders[ptype]
-        target_pl = target_placeholders[ptype]
-        
-        # Count occurrences
-        source_counts = {}
-        for pl in source_pl:
-            source_counts[pl] = source_counts.get(pl, 0) + 1
-        
-        target_counts = {}
-        for pl in target_pl:
-            target_counts[pl] = target_counts.get(pl, 0) + 1
-        
-        # Check for missing placeholders
-        for pl, count in source_counts.items():
-            if pl not in target_counts:
-                issues.append(Issue('error', 'placeholders',
-                    f'Missing placeholder in translation: {pl} (appears {count} time(s) in source)', key))
-            elif target_counts[pl] < count:
-                issues.append(Issue('error', 'placeholders',
-                    f'Placeholder {pl} appears {count} time(s) in source but only {target_counts[pl]} time(s) in translation', key))
-        
-        # Check for extra placeholders
-        for pl, count in target_counts.items():
-            if pl not in source_counts:
-                issues.append(Issue('warning', 'placeholders',
-                    f'Extra placeholder in translation: {pl} (not in source)', key))
-            elif source_counts[pl] < count:
-                issues.append(Issue('warning', 'placeholders',
-                    f'Placeholder {pl} appears {count} time(s) in translation but only {source_counts[pl]} time(s) in source', key))
-        
-        # For printf, check type consistency
-        if ptype == 'printf':
-            for pl in source_pl:
-                if pl in target_pl:
-                    # Extract specifier (last character)
-                    source_spec = pl[-1] if len(pl) > 0 else ''
-                    # Find matching placeholder in target
-                    target_matches = [tpl for tpl in target_pl if tpl == pl]
-                    if target_matches:
-                        target_spec = target_matches[0][-1] if len(target_matches[0]) > 0 else ''
-                        # Check if specifier type changed (some changes are acceptable, some are not)
-                        numeric_specs = {'d', 'i', 'o', 'x', 'X', 'u'}
-                        string_specs = {'s', 'c'}
-                        if source_spec in numeric_specs and target_spec in string_specs:
-                            issues.append(Issue('error', 'placeholders',
-                                f'Placeholder type changed from numeric ({source_spec}) to string ({target_spec}): {pl}', key))
-                        elif source_spec in string_specs and target_spec in numeric_specs:
-                            issues.append(Issue('error', 'placeholders',
-                                f'Placeholder type changed from string ({source_spec}) to numeric ({target_spec}): {pl}', key))
-    
+    for problem in verify(source, target, profile or GENERIC_PROFILE):
+        severity = _PLACEHOLDER_SEVERITY.get(problem.code)
+        if severity is None or problem.placeholder.startswith('<'):
+            continue  # tags: reported by check_html_xml_tags
+        if problem.code == 'missing':
+            message = f'Missing placeholder in translation: {problem.placeholder}'
+        elif problem.code == 'extra':
+            message = f'Extra placeholder in translation: {problem.placeholder} (not in source)'
+        else:
+            message = problem.message
+        issues.append(Issue(severity, 'placeholders', message, key))
     return issues
 
 
@@ -640,7 +610,7 @@ def check_xliff_placeholders(source: str, target: str, key: Optional[str] = None
     return issues
 
 
-def validate_translation(source: str, target: str, key: Optional[str] = None, is_xliff: bool = False) -> List[Issue]:
+def validate_translation(source: str, target: str, key: Optional[str] = None, is_xliff: bool = False, profile=None) -> List[Issue]:
     """
     Run all validation checks on a translation pair.
     
@@ -660,7 +630,7 @@ def validate_translation(source: str, target: str, key: Optional[str] = None, is
     
     # Run all checks
     issues.extend(check_formatting(source, target, key))
-    issues.extend(check_placeholders(source, target, key))
+    issues.extend(check_placeholders(source, target, key, profile))
     issues.extend(check_numbers(source, target, key))
     issues.extend(check_html_xml_tags(source, target, key))
     issues.extend(check_non_translatable_tokens(source, target, key))

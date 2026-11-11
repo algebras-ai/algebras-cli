@@ -423,6 +423,33 @@ algebras healthcheck --language fr --verbose
 
 **Note:** The healthcheck command validates translation quality by checking formatting, placeholders, and tags. It returns exit code 0 if no errors are found, or 1 if errors are detected (useful for CI/CD pipelines).
 
+### Check and fix placeholders
+
+Placeholders (`%s`, `%1$d`, `%@`, `{name}`, `{{name}}`, `<b>` …) are protected during translation: the
+model only sees opaque tokens, and a translation that loses or changes one is retried once, then left
+untranslated instead of being written damaged. To check files that were translated earlier:
+
+```bash
+# Report lost, extra or damaged placeholders (exit code 1 if any)
+algebras placeholders
+
+# Only some languages
+algebras placeholders -l uz -l ru
+
+# Preview the automatic fixes (e.g. "%1$с" → "%1$s", "{{ имя }}" → "{{name}}")
+algebras placeholders --fix --dry-run
+
+# Apply them; retranslate what cannot be fixed automatically
+algebras placeholders --fix --retranslate
+
+# JSON report for CI
+algebras placeholders --format json
+```
+
+Exit codes: 0 = no issues (or all fixed), 1 = issues found, 2 = issues left after `--fix`.
+To choose which placeholder syntaxes apply to a file, add `placeholders` to its entry in `source_files`,
+e.g. `"placeholders": ["printf", "xml_tag"]`.
+
 ### Check the status of your translations
 
 ```bash
