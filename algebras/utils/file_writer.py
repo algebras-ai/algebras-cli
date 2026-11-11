@@ -12,7 +12,11 @@ class IncrementalFileWriter:
     """
 
     def __init__(
-        self, file_path: str, file_type: str, export_name: Optional[str] = None
+        self,
+        file_path: str,
+        file_type: str,
+        export_name: Optional[str] = None,
+        source_file: Optional[str] = None,
     ):
         """
         Initialize incremental file writer.
@@ -21,10 +25,12 @@ class IncrementalFileWriter:
             file_path: Path to the file to write
             file_type: Type of file ('ts', 'json', etc.)
             export_name: Export name for TypeScript files
+            source_file: Source language file (TypeScript: quote style of new values)
         """
         self.file_path = file_path
         self.file_type = file_type
         self.export_name = export_name
+        self.source_file = source_file
         self.queue = queue.Queue()
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
@@ -77,6 +83,7 @@ class IncrementalFileWriter:
                                 translations,
                                 self.export_name,
                                 self.lock,
+                                source_file=self.source_file,
                             )
                         # Add support for other file types here if needed
                         else:

@@ -697,7 +697,7 @@ def _process_all_files(
                         if detect_format(source_file) == FileFormat.TS:
                             basename = os.path.basename(target_file)
                             export_name = basename.split(".")[0]
-                            incremental_writer = IncrementalFileWriter(target_file, "ts", export_name)
+                            incremental_writer = IncrementalFileWriter(target_file, "ts", export_name, source_file=source_file)
 
                             def on_batch_complete(
                                 batch_results: Dict[str, str], batch_index: int
@@ -815,7 +815,7 @@ def _process_all_files(
 
                             # Create incremental writer
                             incremental_writer = IncrementalFileWriter(
-                                target_file, "ts", export_name
+                                target_file, "ts", export_name, source_file=source_file
                             )
 
                             # Define callback for batch completion
@@ -1049,8 +1049,6 @@ def _process_all_files(
                             if provider == "algebras-ai"
                             else translator.translate_text
                         )
-                        from algebras.services.placeholders import profile_for_path
-
                         translated_content = flat_strategy.translate(
                             source_content,
                             source_language,
@@ -1116,7 +1114,7 @@ def _process_all_files(
 
                         # Create incremental writer
                         incremental_writer = IncrementalFileWriter(
-                            target_file, "ts", export_name
+                            target_file, "ts", export_name, source_file=source_file
                         )
 
                         # Define callback for batch completion
@@ -1342,7 +1340,7 @@ def _process_outdated_files(
 
                     # Create incremental writer
                     incremental_writer = IncrementalFileWriter(
-                        target_file, "ts", export_name
+                        target_file, "ts", export_name, source_file=source_file
                     )
 
                     # Define callback for batch completion
@@ -1529,7 +1527,7 @@ def _process_missing_keys_files(
 
                     # Create incremental writer
                     incremental_writer = IncrementalFileWriter(
-                        target_file, "ts", export_name
+                        target_file, "ts", export_name, source_file=source_file
                     )
 
                     # Define callback for batch completion
@@ -1675,7 +1673,7 @@ def _process_outdated_keys_files(
 
                     # Create incremental writer
                     incremental_writer = IncrementalFileWriter(
-                        target_file, "ts", export_name
+                        target_file, "ts", export_name, source_file=source_file
                     )
 
                     # Define callback for batch completion
@@ -2041,6 +2039,8 @@ def _write_translated_content(
         kwargs["source_file"] = source_file
     elif format_type == FileFormat.XML:
         kwargs["source_file"] = source_file  # markup and formatted="false" come from the source
+    elif format_type == FileFormat.TS:
+        kwargs["source_file"] = source_file  # quote style of each value ('…', "…" or `…`)
     elif format_type in (FileFormat.CSV, FileFormat.TSV):
         if target_language is None:
             raise ValueError("CSV/TSV write requires target_language")
