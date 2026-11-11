@@ -117,7 +117,8 @@ def check_file_pair(
 
 def _force_key(path: KeyPath, source_data_top: Dict[str, Any]) -> str:
     # Plural groups stored under one top-level key (Android "name.__plurals__") are retranslated whole.
-    if len(path) == 2 and isinstance(source_data_top.get(path[0]), dict):
+    # Nested formats (YAML, JSON) are retranslated per key path.
+    if len(path) == 2 and path[0].endswith(".__plurals__") and isinstance(source_data_top.get(path[0]), dict):
         return path[0]
     return ".".join(path)
 
