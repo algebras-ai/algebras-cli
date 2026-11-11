@@ -325,8 +325,12 @@ class BatchProcessor:
             except PlaceholderError as e:
                 failed.add(i)
                 if key_labels is not None:
-                    label = str(key_labels[i])[:60]
-                    print(f"    ✗ '{label}': {e}")
+                    # XLIFF texts hold private-use stand-ins for {, }, # and whitespace inside
+                    # inline element attributes; show the real characters.
+                    from algebras.utils.xliff_handler import decode_flat
+
+                    label = decode_flat(str(key_labels[i]))[:60]
+                    print(f"    ✗ '{label}': {decode_flat(str(e))}")
         return failed
 
     def _process_segments(

@@ -49,7 +49,9 @@ from algebras.utils.html_handler import (
     write_html_file,
 )
 from algebras.utils.xliff_handler import (
+    decode_flat,
     read_xliff_file,
+    segment_contexts,
     write_xliff_file,
     extract_translatable_strings as extract_xliff_strings,
     update_xliff_targets,
@@ -1084,52 +1086,37 @@ def _process_all_files(
                                 key_order=list(translated_content.get("translations", {})),
                             )
                     elif source_file.endswith((".xlf", ".xliff")):
-                        # For XLIFF files, extract strings, translate, then update structure
-                        # Don't use translator.translate_file() as it returns structured dict, not flat translations
+                        # XLIFF: every translatable text (a 1.2 unit, or a 2.x segment with the
+                        # other segments of its unit as context; translate="no" units are left
+                        # out), placeholders masked. An existing target keeps everything but the
+                        # changed <target>s; a new one (or --regenerate-from-scratch) is built
+                        # from the source file, keeping its notes, context and attributes.
                         source_content_raw = read_xliff_file(source_file)
-                        # Extract flat translatable strings
                         source_content = extract_xliff_strings(source_content_raw)
-
-                        # Translate the flat dictionary using strategy
-                        from algebras.services.strategies.strategy_factory import (
-                            TranslationStrategyFactory,
-                        )
-
-                        flat_strategy = (
-                            TranslationStrategyFactory.get_flat_dict_strategy(
-                                translator
-                            )
-                        )
-                        provider = translator.api_config.get("provider", "algebras-ai")
-                        translate_text_func = (
-                            None
-                            if provider == "algebras-ai"
-                            else translator.translate_text
-                        )
-                        translated_content = flat_strategy.translate(
+                        translated_content = _translate_plural_aware(
+                            translator.translate_missing_keys_batch,
                             source_content,
-                            source_language,
+                            {},
+                            list(source_content),
                             target_lang,
                             ui_safe,
                             glossary_id,
-                            None,
-                            translate_text_func,
-                            placeholder_profile=profile_for_path(source_file, config),
+                            source_file_path=source_file,
+                            contexts=_xliff_segment_contexts(source_content_raw),
                         )
 
-                        # Create empty target structure with version from source
-                        target_version = (
-                            source_content_raw.get("version", xlf_version)
-                            if source_content_raw
-                            else xlf_version
-                        )
-                        target_content_raw = {
-                            "version": target_version,
-                            "files": [],
-                        }
+                        in_place = _should_use_in_place(target_file, regenerate_from_scratch)
+                        if in_place:
+                            target_content_raw = read_xliff_file(target_file)
+                        else:
+                            target_content_raw = {
+                                "version": source_content_raw.get("version", xlf_version),
+                                "files": [],
+                            }
                         if verbose:
                             click.echo(
-                                f"  {Fore.CYAN}Creating new XLIFF file with version {target_version} and state '{xlf_target_state}'\x1b[0m"
+                                f"  {Fore.CYAN}{'Updating' if in_place else 'Creating new'} XLIFF file "
+                                f"(version {target_content_raw['version']}, state '{xlf_target_state}')\x1b[0m"
                             )
                             # Show sample translations
                             sample_count = min(3, len(translated_content))
@@ -1140,12 +1127,11 @@ def _process_all_files(
                                 for i, (key, value) in enumerate(
                                     list(translated_content.items())[:sample_count]
                                 ):
-                                    source_value = source_content.get(key, "")
+                                    source_value = decode_flat(source_content.get(key, ""))
                                     click.echo(
-                                        f"    {key[:30]}... : '{source_value[:40]}...' → '{value[:40]}...'"
+                                        f"    {key[:30]}... : '{source_value[:40]}...' → '{decode_flat(value)[:40]}...'"
                                     )
 
-                        # Use update_xliff_targets to properly structure the content and add state
                         updated_content = update_xliff_targets(
                             target_content_raw,
                             translated_content,
@@ -1951,6 +1937,7 @@ def _load_file_contents(
             if os.path.exists(target_file)
             else {}
         )
+        plural_contexts = _xliff_segment_contexts(source_raw_content)
     elif format_type == FileFormat.STRINGSDICT:
         # StringsDict needs raw content for structure preservation
         source_raw_content = handler.read(source_file)
@@ -2050,6 +2037,19 @@ def _load_file_contents(
         target_raw_content,
         plural_contexts,
     )
+
+
+def _xliff_segment_contexts(source_raw_content) -> Optional[Dict[str, str]]:
+    """
+    Notes for the segments of multi-segment XLIFF 2.x units (the whole message as context), as
+    PluralContexts anchored to themselves so _translate_plural_aware sends them in one pass.
+    """
+    notes = segment_contexts(source_raw_content or {})
+    if not notes:
+        return None
+    from algebras.utils.ios_stringsdict_handler import PluralContexts
+
+    return PluralContexts(notes, anchors={key: key for key in notes})
 
 
 def _translate_plural_aware(
