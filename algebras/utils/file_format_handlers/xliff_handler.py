@@ -29,8 +29,27 @@ class XLIFFHandler(FileFormatHandler):
         language: Optional[str] = None,
         config: Optional["Config"] = None,
     ) -> Dict[str, Any]:
-        """Read XLIFF file and extract translatable strings"""
+        """
+        Read XLIFF file and extract translatable strings.
+
+        For a target-language file this returns the existing translations (non-empty <target>
+        values), not the unit sources: the result is what is already translated, and writing it back
+        must not replace other units' targets with their source text.
+        """
         raw_content = read_xliff_file(file_path)
+        source_language = None
+        if config is not None:
+            try:
+                source_language = config.get_source_language()
+            except Exception:
+                source_language = None
+        if language and source_language and language != source_language:
+            return {
+                unit["id"]: unit["target"]
+                for file_data in raw_content.get("files", [])
+                for unit in file_data.get("trans-units", [])
+                if unit.get("id") and (unit.get("target") or "").strip()
+            }
         return extract_xliff_strings(raw_content)
     
     def write(

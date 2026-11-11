@@ -994,6 +994,8 @@ def _process_all_files(
                             if provider == "algebras-ai"
                             else translator.translate_text
                         )
+                        from algebras.services.placeholders import profile_for_path
+
                         translated_content = flat_strategy.translate(
                             source_content,
                             source_language,
@@ -1002,6 +1004,7 @@ def _process_all_files(
                             glossary_id,
                             None,
                             translate_text_func,
+                            placeholder_profile=profile_for_path(source_file, config),
                         )
 
                         # Create empty target structure with version from source
