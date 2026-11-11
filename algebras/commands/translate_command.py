@@ -21,6 +21,7 @@ from algebras.utils.po_handler import (
     read_po_file,
     write_po_file,
 )
+from algebras.utils import po_handler
 from algebras.utils import android_plurals
 from algebras.utils.android_xml_handler import (
     read_android_xml_file,
@@ -954,6 +955,49 @@ def _process_all_files(
                             target_language=target_lang,
                         )
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
+                    elif detect_format(source_file) == FileFormat.PO:
+                        # gettext: every msgstr / msgstr[N] the target needs, plural notes,
+                        # placeholders masked; written through the per-entry placeholder gate.
+                        handler = get_handler(source_file, config)
+                        (
+                            source_content,
+                            _target_content,
+                            _source_raw,
+                            _target_raw,
+                            plural_contexts,
+                        ) = _load_file_contents(
+                            source_file,
+                            target_file,
+                            handler,
+                            source_language,
+                            target_lang,
+                            config,
+                            verbose,
+                            xlf_version,
+                        )
+                        translated_content = _translate_plural_aware(
+                            translator.translate_missing_keys_batch,
+                            source_content,
+                            {},
+                            list(source_content),
+                            target_lang,
+                            ui_safe,
+                            glossary_id,
+                            source_file_path=source_file,
+                            contexts=plural_contexts,
+                        )
+                        _write_translated_content(
+                            target_file,
+                            translated_content,
+                            handler,
+                            set(translated_content),
+                            use_in_place=False,
+                            source_file=source_file,
+                            source_language=source_language,
+                            target_language=target_lang,
+                            po_mark_fuzzy=po_mark_fuzzy,
+                        )
+                        click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     elif source_file.endswith((".csv", ".tsv")):
                         # For CSV/TSV files, read existing CSV/TSV and add/update language column
                         existing_csv = read_csv_file(source_file)
@@ -1798,6 +1842,23 @@ def _load_file_contents(
             if os.path.exists(target_file)
             else {}
         )
+    elif format_type == FileFormat.PO:
+        # Plural entries: one key per msgstr[N] the target needs (its Plural-Forms), each with
+        # the source text it is translated from and a note on which counts it covers.
+        source_content = po_handler.expand_plural_source(
+            source_file,
+            handler.read_for_translation(source_file, source_language, config),
+            target_language,
+            target_file,
+        )
+        plural_contexts = po_handler.build_plural_contexts(
+            source_file, source_language, target_language, target_file
+        )
+        target_content = (
+            handler.read_for_translation(target_file, target_language, config)
+            if os.path.exists(target_file)
+            else {}
+        )
     elif format_type in (FileFormat.CSV, FileFormat.TSV):
         # CSV needs language-specific reading
         source_content = handler.read_for_translation(
@@ -1959,6 +2020,9 @@ def _write_translated_content(
         )
     elif format_type == FileFormat.PO:
         kwargs["po_mark_fuzzy"] = po_mark_fuzzy
+        # New entries take flags/msgid_plural from the source; a new file gets the target's Plural-Forms.
+        kwargs["source_file"] = source_file
+        kwargs["target_language"] = target_language
 
     # Write using handler
     if use_in_place and handler.supports_in_place():

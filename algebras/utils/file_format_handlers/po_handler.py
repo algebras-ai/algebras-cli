@@ -11,6 +11,16 @@ from algebras.utils.po_handler import (
 )
 
 
+def _po_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Source file (template, flags, msgid_plural of new entries) and target language, if known."""
+    extra = {}
+    if kwargs.get("source_file"):
+        extra["source_file"] = kwargs["source_file"]
+    if kwargs.get("target_language"):
+        extra["language"] = kwargs["target_language"]
+    return extra
+
+
 class POHandler(FileFormatHandler):
     """Handler for PO (gettext) files"""
     
@@ -26,7 +36,7 @@ class POHandler(FileFormatHandler):
     ) -> None:
         """Write PO file"""
         po_mark_fuzzy = kwargs.get("po_mark_fuzzy", False)
-        write_po_file(file_path, content, po_mark_fuzzy)
+        write_po_file(file_path, content, po_mark_fuzzy, **_po_kwargs(kwargs))
     
     def supports_in_place(self) -> bool:
         """PO format supports in-place updates via write_po_file"""
@@ -41,4 +51,4 @@ class POHandler(FileFormatHandler):
     ) -> None:
         """Write PO file (write_po_file already supports in-place)"""
         po_mark_fuzzy = kwargs.get("po_mark_fuzzy", False)
-        write_po_file(file_path, content, po_mark_fuzzy)
+        write_po_file(file_path, content, po_mark_fuzzy, **_po_kwargs(kwargs))

@@ -200,7 +200,11 @@ def get_key_value(data: Dict[str, Any], key: str) -> Any:
 def expand_plural_source_keys(
     source_file: str, source_data: Dict[str, Any], target_language: Optional[str]
 ) -> Dict[str, Any]:
-    """For .stringsdict sources, add the plural-form keys target_language needs."""
+    """For .stringsdict and .po sources, add the plural-form keys target_language needs."""
+    if target_language and source_file.endswith(".po"):
+        from algebras.utils.po_handler import expand_plural_source
+
+        return expand_plural_source(source_file, source_data, target_language)
     if not target_language or not source_file.endswith(".stringsdict"):
         return source_data
     return expand_plural_forms(
