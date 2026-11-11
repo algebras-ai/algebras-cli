@@ -283,32 +283,57 @@ def write_properties_from_template(
     text = _read_text(source_file)
     if ascii_only is None:
         ascii_only = uses_unicode_escapes(source_file)
+    from algebras.utils import layout_merge
+
     lines, entries = parse_properties_text(text)
     newline = "\r\n" if "\r\n" in text else "\n"
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line))
+
+    def _line_content_end(index: int) -> int:
+        return offsets[index] + len(lines[index].rstrip("\r\n"))
+
+    # Items for layout_merge: entries and comment lines (blank lines are layout between them), so a
+    # left-out key takes the comment directly above it along, as in Android and .strings files.
+    items: List[layout_merge.Item] = []
+    item_entries: Dict[int, PropertiesEntry] = {}
     by_first = {e.first_line: e for e in entries}
-    out: List[str] = []
     i = 0
     while i < len(lines):
         entry = by_first.get(i)
-        if entry is None:
-            out.append(lines[i])
-            i += 1
+        if entry is not None:
+            item_entries[len(items)] = entry
+            items.append(
+                layout_merge.Item(layout_merge.ENTRY, offsets[i], _line_content_end(entry.last_line), entry.key)
+            )
+            i = entry.last_line + 1
             continue
-        value = values.get(entry.key)
-        if isinstance(value, str):
-            ending = lines[entry.last_line][len(lines[entry.last_line].rstrip("\r\n")) :]
-            if value == entry.value:
-                out.extend(lines[entry.first_line : entry.last_line + 1])
-            else:
-                out.append(_render_value(entry, value, ascii_only, newline) + ending)
-        i = entry.last_line + 1
-    if lines and not lines[-1].endswith(("\n", "\r")) and out and out[-1].endswith(("\n", "\r")):
-        out[-1] = out[-1].rstrip("\r\n")  # the last entry was left out: keep "no final line break"
+        if lines[i].strip():
+            content_start = offsets[i] + len(lines[i]) - len(lines[i].lstrip(" \t\f"))
+            items.append(layout_merge.Item(layout_merge.COMMENT, content_start, _line_content_end(i)))
+        i += 1
+
+    def _render(index: int) -> str:
+        entry = item_entries[index]
+        value = values[entry.key]
+        if value == entry.value:
+            return text[items[index].start : items[index].end]
+        return _render_value(entry, value, ascii_only, newline)
+
+    output = layout_merge.build_from_template(
+        text,
+        items,
+        keep=lambda index: isinstance(values.get(items[index].key), str),
+        render_item=_render,
+    )
+    if text and not text.endswith(("\n", "\r")):
+        output = output.rstrip("\r\n")  # the last entry was left out: keep "no final line break"
     directory = os.path.dirname(file_path)
     if directory:
         os.makedirs(directory, exist_ok=True)
     with open(file_path, "w", encoding="utf-8", newline="") as f:
-        f.write("".join(out))
+        f.write(output)
 
 
 def _render_value(entry: PropertiesEntry, value: str, ascii_only: bool, newline: str) -> str:
