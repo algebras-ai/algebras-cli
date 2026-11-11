@@ -78,6 +78,8 @@ from algebras.utils.file_writer import IncrementalFileWriter
 from algebras.utils.json_i18n import expand_i18next_source_file
 from algebras.services.placeholders import profile_for_path
 from algebras.services.translator import Translator
+from algebras.services.batch_processor import BatchProcessor
+from algebras.utils.run_stats import RunStats, EXIT_ERROR, EXIT_OK
 from algebras.utils.file_format_handlers import get_handler
 from algebras.utils.file_format_detector import (
     is_flat_format,
@@ -112,6 +114,63 @@ def lookup_source_file_config(
     return normalized_source_files_config.get(os.path.normpath(source_file))
 
 
+# --- Run outcome and --force keys -------------------------------------------------------------
+
+
+def _force_values(force: Any) -> Optional[List[str]]:
+    """
+    The values given to --force, None for no specific keys. `force` is a string (one --force, or
+    a "k1,k2" list) or a sequence (--force given several times, or keys passed from Python).
+    """
+    if not force or force is True or force == "__all__":
+        return None
+    values = [force] if isinstance(force, str) else [str(v) for v in force]
+    if "__all__" in values:
+        return None
+    return values
+
+
+def _split_force_values(values: List[str]) -> Set[str]:
+    # Backwards-compatible comma form: --force "key1,key2".
+    return {k.strip() for value in values for k in value.split(",") if k.strip()}
+
+
+def _resolve_force_keys(values: List[str], available_keys: Set[str]) -> Set[str]:
+    """
+    Keys to retranslate for one file. A value that is itself a key (PO msgids often contain
+    commas) is taken as is; any other value is split on commas (the "k1,k2" form).
+    """
+    keys: Set[str] = set()
+    for value in values:
+        if value in available_keys or value.strip() in available_keys:
+            keys.add(value if value in available_keys else value.strip())
+        else:
+            keys |= _split_force_values([value])
+    return keys
+
+
+def _available_keys(handler, content: Any) -> Set[str]:
+    if not isinstance(content, dict):
+        return set()
+    keys = set(content)
+    try:
+        keys |= set(handler.extract_keys(content))
+    except Exception:  # noqa: BLE001 - only used to recognise keys that contain commas
+        pass
+    return keys
+
+
+def _each_file(target_languages: List[str], source_files: List[str]):
+    """(target language, source file) pairs, announcing each language."""
+    for target_lang in target_languages:
+        click.echo(f"\n{Fore.BLUE}Translating to {target_lang}...\x1b[0m")
+        for source_file in source_files:
+            yield target_lang, source_file
+
+
+# ------------------------------------------------------------------------------------------------
+
+
 def execute(
     language: Optional[str] = None,
     force: Optional[str] = None,  # None=no force, "__all__"=force all, "key1,key2"=force specific keys
@@ -129,9 +188,15 @@ def execute(
     sync_batch: bool = False,
     no_cache: bool = False,
     config_file: Optional[str] = None,
-) -> None:
+    run_stats: Optional[RunStats] = None,
+) -> int:
     """
     Translate your application.
+
+    Returns the exit code: 0 everything translated, 1 errors (a file failed, or the run could
+    not proceed), 2 completed but some keys were left out (retried on the next run). Every file
+    is translated even when another one fails. With `run_stats` (update), results are added to it
+    and no summary line is printed; otherwise the summary line ends the run.
 
     Args:
         language: Language to translate (if None, translate all languages)
@@ -157,12 +222,17 @@ def execute(
         click.echo(
             f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.\x1b[0m"
         )
-        return
+        return EXIT_ERROR
 
     # Load configuration
     config.load()
     if verbose:
         click.echo(f"{Fore.BLUE}Loaded configuration: {config.config_path}\x1b[0m")
+
+    owns_stats = run_stats is None
+    stats = run_stats if run_stats is not None else RunStats(verbose)
+    if owns_stats:
+        BatchProcessor.reset_reported_languages()
 
     # Check for deprecated config format
     if config.check_deprecated_format():
@@ -210,7 +280,7 @@ def execute(
         click.echo(
             f"{Fore.YELLOW}Only one language ({languages[0]}) is configured. Add more languages with 'algebras add <language>'.\x1b[0m"
         )
-        return
+        return EXIT_OK
 
     # Filter languages if specified
     if language:
@@ -218,7 +288,7 @@ def execute(
             click.echo(
                 f"{Fore.RED}Language '{language}' is not configured in your project.\x1b[0m"
             )
-            return
+            return EXIT_ERROR
         target_languages = [language]
         if verbose:
             click.echo(f"{Fore.BLUE}Selected target language: {language}\x1b[0m")
@@ -259,7 +329,7 @@ def execute(
         try:
             if not os.path.exists(prompt_file):
                 click.echo(f"{Fore.RED}Prompt file not found: {prompt_file}\x1b[0m")
-                return
+                return EXIT_ERROR
 
             with open(prompt_file, "r", encoding="utf-8") as f:
                 custom_prompt = f.read().strip()
@@ -275,7 +345,7 @@ def execute(
             click.echo(
                 f"{Fore.RED}Error reading prompt file {prompt_file}: {str(e)}\x1b[0m"
             )
-            return
+            return EXIT_ERROR
     else:
         # Check if prompt is configured in the config file
         custom_prompt = config.get_setting("api.prompt", "")
@@ -335,11 +405,10 @@ def execute(
 
     # If no specific files were provided, scan and process all files
     if not outdated_files and not missing_keys_files and not outdated_keys_files:
-        force_bool = force == "__all__"
+        force_values = _force_values(force)
+        force_bool = bool(force) and force_values is None
         force_keys: Optional[Set[str]] = (
-            set(k.strip() for k in force.split(",") if k.strip())
-            if force and force != "__all__"
-            else None
+            _split_force_values(force_values) if force_values is not None else None
         )
         _process_all_files(
             config,
@@ -356,8 +425,10 @@ def execute(
             po_mark_fuzzy,
             verbose,
             force_keys=force_keys,
+            force_values=force_values,
+            stats=stats,
         )
-        return
+        return stats.print_summary() if owns_stats else stats.exit_code()
 
     for target_lang in target_languages:
         # Process outdated files - find changed keys by comparing the content
@@ -375,6 +446,7 @@ def execute(
             xlf_version,
             po_mark_fuzzy,
             verbose,
+            stats=stats,
         )
 
         # Process files with specific missing keys
@@ -391,6 +463,7 @@ def execute(
             xlf_version,
             po_mark_fuzzy,
             verbose,
+            stats=stats,
         )
 
         # Process files with outdated keys
@@ -408,10 +481,11 @@ def execute(
             xlf_version,
             po_mark_fuzzy,
             verbose,
+            stats=stats,
         )
 
-        click.echo(f"\n{Fore.GREEN}Translation completed.\x1b[0m")
-        return
+        return stats.print_summary() if owns_stats else stats.exit_code()
+    return stats.print_summary() if owns_stats else stats.exit_code()
 
 
 def _process_all_files(
@@ -429,9 +503,14 @@ def _process_all_files(
     po_mark_fuzzy: bool,
     verbose: bool,
     force_keys: Optional[Set[str]] = None,
+    force_values: Optional[List[str]] = None,
+    stats: Optional[RunStats] = None,
 ) -> None:
     """
     Scan and process all files for translation.
+
+    Each (source file, target language) pair is guarded by `stats.file()`: a file that cannot be
+    read or translated is reported and counted, and the other files are still translated.
 
     Args:
         config: Config instance
@@ -448,6 +527,10 @@ def _process_all_files(
         po_mark_fuzzy: Whether to mark PO entries as fuzzy
         verbose: Verbose mode flag
     """
+    if stats is None:
+        stats = RunStats(verbose)
+    if force_keys is not None and force_values is None:
+        force_values = sorted(force_keys)
     try:
         scanner = FileScanner(config=config)
         files_by_language = scanner.group_files_by_language()
@@ -499,17 +582,15 @@ def _process_all_files(
         # Check if git is available for outdated key detection
         git_available = is_git_available()
 
-        # Translate each target language
-        for target_lang in target_languages:
-            click.echo(f"\n{Fore.BLUE}Translating to {target_lang}...\x1b[0m")
-
+        # Translate each target language, one guarded source file at a time
+        for target_lang, source_file in _each_file(target_languages, source_files):
             # Get existing files for this language
             existing_files = files_by_language.get(target_lang, [])
             existing_file_basenames = [os.path.basename(f) for f in existing_files]
             existing_file_paths = {os.path.basename(f): f for f in existing_files}
 
-            # Process each source file
-            for source_file in source_files:
+            # Process each source file (an error fails this file only)
+            with stats.file(f"{source_file} ({target_lang})", translator):
                 source_basename = os.path.basename(source_file)
                 source_dirname = os.path.dirname(source_file)
                 source_ext = (
@@ -673,7 +754,7 @@ def _process_all_files(
                 # Handle --force "key1,key2" — retranslate only specific keys
                 if force_keys is not None and os.path.exists(target_file):
                     click.echo(
-                        f"  {Fore.GREEN}Force-retranslating {len(force_keys)} specific key(s) in {target_basename}...\x1b[0m"
+                        f"  {Fore.GREEN}Force-retranslating {len(force_values)} specific key(s) in {target_basename}...\x1b[0m"
                     )
                     try:
                         handler = get_handler(source_file, config)
@@ -694,7 +775,10 @@ def _process_all_files(
                             xlf_version,
                         )
                         use_in_place = _should_use_in_place(target_file, regenerate_from_scratch)
-                        keys_to_update = set(force_keys)
+                        file_force_keys = _resolve_force_keys(
+                            force_values, _available_keys(handler, source_content)
+                        )
+                        keys_to_update = set(file_force_keys)
 
                         if detect_format(source_file) == FileFormat.TS:
                             basename = os.path.basename(target_file)
@@ -712,7 +796,7 @@ def _process_all_files(
                                 translator.translate_missing_keys_batch,
                                 source_content,
                                 target_content,
-                                list(force_keys),
+                                list(file_force_keys),
                                 target_lang,
                                 ui_safe,
                                 glossary_id,
@@ -726,7 +810,7 @@ def _process_all_files(
                                 translator.translate_missing_keys_batch,
                                 source_content,
                                 target_content,
-                                list(force_keys),
+                                list(file_force_keys),
                                 target_lang,
                                 ui_safe,
                                 glossary_id,
@@ -753,12 +837,10 @@ def _process_all_files(
                             )
 
                         click.echo(
-                            f"  {Fore.GREEN}✓ Force-updated {len(force_keys)} key(s) in {target_file}\x1b[0m"
+                            f"  {Fore.GREEN}✓ Force-updated {len(file_force_keys)} key(s) in {target_file}\x1b[0m"
                         )
                     except Exception as e:
-                        click.echo(
-                            f"  {Fore.RED}Error force-translating keys in {source_basename}: {str(e)}\x1b[0m"
-                        )
+                        raise RuntimeError(f"error force-translating keys: {e}") from e
                     continue
 
                 # Handle the translation based on mode (full or missing keys only)
@@ -891,9 +973,7 @@ def _process_all_files(
                             f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m"
                         )
                     except Exception as e:
-                        click.echo(
-                            f"  {Fore.RED}Error translating keys in {source_basename}: {str(e)}\x1b[0m"
-                        )
+                        raise RuntimeError(f"error translating missing keys: {e}") from e
                 else:
                     # Translate the full file
                     click.echo(
@@ -1271,10 +1351,13 @@ def _process_all_files(
         )
 
     except Exception as e:
-        import traceback
-
+        # The run could not proceed (scanning, config): exit code 1.
+        stats.fatal = True
         click.echo(f"{Fore.RED}Error: {str(e)}\x1b[0m")
-        traceback.print_exc()
+        if verbose:
+            import traceback
+
+            traceback.print_exc()
 
 
 def _process_outdated_files(
@@ -1291,6 +1374,7 @@ def _process_outdated_files(
     xlf_version: str,
     po_mark_fuzzy: bool,
     verbose: bool,
+    stats: Optional[RunStats] = None,
 ) -> None:
     """
     Process outdated files by finding changed keys and translating them.
@@ -1315,7 +1399,10 @@ def _process_outdated_files(
             f"\n{Fore.BLUE}Processing outdated file {os.path.basename(target_file)} for language '{target_lang}'...{Fore.RESET}"
         )
 
-        try:
+        if stats is None:
+            stats = RunStats(verbose)
+        # An error fails this file only; the other files are still translated.
+        with stats.file(f"{target_file} ({target_lang})", translator):
             # Get handler for file format
             handler = get_handler(source_file, config)
 
@@ -1531,11 +1618,6 @@ def _process_outdated_files(
                     f"  {Fore.GREEN}No keys need to be updated in {os.path.basename(target_file)}\x1b[0m"
                 )
 
-        except Exception as e:
-            click.echo(
-                f"  {Fore.RED}Error processing outdated file {os.path.basename(target_file)}: {str(e)}\x1b[0m"
-            )
-
 
 def _process_missing_keys_files(
     missing_keys_files: List[Tuple[str, Set[str], str]],
@@ -1550,6 +1632,7 @@ def _process_missing_keys_files(
     xlf_version: str,
     po_mark_fuzzy: bool,
     verbose: bool,
+    stats: Optional[RunStats] = None,
 ) -> None:
     """
     Process files with specific missing keys.
@@ -1573,7 +1656,10 @@ def _process_missing_keys_files(
             f"\n{Fore.BLUE}Processing file with missing keys {os.path.basename(target_file)}...{Fore.RESET}"
         )
 
-        try:
+        if stats is None:
+            stats = RunStats(verbose)
+        # An error fails this file only; the other files are still translated.
+        with stats.file(f"{target_file} ({target_lang})", translator):
             # Get handler for file format
             handler = get_handler(source_file, config)
 
@@ -1678,10 +1764,6 @@ def _process_missing_keys_files(
                 click.echo(
                     f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m"
                 )
-        except Exception as e:
-            click.echo(
-                f"  {Fore.RED}Error processing file with missing keys {os.path.basename(target_file)}: {str(e)}\x1b[0m"
-            )
 
 
 def _process_outdated_keys_files(
@@ -1698,6 +1780,7 @@ def _process_outdated_keys_files(
     xlf_version: str,
     po_mark_fuzzy: bool,
     verbose: bool,
+    stats: Optional[RunStats] = None,
 ) -> None:
     """
     Process files with specific outdated keys.
@@ -1722,7 +1805,10 @@ def _process_outdated_keys_files(
             f"\n{Fore.BLUE}Processing file with outdated keys {os.path.basename(target_file)}...{Fore.RESET}"
         )
 
-        try:
+        if stats is None:
+            stats = RunStats(verbose)
+        # An error fails this file only; the other files are still translated.
+        with stats.file(f"{target_file} ({target_lang})", translator):
             # Get handler for file format
             handler = get_handler(source_file, config)
 
@@ -1827,10 +1913,6 @@ def _process_outdated_keys_files(
                 click.echo(
                     f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m"
                 )
-        except Exception as e:
-            click.echo(
-                f"  {Fore.RED}Error processing file with outdated keys {os.path.basename(target_file)}: {str(e)}\x1b[0m"
-            )
 
 
 def _write_layout_preserving(

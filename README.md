@@ -307,6 +307,12 @@ algebras translate --language fr
 # Force translation even if files are up to date
 algebras translate --force
 
+# Retranslate only specific keys (repeat --force; a key may contain commas)
+algebras translate --force login.title --force "Hello, %(name)s, welcome"
+
+# The comma-separated form still works (a value that is itself a key is never split)
+algebras translate --force "login.title,nav.home"
+
 # Only translate missing keys
 algebras translate --only-missing
 
@@ -328,6 +334,21 @@ algebras translate --regenerate-from-scratch
 # Performance tuning
 algebras translate --batch-size 10 --max-parallel-batches 3
 ```
+
+`translate` and `update` translate every file even when one of them fails (an unreadable or
+invalid source file is reported with the reason; add `--verbose` for the traceback). The run
+ends with a summary line such as `12 files OK, 1 files failed, 3 keys left out`, and exits with:
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Everything was translated. |
+| `1` | Errors: a file failed (or none of its keys could be translated), or the run could not proceed. |
+| `2` | Completed, but some keys were left out (placeholders rejected or API batches failed). They are retried on the next run. |
+
+Language codes are sent to the API in full BCP-47 form (`uz-Cyrl`, `pt-BR`). If the platform
+answers that a code is not supported, the CLI says so once per language and leaves those keys
+out. Map it to a supported code with the locale mapping (see [Locale Code Mapping](#locale-code-mapping)):
+`languages: [en, {pt: pt-BR}]` translates with `pt` and still writes the `pt-BR` files. Or ask support.
 
 ### Use Custom Configuration Files
 

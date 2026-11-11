@@ -245,7 +245,8 @@ def _retranslate(
     for language, keys in keys_by_language.items():
         if console:
             click.echo(f"\n{Fore.BLUE}Retranslating {len(keys)} key(s) for {language}...{Fore.RESET}")
-        translate_command.execute(language=language, force=",".join(sorted(keys)), config_file=config_file)
+        # The keys themselves, not a comma-joined string: PO msgids (keys) often contain commas.
+        translate_command.execute(language=language, force=sorted(keys), config_file=config_file)
 
     # Re-check the retranslated keys.
     for issue in issues:

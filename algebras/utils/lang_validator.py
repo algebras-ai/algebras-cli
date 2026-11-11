@@ -391,8 +391,9 @@ def find_outdated_keys(
             source_value = get_key_value(source_data, key)
             target_value = get_key_value(target_data, key)
 
-            # Only consider keys with different values
-            if source_value != target_value:
+            # Only leaf string keys with different values: a parent mapping (`en`, `en.nav`)
+            # differs whenever anything under it does, but it is not a key to retranslate.
+            if isinstance(source_value, str) and source_value != target_value:
                 different_value_keys.append(key)
 
         # If there are no keys with different values, we're done
@@ -473,3 +474,29 @@ def map_language_code(lang_code: str) -> str:
 
     # If no separator found, return the first two characters
     return lang_code[:2].lower()
+
+
+def api_language_code(lang_code: str) -> str:
+    """
+    The language code sent to the translation API, on every path (batch and single text).
+
+    The full BCP-47 code is kept, script and region included ('uz-Cyrl', 'pt-BR', 'zh-Hant-TW'):
+    reducing it to two letters would lose the script (uz-Cyrl -> uz is Latin). Only the spelling
+    is normalized: '_' becomes '-', the language is lower case, a 4-letter script title case and
+    a region upper case ('pt_br' -> 'pt-BR', 'uz_cyrl' -> 'uz-Cyrl'). 'auto' and empty values are
+    returned unchanged.
+    """
+    if not isinstance(lang_code, str) or not lang_code or lang_code == "auto":
+        return lang_code
+    parts = [p for p in lang_code.strip().replace("_", "-").split("-") if p]
+    if not parts:
+        return lang_code
+    normalized = [parts[0].lower()]
+    for part in parts[1:]:
+        if len(part) == 4 and part.isalpha():
+            normalized.append(part.title())
+        elif (len(part) == 2 and part.isalpha()) or (len(part) == 3 and part.isdigit()):
+            normalized.append(part.upper())
+        else:
+            normalized.append(part)
+    return "-".join(normalized)

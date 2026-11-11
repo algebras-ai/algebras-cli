@@ -50,14 +50,37 @@ def add(ctx, language):
     add_command.execute(language, config_file)
 
 
-@cli.command("translate")
+_EXIT_CODES_HELP = """
+    \b
+    Exit codes:
+      0  everything translated
+      1  errors: a file failed, or the run could not proceed
+      2  completed, but some keys were left out (placeholders rejected
+         or API batches failed); they are retried on the next run
+"""
+
+
+def _force_arg(force):
+    """--force values as translate_command.execute takes them."""
+    if not force:
+        return None
+    if "__all__" in force:
+        return "__all__"
+    # One value keeps the original string form ("k1,k2" is split on commas unless it is a key).
+    return force[0] if len(force) == 1 else list(force)
+
+
+@cli.command("translate", epilog=_EXIT_CODES_HELP)
 @click.option("--language", "-l", help="Translate only the specified language.")
 @click.option(
     "--force",
     default=None,
     is_flag=False,
     flag_value="__all__",
-    help='Force translation even if files are up to date. Optionally pass comma-separated key names to force only specific keys (e.g. --force "key1,key2").',
+    multiple=True,
+    help='Force translation even if files are up to date. Pass a key to force only that key; repeat '
+    'the option for several keys (--force key1 --force "key, with commas"). The comma form '
+    '--force "key1,key2" still works; a value that is itself a key is never split.',
 )
 @click.option("--only-missing", is_flag=True, help="Only translate keys that are missing in the target files.")
 @click.option("--ui-safe", is_flag=True, help="Ensure translations will not exceed the original text length.")
@@ -73,10 +96,11 @@ def add(ctx, language):
 def translate(ctx, language, force, only_missing, ui_safe, verbose, batch_size, max_parallel_batches, glossary_id, prompt_file, regenerate_from_scratch, sync_batch, no_cache):
     """Translate your application."""
     config_file = ctx.obj.get('config_file') if ctx.obj else None
-    translate_command.execute(language, force, only_missing, ui_safe=ui_safe, verbose=verbose, batch_size=batch_size, max_parallel_batches=max_parallel_batches, glossary_id=glossary_id, prompt_file=prompt_file, regenerate_from_scratch=regenerate_from_scratch, sync_batch=sync_batch, no_cache=no_cache, config_file=config_file)
+    exit_code = translate_command.execute(language, _force_arg(force), only_missing, ui_safe=ui_safe, verbose=verbose, batch_size=batch_size, max_parallel_batches=max_parallel_batches, glossary_id=glossary_id, prompt_file=prompt_file, regenerate_from_scratch=regenerate_from_scratch, sync_batch=sync_batch, no_cache=no_cache, config_file=config_file)
+    sys.exit(exit_code if isinstance(exit_code, int) else 0)
 
 
-@cli.command("update")
+@cli.command("update", epilog=_EXIT_CODES_HELP)
 @click.option("--language", "-l", help="Update only the specified language.")
 @click.option("--full", is_flag=True, help="Translate the entire file, not just missing keys.")
 @click.option("--only-missing", is_flag=True, help="Only translate keys that are missing in the target files.")
@@ -90,7 +114,8 @@ def update(ctx, language, full, only_missing, ui_safe, verbose, glossary_id):
     # If neither flag is provided, only_missing defaults to True (current behavior)
     only_missing_value = only_missing if only_missing else not full
     config_file = ctx.obj.get('config_file') if ctx.obj else None
-    update_command.execute(language, only_missing_value, skip_git_validation=only_missing, ui_safe=ui_safe, verbose=verbose, glossary_id=glossary_id, config_file=config_file)
+    exit_code = update_command.execute(language, only_missing_value, skip_git_validation=only_missing, ui_safe=ui_safe, verbose=verbose, glossary_id=glossary_id, config_file=config_file)
+    sys.exit(exit_code if isinstance(exit_code, int) else 0)
 
 
 @cli.command("ci")

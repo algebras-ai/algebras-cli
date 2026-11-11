@@ -151,7 +151,7 @@ def test_retranslate_forces_unresolved_keys(project, recording_writer):
         placeholders_command.execute(fix=True, retranslate=True)
     translate.assert_called_once()
     assert translate.call_args.kwargs["language"] == "uz"
-    assert translate.call_args.kwargs["force"] == "lost"
+    assert translate.call_args.kwargs["force"] == ["lost"]
 
 
 def test_unknown_language(project, capsys):
