@@ -72,8 +72,9 @@ PYTHON_PERCENT = Syntax(
 RUBY = Syntax(
     name="ruby",
     kind="named",
-    # %<name>s: the name is an identifier, so "50%</b> off" is not a reference.
-    pattern=re.compile(r"%\{[^{}\s]+\}|%<[A-Za-z_][A-Za-z0-9_]*>[-+ 0#]*\d*(?:\.\d+)?[a-zA-Z]"),
+    # %<name>s: the name is an identifier (any script, so a transliterated "%<цена>.2f" is still
+    # found and reported), which keeps "50%</b> off" from being read as a reference.
+    pattern=re.compile(r"%\{[^{}\s]+\}|%<[^\W\d]\w*>[-+ 0#]*\d*(?:\.\d+)?[a-zA-Z]"),
     lenient=re.compile(r"[%％]\s?\{\s*[^{}]+?\s*\}"),
 )
 

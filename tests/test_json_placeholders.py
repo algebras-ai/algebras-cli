@@ -294,9 +294,11 @@ def test_missing_plural_keys_get_count_and_plural_notes(tmp_path, monkeypatch):
     assert data["greeting"] == existing["greeting"]
     assert "{{count}}" in data["nested"]["item_one"] and "{{count}}" in data["nested"]["item_other"]
     assert data["nested"]["price"].endswith("{{value, number}}")
-    by_text = {t: c for batch, contexts in sent for t, c in zip(batch, contexts or [None] * len(batch))}
-    assert "One item" not in by_text  # ru one is translated from "{{count}} items"
-    notes = [c for c in by_text.values() if c and "i18next plural form 'one' for Russian" in c]
+    # One text can be sent several times (ru one and other both use "{{count}} items"), so keep
+    # every (text, context) pair instead of a dict keyed by text.
+    pairs = [(t, c) for batch, contexts in sent for t, c in zip(batch, contexts or [None] * len(batch))]
+    assert "One item" not in {t for t, _ in pairs}  # ru one is translated from "{{count}} items"
+    notes = [c for _, c in pairs if c and "i18next plural form 'one' for Russian" in c]
     assert notes and "keep the count placeholder (⟦0⟧)" in notes[0]
 
 
