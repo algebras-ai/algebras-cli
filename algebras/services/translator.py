@@ -65,6 +65,11 @@ from algebras.services.placeholders import (
     verify,
 )
 from algebras.services.placeholders.plurals import drop_allowed_for_key
+from algebras.utils.json_i18n import plan_json_translation, run_json_plan
+
+
+def _is_json(file_path: Optional[str]) -> bool:
+    return bool(file_path) and file_path.lower().endswith(".json")
 
 
 def _contexts_kwarg(
@@ -529,6 +534,14 @@ class Translator:
         provider = self.api_config.get("provider", "algebras-ai")
         translate_text_func = None if provider == "algebras-ai" else self.translate_text
 
+        # JSON: Chrome messages.json sends only "message"; i18next plural forms that need the
+        # count placeholder are translated from the "_other" text.
+        json_plan = None
+        if _is_json(file_path):
+            json_plan = plan_json_translation(content, None, source_lang, target_lang, profile)
+            if json_plan is not None:
+                content = json_plan.source
+
         # Handle special cases that need preprocessing
         if file_path.endswith(".arb"):
             # ARB files need special handling to extract translatable strings
@@ -590,7 +603,23 @@ class Translator:
                 **extra_kwargs,
             )
 
+        if json_plan is not None:
+            translated = json_plan.finish(translated)
         return translated
+
+    def _run_json_plan(self, method, source_content, target_content, keys, target_lang, contexts, **kwargs):
+        source_file_path = kwargs.get("source_file_path")
+        return run_json_plan(
+            lambda s, t, k, lang, contexts=None, **kw: method(s, t, k, lang, contexts=contexts, _json_planned=True, **kw),
+            source_content,
+            target_content,
+            list(keys),
+            target_lang,
+            self.config.get_source_language(),
+            profile_for_path(source_file_path, self.config),
+            contexts,
+            **kwargs,
+        )
 
     def translate_missing_keys(
         self,
@@ -827,6 +856,7 @@ class Translator:
         on_batch_complete: Optional[Callable[[Dict[str, str], int], None]] = None,
         source_file_path: Optional[str] = None,
         contexts: Optional[Dict[str, str]] = None,
+        _json_planned: bool = False,
     ) -> Dict[str, Any]:
         """
         Translate missing keys in batches to avoid overloading the API.
@@ -843,6 +873,14 @@ class Translator:
         Returns:
             Updated target content with translated missing keys
         """
+        if not _json_planned and _is_json(source_file_path):
+            # Chrome messages.json fields and i18next plural forms (see algebras.utils.json_i18n).
+            return self._run_json_plan(
+                self.translate_missing_keys_batch, source_content, target_content, missing_keys,
+                target_lang, contexts, ui_safe=ui_safe, glossary_id=glossary_id,
+                on_batch_complete=on_batch_complete, source_file_path=source_file_path,
+            )
+
         # Resolve glossary_id from config if not provided
         if glossary_id is None:
             glossary_id = self.config.get_setting("api.glossary_id", "")
@@ -1115,6 +1153,7 @@ class Translator:
         on_batch_complete: Optional[Callable[[Dict[str, str], int], None]] = None,
         contexts: Optional[Dict[str, str]] = None,
         source_file_path: Optional[str] = None,
+        _json_planned: bool = False,
     ) -> Dict[str, Any]:
         """
         Translate outdated keys in batches to avoid overloading the API.
@@ -1130,6 +1169,13 @@ class Translator:
         Returns:
             Updated target content with translated outdated keys
         """
+        if not _json_planned and _is_json(source_file_path):
+            return self._run_json_plan(
+                self.translate_outdated_keys_batch, source_content, target_content, outdated_keys,
+                target_lang, contexts, ui_safe=ui_safe, glossary_id=glossary_id,
+                on_batch_complete=on_batch_complete, source_file_path=source_file_path,
+            )
+
         # Resolve glossary_id from config if not provided
         if glossary_id is None:
             glossary_id = self.config.get_setting("api.glossary_id", "")
