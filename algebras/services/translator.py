@@ -96,6 +96,21 @@ def _plural_drop_allowed(
     return allowed if any(allowed) else None
 
 
+def _is_copied_scalar(source_content: Any, key_parts: List[str], value: Any) -> bool:
+    """A non-string scalar (number, boolean, null) that the source really has at key_parts."""
+    if isinstance(value, (str, dict, list)):
+        return False
+    if value is not None:
+        return isinstance(value, (int, float, bool))
+    # None: a YAML/JSON null in the source, or no such key at all.
+    node = source_content
+    for part in key_parts:
+        if not isinstance(node, dict) or part not in node:
+            return False
+        node = node[part]
+    return True
+
+
 def _flatten_translated_subtree(base_key_path: str, subtree: Any) -> Dict[str, str]:
     """
     Flatten a translated nested dict back into dot-notation leaf paths,
@@ -914,6 +929,7 @@ class Translator:
         key_parts_list = []
         empty_key_paths = []  # Track keys with empty strings
         missing_subtrees = []  # Track entire nested objects that are missing from target
+        copied_values = []  # Non-string scalars copied from the source unchanged
 
         # Resolve every missing key to its source value first, then process
         # shallowest paths first. This lets us detect when a whole nested
@@ -965,6 +981,10 @@ class Translator:
                 # collapsing it to a single value.
                 missing_subtrees.append((key_path, key_parts, source_value))
                 covered_prefixes.append(tuple(key_parts))
+            elif _is_copied_scalar(source_content, key_parts, source_value):
+                # A number, boolean or null in the source (YAML `limit: 3`, JSON `"max": 5`):
+                # copied unchanged, never sent for translation nor blanked to ''.
+                copied_values.append((key_parts, source_value))
             else:
                 # Determine file format to decide how to handle missing keys
                 is_flat_format = False
@@ -994,6 +1014,12 @@ class Translator:
                     # For nested formats (TypeScript, JSON, YAML), if key not found in source,
                     # set empty string (key will be created in target file with empty value)
                     empty_key_paths.append((key_path, key_parts))
+
+        for key_parts, value in copied_values:
+            if len(key_parts) == 1:
+                updated_content[key_parts[0]] = value
+            else:
+                set_nested_value(updated_content, key_parts, value)
 
         # Set empty strings in the result
         for key_path, key_parts in empty_key_paths:
