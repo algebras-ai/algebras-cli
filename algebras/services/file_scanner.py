@@ -140,7 +140,12 @@ class FileScanner:
         Returns:
             Dictionary mapping language codes to lists of file paths
         """
-        from algebras.utils.path_utils import resolve_destination_path
+        from algebras.utils.path_utils import (
+            match_android_qualifier,
+            resolve_destination_path,
+            warn_legacy_android_dir,
+            warn_legacy_android_folder,
+        )
         
         # Make sure we have valid languages list (no False values)
         languages = [lang for lang in self.config.get_languages() if lang]
@@ -172,6 +177,7 @@ class FileScanner:
                     if destination_pattern:
                         for lang in languages:
                             if lang != source_language:
+                                warn_legacy_android_folder(destination_pattern, lang, self.config)
                                 resolved_path = resolve_destination_path(destination_pattern, lang, self.config)
                                 # Normalize the resolved path for consistent path separators
                                 normalized_resolved_path = os.path.normpath(resolved_path)
@@ -212,6 +218,14 @@ class FileScanner:
                             # Otherwise, check if the extracted value is itself a language code
                             if lang_code is None:
                                 lang_code = destination_value if destination_value in languages else None
+                            
+                            if lang_code is not None and destination_value == lang_code:
+                                # A raw-code folder such as values-uz-Cyrl, which Android ignores
+                                warn_legacy_android_dir(os.path.dirname(file_path), lang_code)
+                            
+                            # Android qualifiers: values-b+uz+Cyrl -> uz-Cyrl, values-pt-rBR -> pt-BR
+                            if lang_code is None:
+                                lang_code = match_android_qualifier(destination_value, languages)
                             
                             if lang_code and lang_code in languages:
                                 result[lang_code].append(file_path)
