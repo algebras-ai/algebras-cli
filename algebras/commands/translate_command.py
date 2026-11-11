@@ -2189,7 +2189,7 @@ def _write_translated_content(
         # template of a new file and gives new keys their position. Writing an existing file
         # without in-place is --regenerate-from-scratch: sorted, as before.
         kwargs["source_file"] = source_file
-        kwargs["preserve_layout"] = not os.path.exists(target_file)
+        kwargs["preserve_layout"] = not regenerate_from_scratch and not os.path.exists(target_file)
     elif format_type == FileFormat.TS:
         kwargs["source_file"] = source_file  # quote style of each value ('…', "…" or `…`)
     elif format_type in (FileFormat.CSV, FileFormat.TSV):
