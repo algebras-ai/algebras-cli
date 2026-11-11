@@ -6,14 +6,24 @@ MVP scope:
 - Extract only literal text segments for translation.
 - Rebuild message from translated segments.
 - Validate rebuilt ICU syntax.
+
+Plural branches for the target language: when `prepare` gets the target language, every
+`plural` (not `selectordinal` or `select`) gets the CLDR categories the target needs but the
+message lacks (en one/other -> ru one/few/many/other). Each new branch starts as a copy of the
+source `other` branch, which already holds `#` / `{count}`, so the model translates it with the
+grammar of that category. Explicit `=N` branches and the source's own branches stay; branches the
+target does not use (an English `one` for Japanese) are kept too, since removing them would
+change which text the app shows. Nested plurals are all expanded the same way, inner ones first,
+so a copied `other` already carries the expanded inner plural. Every literal segment inside a
+CLDR plural branch gets a translator note naming the category and the counts it covers.
 """
 
 from __future__ import annotations
 
 import re
 from copy import deepcopy
-from dataclasses import dataclass
-from typing import Any, List, Sequence, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from pyicumessageformat import Parser
 
@@ -49,6 +59,7 @@ class LiteralSegment:
     trailing_ws: str
     target_type: str
     skip_translation: bool = False
+    note: Optional[str] = None
 
 
 @dataclass
@@ -59,6 +70,9 @@ class PreparedMessage:
     literal_paths: List[Tuple[Any, ...]]
     translatable_segments: List[str]
     literal_segments: List[LiteralSegment]
+    # Translator note per translatable segment (plural category and counts), aligned with
+    # translatable_segments; empty when no target language was given.
+    segment_notes: List[Optional[str]] = field(default_factory=list)
 
 
 @dataclass
@@ -68,6 +82,11 @@ class BatchMapEntry:
     start: int
     count: int
     prepared: PreparedMessage | None = None
+
+    def note(self, offset: int) -> Optional[str]:
+        """Translator note of the segment at `offset` within this message, if any."""
+        notes = self.prepared.segment_notes if self.prepared is not None else []
+        return notes[offset] if offset < len(notes) else None
 
 
 class ICUMessageService:
@@ -86,8 +105,13 @@ class ICUMessageService:
             return False
         return self._contains_target_icu(ast)
 
-    def prepare(self, text: str) -> PreparedMessage:
-        """Parse and extract literal segments from a targeted ICU message."""
+    def prepare(
+        self, text: str, target_lang: Optional[str] = None, source_lang: Optional[str] = None
+    ) -> PreparedMessage:
+        """
+        Parse and extract literal segments from a targeted ICU message. With `target_lang`, plural
+        branches the target language needs are added first (see the module docstring).
+        """
         if not isinstance(text, str):
             return PreparedMessage(str(text), [], False, [], [], [])
 
@@ -99,6 +123,10 @@ class ICUMessageService:
         has_target_icu = self._contains_target_icu(ast)
         if not has_target_icu:
             return PreparedMessage(text, ast, False, [], [], [])
+
+        plural_sources: Dict[int, str] = {}
+        if target_lang:
+            self._expand_plurals(ast, target_lang, plural_sources)
 
         collected_segments: List[Tuple[Tuple[Any, ...], str]] = []
         self._collect_literal_paths(
@@ -134,9 +162,18 @@ class ICUMessageService:
                 )
             )
 
+        if target_lang:
+            for segment in literal_segments:
+                segment.note = self._branch_note(
+                    ast, segment.path, plural_sources, target_lang, source_lang
+                )
+
         literal_paths = [segment.path for segment in literal_segments]
         translatable_segments = [
             segment.core_text for segment in literal_segments if not segment.skip_translation
+        ]
+        segment_notes = [
+            segment.note for segment in literal_segments if not segment.skip_translation
         ]
 
         return PreparedMessage(
@@ -146,6 +183,7 @@ class ICUMessageService:
             literal_paths=literal_paths,
             translatable_segments=translatable_segments,
             literal_segments=literal_segments,
+            segment_notes=segment_notes if target_lang else [],
         )
 
     def rebuild(self, prepared: PreparedMessage, translated_segments: Sequence[str]) -> str:
@@ -186,9 +224,16 @@ class ICUMessageService:
         except Exception:
             return False
 
-    def preprocess_texts(self, texts: Sequence[Any]) -> Tuple[List[Any], List[BatchMapEntry]]:
+    def preprocess_texts(
+        self,
+        texts: Sequence[Any],
+        target_lang: Optional[str] = None,
+        source_lang: Optional[str] = None,
+    ) -> Tuple[List[Any], List[BatchMapEntry]]:
         """
         Flatten targeted ICU messages into literal segments.
+        With `target_lang`, plurals get the branches that language needs (BatchMapEntry.note
+        gives each segment's translator note).
         Returns (flattened_texts, mapping_for_rebuild).
         """
         flattened: List[Any] = []
@@ -203,7 +248,7 @@ class ICUMessageService:
                 )
                 continue
 
-            prepared = self.prepare(text)
+            prepared = self.prepare(text, target_lang, source_lang)
             if not prepared.has_target_icu:
                 start = len(flattened)
                 flattened.append(text)
@@ -253,6 +298,142 @@ class ICUMessageService:
             rebuilt.append(rebuilt_text)
 
         return rebuilt
+
+    def align_source_branches(self, source: str, target: str) -> str:
+        """
+        `source` with the plural branches `target` has but the source lacks (ru few/many from an
+        en one/other message), each a copy of the source `other` branch. Placeholder checks
+        compare the target with this text, so an argument repeated in the new branches is not a
+        count mismatch. Returns `source` unchanged when nothing needs adding or either text is not
+        a parseable ICU message.
+        """
+        if not isinstance(source, str) or not isinstance(target, str) or "plural" not in source:
+            return source
+        try:
+            src_ast = self._parser.parse(source)
+            tgt_ast = self._parser.parse(target)
+        except Exception:
+            return source
+        src_plurals, tgt_plurals = _plural_nodes(src_ast), _plural_nodes(tgt_ast)
+        if not src_plurals or len(src_plurals) != len(tgt_plurals):
+            return source
+        changed = False
+        for s, t in zip(src_plurals, tgt_plurals):
+            options = s.get("options")
+            target_options = t.get("options")
+            if (
+                s.get("name") != t.get("name")
+                or not isinstance(options, dict)
+                or not isinstance(target_options, dict)
+                or "other" not in options
+            ):
+                continue
+            added = [key for key in target_options if key not in options]
+            if not added:
+                continue
+            # In the target's branch order, so argument order compares branch by branch.
+            merged = {
+                key: options[key] if key in options else deepcopy(options["other"])
+                for key in target_options
+            }
+            merged.update({key: value for key, value in options.items() if key not in merged})
+            s["options"] = merged
+            changed = True
+        return self._serialize_tokens(src_ast) if changed else source
+
+    # ------------------------------------------------------------------
+    # Plural branches for the target language
+    # ------------------------------------------------------------------
+
+    def _expand_plurals(self, ast: Any, target_lang: str, plural_sources: Dict[int, str]) -> None:
+        """
+        Add the CLDR branches `target_lang` needs to every plural in `ast` (in place).
+        `plural_sources` gets the source branches of every plural node (copies included), by id.
+        """
+        for node in _plural_nodes(ast):
+            plural_sources[id(node)] = "; ".join(
+                f"{key}: '{self._serialize_tokens(value, in_option=True)}'"
+                for key, value in node["options"].items()
+            )
+        self._expand_node(ast, target_lang, plural_sources)
+
+    def _expand_node(self, node: Any, target_lang: str, plural_sources: Dict[int, str]) -> None:
+        if isinstance(node, list):
+            for item in node:
+                self._expand_node(item, target_lang, plural_sources)
+            return
+        if not isinstance(node, dict):
+            return
+        options = node.get("options")
+        if not isinstance(options, dict):
+            return
+        # Inner plurals first: a copied 'other' then already holds the expanded inner plural.
+        for option_tokens in options.values():
+            self._expand_node(option_tokens, target_lang, plural_sources)
+        if node.get("type") != "plural" or "other" not in options:
+            return
+        missing = missing_plural_categories(list(options), target_lang)
+        if not missing:
+            return
+        expanded = dict(options)
+        for category in missing:
+            copy = deepcopy(options["other"])
+            for original, copied in zip(_plural_nodes(options["other"]), _plural_nodes(copy)):
+                if id(original) in plural_sources:
+                    plural_sources[id(copied)] = plural_sources[id(original)]
+            expanded[category] = copy
+        node["options"] = {key: expanded[key] for key in order_plural_keywords(list(expanded))}
+
+    def _branch_note(
+        self,
+        ast: Any,
+        path: Tuple[Any, ...],
+        plural_sources: Dict[int, str],
+        target_lang: str,
+        source_lang: Optional[str],
+    ) -> Optional[str]:
+        """Translator note for a literal at `path`: its innermost plural branch, if a CLDR one."""
+        from algebras.utils.plural_rules import (
+            PLURAL_CATEGORY_ORDER,
+            get_category_examples,
+            get_language_name,
+            get_plural_categories,
+        )
+
+        branch = None
+        current = ast
+        for i, key in enumerate(path):
+            if (
+                key == "options"
+                and isinstance(current, dict)
+                and current.get("type") == "plural"
+                and i + 1 < len(path)
+            ):
+                branch = (current, path[i + 1])
+            current = current[key]
+        if branch is None:
+            return None
+        node, category = branch
+        if category not in PLURAL_CATEGORY_ORDER or id(node) not in plural_sources:
+            return None
+
+        target_name = get_language_name(target_lang)
+        source_name = get_language_name(source_lang) if source_lang else "Source"
+        if category in get_plural_categories(target_lang):
+            examples = get_category_examples(target_lang, category)
+            usage = ""
+            if examples:
+                usage = f"It is shown when the count is {examples}"
+                usage += "" if examples.endswith("…") else "."
+        else:
+            usage = f"{target_name} does not use this form; translate it like the general plural."
+        parts = [
+            f"ICU plural category '{category}' for {target_name}. {usage}".strip(),
+            f"{source_name} source branches: {plural_sources[id(node)]}.",
+            f"Write the {target_name} text for exactly these counts, using the correct "
+            "grammatical form of the counted noun.",
+        ]
+        return " ".join(parts)
 
     def _contains_target_icu(self, node: Any) -> bool:
         if isinstance(node, dict):
@@ -384,3 +565,67 @@ class ICUMessageService:
                 return f"{{{name}}}"
 
         return str(tokens)
+
+
+def _plural_nodes(node: Any) -> List[Dict[str, Any]]:
+    """Plural argument nodes of a parsed message, in pre-order."""
+    found: List[Dict[str, Any]] = []
+    if isinstance(node, list):
+        for item in node:
+            found.extend(_plural_nodes(item))
+    elif isinstance(node, dict):
+        if node.get("type") == "plural":
+            found.append(node)
+        options = node.get("options")
+        if isinstance(options, dict):
+            for value in options.values():
+                found.extend(_plural_nodes(value))
+    return found
+
+
+def _explicitly_covered(category: str, keywords: Sequence[str], target_lang: str) -> bool:
+    """True if an explicit branch already covers the only count of `category` (=1 for German one)."""
+    from algebras.utils.plural_rules import get_category_examples
+
+    examples = get_category_examples(target_lang, category)
+    return bool(examples) and examples.isdigit() and f"={examples}" in keywords
+
+
+def missing_plural_categories(keywords: Sequence[str], target_lang: str) -> List[str]:
+    """
+    CLDR categories `target_lang` needs that a plural with these branch keywords lacks, in CLDR
+    order. A category whose only count has an explicit branch (=1 for German one) is not missing.
+    Unknown languages need nothing.
+    """
+    from algebras.utils.plural_rules import get_plural_categories, is_known_language
+
+    keywords = list(keywords)
+    if not target_lang or not is_known_language(target_lang):
+        return []
+    return [
+        c
+        for c in get_plural_categories(target_lang)
+        if c not in keywords and not _explicitly_covered(c, keywords, target_lang)
+    ]
+
+
+def order_plural_keywords(keywords: Sequence[str]) -> List[str]:
+    """Explicit =N branches first (in their order), then CLDR categories, then anything else."""
+    from algebras.utils.plural_rules import PLURAL_CATEGORY_ORDER
+
+    keywords = list(keywords)
+    explicit = [k for k in keywords if k.startswith("=")]
+    cldr = [c for c in PLURAL_CATEGORY_ORDER if c in keywords]
+    rest = [k for k in keywords if k not in explicit and k not in cldr]
+    return explicit + cldr + rest
+
+
+_shared_service: Optional[ICUMessageService] = None
+
+
+def align_source_branches(source: str, target: str) -> str:
+    """Module-level ICUMessageService.align_source_branches for placeholder checks."""
+    global _shared_service
+    if _shared_service is None:
+        _shared_service = ICUMessageService()
+    return _shared_service.align_source_branches(source, target)

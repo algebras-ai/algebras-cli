@@ -108,8 +108,11 @@ class BatchProcessor:
         profile = placeholder_profile or GENERIC_PROFILE
 
         # Flatten targeted ICU messages into literal segments first.
-        # This preserves syntax tokens while translating only literal text.
-        preprocessed_texts, icu_mapping = self.icu_service.preprocess_texts(texts)
+        # This preserves syntax tokens while translating only literal text. Plurals get the
+        # branches the target language needs, each segment with a note on its category.
+        preprocessed_texts, icu_mapping = self.icu_service.preprocess_texts(
+            texts, target_lang=target_lang, source_lang=source_lang
+        )
         preprocessed_contexts: List[Optional[str]] = [None] * len(preprocessed_texts)
         preprocessed_drop: List[FrozenSet[str]] = [frozenset()] * len(preprocessed_texts)
         for index, entry in enumerate(icu_mapping):
@@ -117,6 +120,10 @@ class BatchProcessor:
             for offset in range(entry.count):
                 if contexts and index < len(contexts):
                     preprocessed_contexts[entry.start + offset] = contexts[index]
+                note = entry.note(offset)
+                if note:
+                    base = preprocessed_contexts[entry.start + offset]
+                    preprocessed_contexts[entry.start + offset] = f"{base} {note}" if base else note
                 if drop_allowed and index < len(drop_allowed):
                     preprocessed_drop[entry.start + offset] = drop_allowed[index] or frozenset()
 
