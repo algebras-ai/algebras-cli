@@ -29,7 +29,6 @@ import xml.etree.ElementTree as ET
 from collections import Counter
 from functools import lru_cache
 from typing import Dict, List, Optional, Sequence, Tuple
-from xml.sax.saxutils import escape as _xml_escape
 
 from algebras.services.placeholders.engine import Placeholder, Problem, extract, repair, verify
 from algebras.services.placeholders.file_checks import Finding, register_file_check
@@ -40,10 +39,11 @@ from algebras.utils.xliff_handler import (
     INLINE_ATOMIC_PATTERN,
     INLINE_CLOSE_PATTERN,
     INLINE_OPEN_PATTERN,
+    _read_text,
     build_inline_content,
     decode_flat,
-    flat_to_file_xml,
     read_xliff_file,
+    set_targets,
 )
 
 _EXTENSIONS = (".xlf", ".xliff")
@@ -326,37 +326,18 @@ def _decoded(value: Optional[str]) -> Optional[str]:
     return decode_flat(value) if value is not None else None
 
 
-def _unit_span(text: str, unit_id: str) -> Optional[Tuple[int, int]]:
-    for quoted in {unit_id, _xml_escape(unit_id, {'"': "&quot;"})}:
-        m = re.search(
-            r"<(trans-unit|unit)\b[^>]*?\bid\s*=\s*([\"'])" + re.escape(quoted) + r"\2[^>]*>", text
-        )
-        if m:
-            end = text.find(f"</{m.group(1)}>", m.end())
-            return (m.end(), end if end != -1 else len(text))
-    return None
-
-
-_TARGET_RE = re.compile(r"<target\b([^>]*?)(?:/>|>(.*?)</target\s*>)", re.DOTALL)
-
-
 def write_fixes(target_file: str, fixes: Dict[KeyPath, str], language: str = None, config=None) -> None:
-    """Replace only the inner XML of the fixed units' <target> elements; the rest stays byte-identical."""
-    with open(target_file, "r", encoding="utf-8") as f:
-        text = f.read()
-    not_found = []
-    for path, value in fixes.items():
-        unit_id = path[0]
-        span = _unit_span(text, unit_id)
-        m = _TARGET_RE.search(text, span[0], span[1]) if span else None
-        if m is None:
-            not_found.append(unit_id)
-            continue
-        attrs = m.group(1).rstrip()
-        text = text[: m.start()] + f"<target{attrs}>{flat_to_file_xml(value)}</target>" + text[m.end() :]
+    """
+    Replace only the inner XML of the fixed <target> elements (a key is a 1.2 unit or a 2.x
+    segment, see read_xliff_file); the rest stays byte-identical.
+    """
+    text, encoding = _read_text(target_file)
+    if text is None:
+        raise ValueError(f"Could not decode {target_file}")
+    text, not_found = set_targets(text, {path[0]: value for path, value in fixes.items()})
     if not_found:
         raise ValueError(f"Could not find the target of {', '.join(not_found)} in {target_file}")
-    with open(target_file, "w", encoding="utf-8") as f:
+    with open(target_file, "w", encoding=encoding, newline="") as f:
         f.write(text)
 
 

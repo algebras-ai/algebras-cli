@@ -287,10 +287,9 @@ def test_translate_never_writes_damaged_inline_elements(tmp_path, monkeypatch):
     for text in (t for batch in sent for t in batch):
         assert "<" not in text and "equiv" not in text and "" not in text, text
 
-    # Damaged units: no target text, no translated state.
+    # Damaged units: no <target> (a new file is built from the source), so no translated state.
     for unit_id in ("greet", "items", "terms"):
-        assert not (units[unit_id][1].text or "").strip() and not len(units[unit_id][1]), unit_id
-        assert units[unit_id][1].get("state") is None, unit_id
+        assert units[unit_id][1] is None, unit_id
     assert "nom" not in raw and "un " not in raw and "Acceptez" not in raw
 
     # Good units: translated, inline elements identical to the source file's.
