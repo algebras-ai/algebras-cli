@@ -71,6 +71,10 @@ def read_language_file(
         from algebras.utils.arb_handler import read_arb_file, extract_translatable_strings as extract_arb_strings
 
         return extract_arb_strings(read_arb_file(file_path))
+    elif file_path.endswith(".properties"):
+        from algebras.utils.properties_handler import read_properties_file
+
+        return read_properties_file(file_path)
     elif file_path.endswith((".csv", ".tsv")):
         # For CSV/TSV files, extract a specific language column
         csv_content = read_csv_file(file_path)

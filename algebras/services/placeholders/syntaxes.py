@@ -25,6 +25,12 @@ class Syntax:
     # (source placeholders, target placeholders, problems so far) -> problems. It may add problems
     # (e.g. XLIFF pairing/nesting) or refine existing ones (missing + extra -> attribute changed).
     check: Optional[Callable] = None
+    # Optional codec for literal text, for syntaxes that escape the text around their placeholders
+    # (MessageFormat writes an apostrophe as ''). encode(masked) returns the masked text to send to
+    # the model; decode(translated, masked) returns the model's output, still masked, with that
+    # escaping restored. Both only see tokens and literal text, never placeholder bytes.
+    encode: Optional[Callable] = None
+    decode: Optional[Callable] = None
 
 
 _PRINTF_FLAGS = r"[-+0#,]*"
