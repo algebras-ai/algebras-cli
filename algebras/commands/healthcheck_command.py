@@ -248,7 +248,7 @@ def validate_file_pair(source_file: str, target_file: str, source_language: str,
             target_data = read_language_file(target_file, target_lang, config)
             
             # Handle flat dictionary formats
-            if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv')):
+            if target_file.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv', '.arb')):
                 source_keys = set(source_data.keys())
                 target_keys = set(target_data.keys())
                 

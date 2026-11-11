@@ -20,6 +20,7 @@ class FileFormat(Enum):
     XLIFF = "xliff"
     CSV = "csv"
     TSV = "tsv"
+    ARB = "arb"
     UNKNOWN = "unknown"
 
 
@@ -61,6 +62,8 @@ def detect_format(file_path: str) -> FileFormat:
         return FileFormat.PO
     elif file_path_lower.endswith((".html", ".htm")):
         return FileFormat.HTML
+    elif file_path_lower.endswith(".arb"):
+        return FileFormat.ARB
     else:
         return FileFormat.UNKNOWN
 

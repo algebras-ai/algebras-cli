@@ -66,6 +66,11 @@ def read_language_file(
         # For XLIFF files, extract translatable strings to get a flat dictionary
         content = read_xliff_file(file_path)
         return extract_xliff_strings(content)
+    elif file_path.endswith(".arb"):
+        # Flutter ARB: messages only, `@` metadata is not translatable
+        from algebras.utils.arb_handler import read_arb_file, extract_translatable_strings as extract_arb_strings
+
+        return extract_arb_strings(read_arb_file(file_path))
     elif file_path.endswith((".csv", ".tsv")):
         # For CSV/TSV files, extract a specific language column
         csv_content = read_csv_file(file_path)
