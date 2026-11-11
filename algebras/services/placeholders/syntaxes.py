@@ -104,6 +104,8 @@ SYMFONY = Syntax(
     name="symfony",
     kind="named",
     pattern=re.compile(r"%[A-Za-z_][A-Za-z0-9_.]*%"),
+    # A translated or transliterated name ("%счёт%"), fullwidth signs or a stray space inside.
+    lenient=re.compile(r"[%％]\s?[^\W\d][\w.]*\s?[%％]"),
 )
 
 QT = Syntax(

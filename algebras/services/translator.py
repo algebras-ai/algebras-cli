@@ -566,6 +566,17 @@ class Translator:
             # For XLIFF, we need to update the target elements
             translated = self._update_xliff_targets(content, translated_strings)
         else:
+            extra_kwargs: Dict[str, Any] = {}
+            if file_path.endswith((".yaml", ".yml")):
+                # Rails plural hashes: every form the target language needs, each translated
+                # from the right source text and with a note on the counts it covers.
+                from algebras.services.placeholders.formats import yaml_format
+
+                content, plural_contexts = yaml_format.prepare_for_translation(
+                    content, source_lang, target_lang, profile
+                )
+                if plural_contexts:
+                    extra_kwargs["contexts"] = plural_contexts
             # Use the strategy for translation
             translated = strategy.translate(
                 content,
@@ -576,6 +587,7 @@ class Translator:
                 None,
                 translate_text_func,
                 **self._profile_kwarg(strategy, profile),
+                **extra_kwargs,
             )
 
         return translated
@@ -1060,6 +1072,11 @@ class Translator:
         if missing_subtrees:
             nested_strategy = TranslationStrategyFactory.get_nested_dict_strategy(self)
             for subtree_idx, (key_path, key_parts, subtree) in enumerate(missing_subtrees):
+                # Plural notes for forms inside this subtree, keyed relative to it.
+                prefix = key_path + "."
+                sub_contexts = {
+                    k[len(prefix) :]: v for k, v in (contexts or {}).items() if k.startswith(prefix)
+                }
                 translated_subtree = nested_strategy.translate(
                     subtree,
                     source_lang,
@@ -1069,6 +1086,7 @@ class Translator:
                     None,
                     translate_text_func,
                     placeholder_profile=profile_for_path(source_file_path, self.config),
+                    **({"contexts": sub_contexts} if sub_contexts else {}),
                 )
 
                 if len(key_parts) == 1:

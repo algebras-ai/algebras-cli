@@ -20,6 +20,7 @@ class NestedDictTranslationStrategy(TranslationStrategy):
         on_batch_complete: Optional[Callable[[Dict[str, str], int], None]] = None,
         translate_text_func: Optional[Callable[[str, str, str, bool, str], str]] = None,
         placeholder_profile=None,
+        contexts: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Recursively translate a nested dictionary.
@@ -31,6 +32,8 @@ class NestedDictTranslationStrategy(TranslationStrategy):
             ui_safe: If True, ensures translation will be no more characters than original text
             glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
             on_batch_complete: Optional callback function called after each batch completes
+            contexts: Optional translator notes by dotted key path (plural forms). Those keys
+                also get the single-count plural exemption for their count placeholder.
 
         Returns:
             Translated dictionary
@@ -94,6 +97,22 @@ class NestedDictTranslationStrategy(TranslationStrategy):
             build_result(data, result)
             return result
 
+        extra_kwargs: Dict[str, Any] = {}
+        if contexts:
+            from algebras.services.placeholders import GENERIC_PROFILE
+            from algebras.services.placeholders.plurals import drop_allowed_for_key
+
+            dotted = [".".join(str(k) for k in path) for path in paths]
+            aligned = [contexts.get(key) for key in dotted]
+            if any(aligned):
+                extra_kwargs["contexts"] = aligned
+                extra_kwargs["drop_allowed"] = [
+                    drop_allowed_for_key(key, text, target_lang, placeholder_profile or GENERIC_PROFILE)
+                    if key in contexts
+                    else frozenset()
+                    for key, text in zip(dotted, string_items)
+                ]
+
         # Process batches
         result = self.batch_processor.process(
             texts=string_items,
@@ -104,6 +123,7 @@ class NestedDictTranslationStrategy(TranslationStrategy):
             on_batch_complete=None,  # We'll handle callback after mapping to paths
             translate_text_func=translate_text_func,
             **({"placeholder_profile": placeholder_profile} if placeholder_profile is not None else {}),
+            **extra_kwargs,
         )
 
         # Map translations back to paths and apply normalization

@@ -1864,6 +1864,23 @@ def _load_file_contents(
             if os.path.exists(target_file)
             else {}
         )
+    elif format_type == FileFormat.YAML:
+        # Rails plural hashes: the forms the target language needs, each holding the text it is
+        # translated from, plus a note per form (keys are dotted paths, e.g. "en.inbox.messages.few").
+        from algebras.services.placeholders.formats import yaml_format
+
+        source_content, plural_contexts = yaml_format.prepare_for_translation(
+            handler.read_for_translation(source_file, source_language, config),
+            source_language,
+            target_language,
+            profile_for_path(source_file, config),
+        )
+        plural_contexts = plural_contexts or None
+        target_content = (
+            handler.read_for_translation(target_file, target_language, config)
+            if os.path.exists(target_file)
+            else {}
+        )
     elif format_type in (FileFormat.CSV, FileFormat.TSV):
         # CSV needs language-specific reading
         source_content = handler.read_for_translation(
