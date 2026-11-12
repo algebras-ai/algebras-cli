@@ -21,6 +21,8 @@ from algebras.utils.po_handler import (
     read_po_file,
     write_po_file,
 )
+from algebras.utils import po_handler
+from algebras.utils import android_plurals
 from algebras.utils.android_xml_handler import (
     read_android_xml_file,
     write_android_xml_file,
@@ -34,6 +36,7 @@ from algebras.utils.ios_stringsdict_handler import (
     anchor_plural_contexts,
     build_plural_contexts,
     expand_plural_forms,
+    plural_sources_for_translation,
     extract_translatable_strings,
     read_ios_stringsdict_file,
     split_plural_passes,
@@ -46,7 +49,9 @@ from algebras.utils.html_handler import (
     write_html_file,
 )
 from algebras.utils.xliff_handler import (
+    decode_flat,
     read_xliff_file,
+    segment_contexts,
     write_xliff_file,
     extract_translatable_strings as extract_xliff_strings,
     update_xliff_targets,
@@ -55,6 +60,7 @@ from algebras.utils.csv_handler import (
     read_csv_file,
     write_csv_file,
     write_csv_file_in_place,
+    rewrite_csv_file_in_place,
     extract_translatable_strings as extract_csv_strings,
 )
 from algebras.utils.nested_structure_handler import (
@@ -71,7 +77,11 @@ from algebras.services.file_scanner import FileScanner
 from algebras.utils.path_utils import determine_target_path, resolve_destination_path
 from algebras.utils.git_utils import is_git_available
 from algebras.utils.file_writer import IncrementalFileWriter
+from algebras.utils.json_i18n import expand_i18next_source_file
+from algebras.services.placeholders import profile_for_path
 from algebras.services.translator import Translator
+from algebras.services.batch_processor import BatchProcessor
+from algebras.utils.run_stats import RunStats, EXIT_ERROR, EXIT_OK
 from algebras.utils.file_format_handlers import get_handler
 from algebras.utils.file_format_detector import (
     is_flat_format,
@@ -106,6 +116,63 @@ def lookup_source_file_config(
     return normalized_source_files_config.get(os.path.normpath(source_file))
 
 
+# --- Run outcome and --force keys -------------------------------------------------------------
+
+
+def _force_values(force: Any) -> Optional[List[str]]:
+    """
+    The values given to --force, None for no specific keys. `force` is a string (one --force, or
+    a "k1,k2" list) or a sequence (--force given several times, or keys passed from Python).
+    """
+    if not force or force is True or force == "__all__":
+        return None
+    values = [force] if isinstance(force, str) else [str(v) for v in force]
+    if "__all__" in values:
+        return None
+    return values
+
+
+def _split_force_values(values: List[str]) -> Set[str]:
+    # Backwards-compatible comma form: --force "key1,key2".
+    return {k.strip() for value in values for k in value.split(",") if k.strip()}
+
+
+def _resolve_force_keys(values: List[str], available_keys: Set[str]) -> Set[str]:
+    """
+    Keys to retranslate for one file. A value that is itself a key (PO msgids often contain
+    commas) is taken as is; any other value is split on commas (the "k1,k2" form).
+    """
+    keys: Set[str] = set()
+    for value in values:
+        if value in available_keys or value.strip() in available_keys:
+            keys.add(value if value in available_keys else value.strip())
+        else:
+            keys |= _split_force_values([value])
+    return keys
+
+
+def _available_keys(handler, content: Any) -> Set[str]:
+    if not isinstance(content, dict):
+        return set()
+    keys = set(content)
+    try:
+        keys |= set(handler.extract_keys(content))
+    except Exception:  # noqa: BLE001 - only used to recognise keys that contain commas
+        pass
+    return keys
+
+
+def _each_file(target_languages: List[str], source_files: List[str]):
+    """(target language, source file) pairs, announcing each language."""
+    for target_lang in target_languages:
+        click.echo(f"\n{Fore.BLUE}Translating to {target_lang}...\x1b[0m")
+        for source_file in source_files:
+            yield target_lang, source_file
+
+
+# ------------------------------------------------------------------------------------------------
+
+
 def execute(
     language: Optional[str] = None,
     force: Optional[str] = None,  # None=no force, "__all__"=force all, "key1,key2"=force specific keys
@@ -123,9 +190,15 @@ def execute(
     sync_batch: bool = False,
     no_cache: bool = False,
     config_file: Optional[str] = None,
-) -> None:
+    run_stats: Optional[RunStats] = None,
+) -> int:
     """
     Translate your application.
+
+    Returns the exit code: 0 everything translated, 1 errors (a file failed, or the run could
+    not proceed), 2 completed but some keys were left out (retried on the next run). Every file
+    is translated even when another one fails. With `run_stats` (update), results are added to it
+    and no summary line is printed; otherwise the summary line ends the run.
 
     Args:
         language: Language to translate (if None, translate all languages)
@@ -151,12 +224,17 @@ def execute(
         click.echo(
             f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.\x1b[0m"
         )
-        return
+        return EXIT_ERROR
 
     # Load configuration
     config.load()
     if verbose:
         click.echo(f"{Fore.BLUE}Loaded configuration: {config.config_path}\x1b[0m")
+
+    owns_stats = run_stats is None
+    stats = run_stats if run_stats is not None else RunStats(verbose)
+    if owns_stats:
+        BatchProcessor.reset_reported_languages()
 
     # Check for deprecated config format
     if config.check_deprecated_format():
@@ -204,7 +282,7 @@ def execute(
         click.echo(
             f"{Fore.YELLOW}Only one language ({languages[0]}) is configured. Add more languages with 'algebras add <language>'.\x1b[0m"
         )
-        return
+        return EXIT_OK
 
     # Filter languages if specified
     if language:
@@ -212,7 +290,7 @@ def execute(
             click.echo(
                 f"{Fore.RED}Language '{language}' is not configured in your project.\x1b[0m"
             )
-            return
+            return EXIT_ERROR
         target_languages = [language]
         if verbose:
             click.echo(f"{Fore.BLUE}Selected target language: {language}\x1b[0m")
@@ -253,7 +331,7 @@ def execute(
         try:
             if not os.path.exists(prompt_file):
                 click.echo(f"{Fore.RED}Prompt file not found: {prompt_file}\x1b[0m")
-                return
+                return EXIT_ERROR
 
             with open(prompt_file, "r", encoding="utf-8") as f:
                 custom_prompt = f.read().strip()
@@ -269,7 +347,7 @@ def execute(
             click.echo(
                 f"{Fore.RED}Error reading prompt file {prompt_file}: {str(e)}\x1b[0m"
             )
-            return
+            return EXIT_ERROR
     else:
         # Check if prompt is configured in the config file
         custom_prompt = config.get_setting("api.prompt", "")
@@ -329,11 +407,10 @@ def execute(
 
     # If no specific files were provided, scan and process all files
     if not outdated_files and not missing_keys_files and not outdated_keys_files:
-        force_bool = force == "__all__"
+        force_values = _force_values(force)
+        force_bool = bool(force) and force_values is None
         force_keys: Optional[Set[str]] = (
-            set(k.strip() for k in force.split(",") if k.strip())
-            if force and force != "__all__"
-            else None
+            _split_force_values(force_values) if force_values is not None else None
         )
         _process_all_files(
             config,
@@ -350,8 +427,10 @@ def execute(
             po_mark_fuzzy,
             verbose,
             force_keys=force_keys,
+            force_values=force_values,
+            stats=stats,
         )
-        return
+        return stats.print_summary() if owns_stats else stats.exit_code()
 
     for target_lang in target_languages:
         # Process outdated files - find changed keys by comparing the content
@@ -369,6 +448,7 @@ def execute(
             xlf_version,
             po_mark_fuzzy,
             verbose,
+            stats=stats,
         )
 
         # Process files with specific missing keys
@@ -385,6 +465,7 @@ def execute(
             xlf_version,
             po_mark_fuzzy,
             verbose,
+            stats=stats,
         )
 
         # Process files with outdated keys
@@ -402,10 +483,11 @@ def execute(
             xlf_version,
             po_mark_fuzzy,
             verbose,
+            stats=stats,
         )
 
-        click.echo(f"\n{Fore.GREEN}Translation completed.\x1b[0m")
-        return
+        return stats.print_summary() if owns_stats else stats.exit_code()
+    return stats.print_summary() if owns_stats else stats.exit_code()
 
 
 def _process_all_files(
@@ -423,9 +505,14 @@ def _process_all_files(
     po_mark_fuzzy: bool,
     verbose: bool,
     force_keys: Optional[Set[str]] = None,
+    force_values: Optional[List[str]] = None,
+    stats: Optional[RunStats] = None,
 ) -> None:
     """
     Scan and process all files for translation.
+
+    Each (source file, target language) pair is guarded by `stats.file()`: a file that cannot be
+    read or translated is reported and counted, and the other files are still translated.
 
     Args:
         config: Config instance
@@ -442,6 +529,10 @@ def _process_all_files(
         po_mark_fuzzy: Whether to mark PO entries as fuzzy
         verbose: Verbose mode flag
     """
+    if stats is None:
+        stats = RunStats(verbose)
+    if force_keys is not None and force_values is None:
+        force_values = sorted(force_keys)
     try:
         scanner = FileScanner(config=config)
         files_by_language = scanner.group_files_by_language()
@@ -477,23 +568,31 @@ def _process_all_files(
             click.echo(
                 f"  {idx}. {Fore.CYAN}{rel_path}{Fore.RESET} ({file_size_str}, {file_ext})"
             )
+            if verbose:
+                try:
+                    from algebras.services.placeholders import profile_for_path as _profile
+
+                    profile = _profile(file_path, config)
+                    click.echo(
+                        f"     placeholders: {profile.name} ({', '.join(profile.syntax_names) or 'none'})"
+                    )
+                except ValueError as e:
+                    click.echo(f"     {Fore.YELLOW}placeholders: {e}{Fore.RESET}")
 
         click.echo("")  # Empty line for better readability
 
         # Check if git is available for outdated key detection
         git_available = is_git_available()
 
-        # Translate each target language
-        for target_lang in target_languages:
-            click.echo(f"\n{Fore.BLUE}Translating to {target_lang}...\x1b[0m")
-
+        # Translate each target language, one guarded source file at a time
+        for target_lang, source_file in _each_file(target_languages, source_files):
             # Get existing files for this language
             existing_files = files_by_language.get(target_lang, [])
             existing_file_basenames = [os.path.basename(f) for f in existing_files]
             existing_file_paths = {os.path.basename(f): f for f in existing_files}
 
-            # Process each source file
-            for source_file in source_files:
+            # Process each source file (an error fails this file only)
+            with stats.file(f"{source_file} ({target_lang})", translator):
                 source_basename = os.path.basename(source_file)
                 source_dirname = os.path.dirname(source_file)
                 source_ext = (
@@ -630,6 +729,14 @@ def _process_all_files(
                             )
                             target_file = os.path.join(target_dirname, target_basename)
 
+                # XLSX: an .xls workbook cannot be written; its translations go to the .xlsx next
+                # to it, which is then the target (read back on the next run).
+                if detect_format(target_file) == FileFormat.XLSX:
+                    from algebras.utils.xlsx_handler import xlsx_output_path
+
+                    target_file = xlsx_output_path(target_file)
+                    target_basename = os.path.basename(target_file)
+
                 os.makedirs(target_dirname, exist_ok=True)
 
                 # Check if target file already exists and is up to date
@@ -657,7 +764,7 @@ def _process_all_files(
                 # Handle --force "key1,key2" — retranslate only specific keys
                 if force_keys is not None and os.path.exists(target_file):
                     click.echo(
-                        f"  {Fore.GREEN}Force-retranslating {len(force_keys)} specific key(s) in {target_basename}...\x1b[0m"
+                        f"  {Fore.GREEN}Force-retranslating {len(force_values)} specific key(s) in {target_basename}...\x1b[0m"
                     )
                     try:
                         handler = get_handler(source_file, config)
@@ -678,12 +785,17 @@ def _process_all_files(
                             xlf_version,
                         )
                         use_in_place = _should_use_in_place(target_file, regenerate_from_scratch)
-                        keys_to_update = set(force_keys)
+                        file_force_keys = _resolve_force_keys(
+                            force_values, _available_keys(handler, source_content)
+                        )
+                        keys_to_update = set(file_force_keys)
 
                         if detect_format(source_file) == FileFormat.TS:
                             basename = os.path.basename(target_file)
                             export_name = basename.split(".")[0]
-                            incremental_writer = IncrementalFileWriter(target_file, "ts", export_name)
+                            incremental_writer = IncrementalFileWriter(
+                                target_file, "ts", export_name, source_file=source_file, regenerate=regenerate_from_scratch
+                            )
 
                             def on_batch_complete(
                                 batch_results: Dict[str, str], batch_index: int
@@ -694,7 +806,7 @@ def _process_all_files(
                                 translator.translate_missing_keys_batch,
                                 source_content,
                                 target_content,
-                                list(force_keys),
+                                list(file_force_keys),
                                 target_lang,
                                 ui_safe,
                                 glossary_id,
@@ -708,7 +820,7 @@ def _process_all_files(
                                 translator.translate_missing_keys_batch,
                                 source_content,
                                 target_content,
-                                list(force_keys),
+                                list(file_force_keys),
                                 target_lang,
                                 ui_safe,
                                 glossary_id,
@@ -724,21 +836,21 @@ def _process_all_files(
                                 source_file=source_file,
                                 source_language=source_language,
                                 target_language=target_lang,
+                                config=config,
                                 xlf_target_state=xlf_target_state,
                                 xlf_version=xlf_version,
                                 po_mark_fuzzy=po_mark_fuzzy,
                                 source_raw_content=source_raw_content,
                                 target_raw_content=target_raw_content,
                                 verbose=verbose,
+                                regenerate_from_scratch=regenerate_from_scratch,
                             )
 
                         click.echo(
-                            f"  {Fore.GREEN}✓ Force-updated {len(force_keys)} key(s) in {target_file}\x1b[0m"
+                            f"  {Fore.GREEN}✓ Force-updated {len(file_force_keys)} key(s) in {target_file}\x1b[0m"
                         )
                     except Exception as e:
-                        click.echo(
-                            f"  {Fore.RED}Error force-translating keys in {source_basename}: {str(e)}\x1b[0m"
-                        )
+                        raise RuntimeError(f"error force-translating keys: {e}") from e
                     continue
 
                 # Handle the translation based on mode (full or missing keys only)
@@ -801,7 +913,8 @@ def _process_all_files(
 
                             # Create incremental writer
                             incremental_writer = IncrementalFileWriter(
-                                target_file, "ts", export_name
+                                target_file, "ts", export_name, source_file=source_file,
+                                regenerate=regenerate_from_scratch,
                             )
 
                             # Define callback for batch completion
@@ -856,21 +969,21 @@ def _process_all_files(
                                 source_file=source_file,
                                 source_language=source_language,
                                 target_language=target_lang,
+                                config=config,
                                 xlf_target_state=xlf_target_state,
                                 xlf_version=xlf_version,
                                 po_mark_fuzzy=po_mark_fuzzy,
                                 source_raw_content=source_raw_content,
                                 target_raw_content=target_raw_content,
                                 verbose=verbose,
+                                regenerate_from_scratch=regenerate_from_scratch,
                             )
 
                         click.echo(
                             f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m"
                         )
                     except Exception as e:
-                        click.echo(
-                            f"  {Fore.RED}Error translating keys in {source_basename}: {str(e)}\x1b[0m"
-                        )
+                        raise RuntimeError(f"error translating missing keys: {e}") from e
                 else:
                     # Translate the full file
                     click.echo(
@@ -889,7 +1002,7 @@ def _process_all_files(
 
                         # Translate every source string plus the plural forms the
                         # target language needs but the source lacks
-                        source_flat = expand_plural_forms(
+                        source_flat = plural_sources_for_translation(
                             source_content_raw,
                             extract_translatable_strings(source_content_raw),
                             target_lang,
@@ -921,9 +1034,112 @@ def _process_all_files(
                                 updated_content, source_content_raw, target_lang
                             ),
                         )
+                    elif detect_format(source_file) == FileFormat.XML:
+                        # Android: strings plus every plural form the target language needs,
+                        # with plural notes, 'other' translated first.
+                        handler = get_handler(source_file, config)
+                        source_content = handler.read_for_translation(
+                            source_file, source_language, config
+                        )
+                        translated_content = _translate_plural_aware(
+                            translator.translate_missing_keys_batch,
+                            source_content,
+                            {},
+                            list(source_content),
+                            target_lang,
+                            ui_safe,
+                            glossary_id,
+                            source_file_path=source_file,
+                            contexts=android_plurals.build_plural_contexts(
+                                source_content, source_language, target_lang
+                            ),
+                        )
+                        _write_layout_preserving(
+                            target_file,
+                            translated_content,
+                            handler,
+                            source_file,
+                            source_language,
+                            target_lang,
+                            config,
+                            regenerate_from_scratch,
+                        )
+                        click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
+                    elif detect_format(source_file) == FileFormat.STRINGS:
+                        # iOS .strings: translated key by key (failed keys are left out), then
+                        # written keeping the target's layout, or the source's for a new file.
+                        handler = get_handler(source_file, config)
+                        source_content = handler.read_for_translation(
+                            source_file, source_language, config
+                        )
+                        translated_content = translator.translate_missing_keys_batch(
+                            source_content,
+                            {},
+                            list(source_content),
+                            target_lang,
+                            ui_safe,
+                            glossary_id,
+                            source_file_path=source_file,
+                        )
+                        _write_layout_preserving(
+                            target_file,
+                            translated_content,
+                            handler,
+                            source_file,
+                            source_language,
+                            target_lang,
+                            config,
+                            regenerate_from_scratch,
+                        )
+                        click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
+                    elif detect_format(source_file) == FileFormat.PO:
+                        # gettext: every msgstr / msgstr[N] the target needs, plural notes,
+                        # placeholders masked; written through the per-entry placeholder gate.
+                        handler = get_handler(source_file, config)
+                        (
+                            source_content,
+                            _target_content,
+                            _source_raw,
+                            _target_raw,
+                            plural_contexts,
+                        ) = _load_file_contents(
+                            source_file,
+                            target_file,
+                            handler,
+                            source_language,
+                            target_lang,
+                            config,
+                            verbose,
+                            xlf_version,
+                        )
+                        translated_content = _translate_plural_aware(
+                            translator.translate_missing_keys_batch,
+                            source_content,
+                            {},
+                            list(source_content),
+                            target_lang,
+                            ui_safe,
+                            glossary_id,
+                            source_file_path=source_file,
+                            contexts=plural_contexts,
+                        )
+                        _write_translated_content(
+                            target_file,
+                            translated_content,
+                            handler,
+                            set(translated_content),
+                            use_in_place=False,
+                            source_file=source_file,
+                            source_language=source_language,
+                            target_language=target_lang,
+                            config=config,
+                            po_mark_fuzzy=po_mark_fuzzy,
+                        )
+                        click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     elif source_file.endswith((".csv", ".tsv")):
-                        # For CSV/TSV files, read existing CSV/TSV and add/update language column
-                        existing_csv = read_csv_file(source_file)
+                        # For CSV/TSV files, update the target language column in place. Only
+                        # the translated cells are written: a cell whose placeholders did not
+                        # survive translation keeps its previous value and is reported.
                         translated_content = translator.translate_file(
                             source_file, target_lang, ui_safe, glossary_id
                         )
@@ -931,59 +1147,64 @@ def _process_all_files(
                         mapped_target_lang = config.get_destination_locale_code(
                             target_lang
                         )
-                        # Extract the translated strings (they come as flat dict from translator)
-                        from algebras.utils.csv_handler import add_language_to_csv
-
-                        updated_csv = add_language_to_csv(
-                            existing_csv, mapped_target_lang, translated_content
+                        target_column = translated_content.get(
+                            "target_column", mapped_target_lang
                         )
-                        write_csv_file(target_file, updated_csv)
-                    elif source_file.endswith((".xlf", ".xliff")):
-                        # For XLIFF files, extract strings, translate, then update structure
-                        # Don't use translator.translate_file() as it returns structured dict, not flat translations
-                        source_content_raw = read_xliff_file(source_file)
-                        # Extract flat translatable strings
-                        source_content = extract_xliff_strings(source_content_raw)
+                        translated_cells = {
+                            key: translated_content["translations"][key][target_column]
+                            for key in translated_content.get("translated_keys", [])
+                            if target_column in translated_content["translations"][key]
+                        }
+                        if not os.path.exists(target_file):
+                            import shutil
 
-                        # Translate the flat dictionary using strategy
-                        from algebras.services.strategies.strategy_factory import (
-                            TranslationStrategyFactory,
-                        )
-
-                        flat_strategy = (
-                            TranslationStrategyFactory.get_flat_dict_strategy(
-                                translator
+                            shutil.copyfile(source_file, target_file)
+                        if regenerate_from_scratch:
+                            rewrite_csv_file_in_place(
+                                target_file, translated_cells, mapped_target_lang
                             )
-                        )
-                        provider = translator.api_config.get("provider", "algebras-ai")
-                        translate_text_func = (
-                            None
-                            if provider == "algebras-ai"
-                            else translator.translate_text
-                        )
-                        translated_content = flat_strategy.translate(
+                        else:
+                            # Only changed cells are written: delimiter, quoting, line
+                            # endings and other cells stay byte for byte; rows the target
+                            # lacks go to their source position.
+                            write_csv_file_in_place(
+                                target_file,
+                                translated_cells,
+                                mapped_target_lang,
+                                key_order=list(translated_content.get("translations", {})),
+                            )
+                    elif source_file.endswith((".xlf", ".xliff")):
+                        # XLIFF: every translatable text (a 1.2 unit, or a 2.x segment with the
+                        # other segments of its unit as context; translate="no" units are left
+                        # out), placeholders masked. An existing target keeps everything but the
+                        # changed <target>s; a new one (or --regenerate-from-scratch) is built
+                        # from the source file, keeping its notes, context and attributes.
+                        source_content_raw = read_xliff_file(source_file)
+                        source_content = extract_xliff_strings(source_content_raw)
+                        translated_content = _translate_plural_aware(
+                            translator.translate_missing_keys_batch,
                             source_content,
-                            source_language,
+                            {},
+                            list(source_content),
                             target_lang,
                             ui_safe,
                             glossary_id,
-                            None,
-                            translate_text_func,
+                            source_file_path=source_file,
+                            contexts=_xliff_segment_contexts(source_content_raw),
                         )
 
-                        # Create empty target structure with version from source
-                        target_version = (
-                            source_content_raw.get("version", xlf_version)
-                            if source_content_raw
-                            else xlf_version
-                        )
-                        target_content_raw = {
-                            "version": target_version,
-                            "files": [],
-                        }
+                        in_place = _should_use_in_place(target_file, regenerate_from_scratch)
+                        if in_place:
+                            target_content_raw = read_xliff_file(target_file)
+                        else:
+                            target_content_raw = {
+                                "version": source_content_raw.get("version", xlf_version),
+                                "files": [],
+                            }
                         if verbose:
                             click.echo(
-                                f"  {Fore.CYAN}Creating new XLIFF file with version {target_version} and state '{xlf_target_state}'\x1b[0m"
+                                f"  {Fore.CYAN}{'Updating' if in_place else 'Creating new'} XLIFF file "
+                                f"(version {target_content_raw['version']}, state '{xlf_target_state}')\x1b[0m"
                             )
                             # Show sample translations
                             sample_count = min(3, len(translated_content))
@@ -994,12 +1215,11 @@ def _process_all_files(
                                 for i, (key, value) in enumerate(
                                     list(translated_content.items())[:sample_count]
                                 ):
-                                    source_value = source_content.get(key, "")
+                                    source_value = decode_flat(source_content.get(key, ""))
                                     click.echo(
-                                        f"    {key[:30]}... : '{source_value[:40]}...' → '{value[:40]}...'"
+                                        f"    {key[:30]}... : '{source_value[:40]}...' → '{decode_flat(value)[:40]}...'"
                                     )
 
-                        # Use update_xliff_targets to properly structure the content and add state
                         updated_content = update_xliff_targets(
                             target_content_raw,
                             translated_content,
@@ -1025,7 +1245,8 @@ def _process_all_files(
 
                         # Create incremental writer
                         incremental_writer = IncrementalFileWriter(
-                            target_file, "ts", export_name
+                            target_file, "ts", export_name, source_file=source_file,
+                            regenerate=regenerate_from_scratch,
                         )
 
                         # Define callback for batch completion
@@ -1058,10 +1279,31 @@ def _process_all_files(
                             glossary_id,
                             on_batch_complete,
                             translate_text_func,
+                            placeholder_profile=profile_for_path(source_file, config),
                         )
 
                         # Wait for all writes to complete
                         incremental_writer.finish()
+                        click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
+                    elif detect_format(source_file) == FileFormat.YAML:
+                        # YAML: written over the existing target, or over the source as a template,
+                        # keeping comments, key order and quoting (--regenerate-from-scratch: yaml.dump).
+                        translated_content = translator.translate_file(
+                            source_file, target_lang, ui_safe, glossary_id
+                        )
+                        handler = get_handler(source_file, config)
+                        _write_translated_content(
+                            target_file,
+                            translated_content,
+                            handler,
+                            handler.extract_keys(translated_content),
+                            use_in_place=not regenerate_from_scratch,
+                            source_file=source_file,
+                            source_language=source_language,
+                            target_language=target_lang,
+                            config=config,
+                            verbose=verbose,
+                        )
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
                     else:
                         # For other file types, use the normal translation flow
@@ -1070,8 +1312,9 @@ def _process_all_files(
                         )
 
                         # Save translated content
-                        # For full file translation, we always regenerate from scratch
-                        # (since we're translating the entire file, not just updating keys)
+                        # Full file translation goes through handler.write(); JSON, ARB and
+                        # .properties keep the target's layout (or the source's, for a new
+                        # file) unless regenerate_from_scratch is set.
                         handler = get_handler(source_file, config)
                         # Get all keys for full file translation
                         all_keys = handler.extract_keys(translated_content)
@@ -1084,12 +1327,14 @@ def _process_all_files(
                             source_file=source_file,
                             source_language=source_language,
                             target_language=target_lang,
+                            config=config,
                             xlf_target_state=xlf_target_state,
                             xlf_version=xlf_version,
                             po_mark_fuzzy=po_mark_fuzzy,
                             source_raw_content=None,
                             target_raw_content=None,
                             verbose=verbose,
+                            regenerate_from_scratch=regenerate_from_scratch,
                         )
 
                         click.echo(f"  {Fore.GREEN}✓ Saved to {target_file}\x1b[0m")
@@ -1100,10 +1345,13 @@ def _process_all_files(
         )
 
     except Exception as e:
-        import traceback
-
+        # The run could not proceed (scanning, config): exit code 1.
+        stats.fatal = True
         click.echo(f"{Fore.RED}Error: {str(e)}\x1b[0m")
-        traceback.print_exc()
+        if verbose:
+            import traceback
+
+            traceback.print_exc()
 
 
 def _process_outdated_files(
@@ -1120,6 +1368,7 @@ def _process_outdated_files(
     xlf_version: str,
     po_mark_fuzzy: bool,
     verbose: bool,
+    stats: Optional[RunStats] = None,
 ) -> None:
     """
     Process outdated files by finding changed keys and translating them.
@@ -1144,7 +1393,10 @@ def _process_outdated_files(
             f"\n{Fore.BLUE}Processing outdated file {os.path.basename(target_file)} for language '{target_lang}'...{Fore.RESET}"
         )
 
-        try:
+        if stats is None:
+            stats = RunStats(verbose)
+        # An error fails this file only; the other files are still translated.
+        with stats.file(f"{target_file} ({target_lang})", translator):
             # Get handler for file format
             handler = get_handler(source_file, config)
 
@@ -1171,7 +1423,11 @@ def _process_outdated_files(
                 source_keys = set(source_content.keys())
                 target_keys = set(target_content.keys())
             else:
-                source_keys = handler.extract_keys(source_content)
+                # i18next JSON: plus the plural forms the target language needs (ru item_few),
+                # so a target lacking them gets them as missing keys (never as outdated ones).
+                source_keys = handler.extract_keys(
+                    expand_i18next_source_file(source_file, source_content, target_lang, config)
+                )
                 target_keys = handler.extract_keys(target_content)
 
             # Find keys that exist in both files - these are potentially outdated
@@ -1250,7 +1506,8 @@ def _process_outdated_files(
 
                     # Create incremental writer
                     incremental_writer = IncrementalFileWriter(
-                        target_file, "ts", export_name
+                        target_file, "ts", export_name, source_file=source_file,
+                        regenerate=regenerate_from_scratch,
                     )
 
                     # Define callback for batch completion
@@ -1288,6 +1545,7 @@ def _process_outdated_files(
                             ui_safe,
                             glossary_id,
                             on_batch_complete=on_batch_complete,
+                            source_file_path=source_file,
                             contexts=plural_contexts,
                         )
 
@@ -1321,6 +1579,7 @@ def _process_outdated_files(
                             target_lang,
                             ui_safe,
                             glossary_id,
+                            source_file_path=source_file,
                             contexts=plural_contexts,
                         )
 
@@ -1334,12 +1593,14 @@ def _process_outdated_files(
                         source_file=source_file,
                         source_language=source_language,
                         target_language=target_lang,
+                        config=config,
                         xlf_target_state=xlf_target_state,
                         xlf_version=xlf_version,
                         po_mark_fuzzy=po_mark_fuzzy,
                         source_raw_content=source_raw_content,
                         target_raw_content=target_raw_content,
                         verbose=verbose,
+                        regenerate_from_scratch=regenerate_from_scratch,
                     )
 
                 updated_count = len(missing_keys) + len(modified_keys)
@@ -1350,11 +1611,6 @@ def _process_outdated_files(
                 click.echo(
                     f"  {Fore.GREEN}No keys need to be updated in {os.path.basename(target_file)}\x1b[0m"
                 )
-
-        except Exception as e:
-            click.echo(
-                f"  {Fore.RED}Error processing outdated file {os.path.basename(target_file)}: {str(e)}\x1b[0m"
-            )
 
 
 def _process_missing_keys_files(
@@ -1370,6 +1626,7 @@ def _process_missing_keys_files(
     xlf_version: str,
     po_mark_fuzzy: bool,
     verbose: bool,
+    stats: Optional[RunStats] = None,
 ) -> None:
     """
     Process files with specific missing keys.
@@ -1393,7 +1650,10 @@ def _process_missing_keys_files(
             f"\n{Fore.BLUE}Processing file with missing keys {os.path.basename(target_file)}...{Fore.RESET}"
         )
 
-        try:
+        if stats is None:
+            stats = RunStats(verbose)
+        # An error fails this file only; the other files are still translated.
+        with stats.file(f"{target_file} ({target_lang})", translator):
             # Get handler for file format
             handler = get_handler(source_file, config)
 
@@ -1435,7 +1695,8 @@ def _process_missing_keys_files(
 
                     # Create incremental writer
                     incremental_writer = IncrementalFileWriter(
-                        target_file, "ts", export_name
+                        target_file, "ts", export_name, source_file=source_file,
+                        regenerate=regenerate_from_scratch,
                     )
 
                     # Define callback for batch completion
@@ -1484,21 +1745,19 @@ def _process_missing_keys_files(
                         source_file=source_file,
                         source_language=source_language,
                         target_language=target_lang,
+                        config=config,
                         xlf_target_state=xlf_target_state,
                         xlf_version=xlf_version,
                         po_mark_fuzzy=po_mark_fuzzy,
                         source_raw_content=source_raw_content,
                         target_raw_content=target_raw_content,
                         verbose=verbose,
+                        regenerate_from_scratch=regenerate_from_scratch,
                     )
 
                 click.echo(
                     f"  {Fore.GREEN}✓ Updated {len(missing_keys)} keys in {target_file}\x1b[0m"
                 )
-        except Exception as e:
-            click.echo(
-                f"  {Fore.RED}Error processing file with missing keys {os.path.basename(target_file)}: {str(e)}\x1b[0m"
-            )
 
 
 def _process_outdated_keys_files(
@@ -1515,6 +1774,7 @@ def _process_outdated_keys_files(
     xlf_version: str,
     po_mark_fuzzy: bool,
     verbose: bool,
+    stats: Optional[RunStats] = None,
 ) -> None:
     """
     Process files with specific outdated keys.
@@ -1539,7 +1799,10 @@ def _process_outdated_keys_files(
             f"\n{Fore.BLUE}Processing file with outdated keys {os.path.basename(target_file)}...{Fore.RESET}"
         )
 
-        try:
+        if stats is None:
+            stats = RunStats(verbose)
+        # An error fails this file only; the other files are still translated.
+        with stats.file(f"{target_file} ({target_lang})", translator):
             # Get handler for file format
             handler = get_handler(source_file, config)
 
@@ -1581,7 +1844,8 @@ def _process_outdated_keys_files(
 
                     # Create incremental writer
                     incremental_writer = IncrementalFileWriter(
-                        target_file, "ts", export_name
+                        target_file, "ts", export_name, source_file=source_file,
+                        regenerate=regenerate_from_scratch,
                     )
 
                     # Define callback for batch completion
@@ -1600,6 +1864,7 @@ def _process_outdated_keys_files(
                         ui_safe,
                         glossary_id,
                         on_batch_complete=on_batch_complete,
+                        source_file_path=source_file,
                         contexts=plural_contexts,
                     )
 
@@ -1615,6 +1880,7 @@ def _process_outdated_keys_files(
                         target_lang,
                         ui_safe,
                         glossary_id,
+                        source_file_path=source_file,
                         contexts=plural_contexts,
                     )
 
@@ -1628,21 +1894,50 @@ def _process_outdated_keys_files(
                         source_file=source_file,
                         source_language=source_language,
                         target_language=target_lang,
+                        config=config,
                         xlf_target_state=xlf_target_state,
                         xlf_version=xlf_version,
                         po_mark_fuzzy=po_mark_fuzzy,
                         source_raw_content=source_raw_content,
                         target_raw_content=target_raw_content,
                         verbose=verbose,
+                        regenerate_from_scratch=regenerate_from_scratch,
                     )
 
                 click.echo(
                     f"  {Fore.GREEN}✓ Updated {len(outdated_keys)} keys in {target_file}\x1b[0m"
                 )
-        except Exception as e:
-            click.echo(
-                f"  {Fore.RED}Error processing file with outdated keys {os.path.basename(target_file)}: {str(e)}\x1b[0m"
-            )
+
+
+def _write_layout_preserving(
+    target_file: str,
+    content: Dict[str, Any],
+    handler,
+    source_file: str,
+    source_language: str,
+    target_language: str,
+    config,
+    regenerate_from_scratch: bool,
+) -> None:
+    """
+    Full translation of a .strings / Android strings.xml file. An existing target keeps its
+    layout (changed values replaced, new keys at their source position); a new one is built from
+    the source as a template. --regenerate-from-scratch writes the file sorted by key.
+    """
+    if regenerate_from_scratch:
+        handler.write(target_file, content, source_file=source_file)
+        return
+    _write_translated_content(
+        target_file,
+        content,
+        handler,
+        set(content),
+        use_in_place=os.path.exists(target_file),
+        source_file=source_file,
+        source_language=source_language,
+        target_language=target_language,
+        config=config,
+    )
 
 
 def _should_use_in_place(target_file: str, regenerate_from_scratch: bool) -> bool:
@@ -1732,13 +2027,14 @@ def _load_file_contents(
             if os.path.exists(target_file)
             else {}
         )
+        plural_contexts = _xliff_segment_contexts(source_raw_content)
     elif format_type == FileFormat.STRINGSDICT:
         # StringsDict needs raw content for structure preservation
         source_raw_content = handler.read(source_file)
         target_raw_content = (
             handler.read(target_file) if os.path.exists(target_file) else None
         )
-        source_content = expand_plural_forms(
+        source_content = plural_sources_for_translation(
             source_raw_content,
             handler.read_for_translation(source_file, source_language, config),
             target_language,
@@ -1750,6 +2046,58 @@ def _load_file_contents(
             handler.read_for_translation(target_file, target_language, config)
             if os.path.exists(target_file)
             else {}
+        )
+    elif format_type == FileFormat.XML:
+        source_content = handler.read_for_translation(source_file, source_language, config)
+        plural_contexts = android_plurals.build_plural_contexts(
+            source_content, source_language, target_language
+        )
+        target_content = (
+            handler.read_for_translation(target_file, target_language, config)
+            if os.path.exists(target_file)
+            else {}
+        )
+    elif format_type == FileFormat.PO:
+        # Plural entries: one key per msgstr[N] the target needs (its Plural-Forms), each with
+        # the source text it is translated from and a note on which counts it covers.
+        source_content = po_handler.expand_plural_source(
+            source_file,
+            handler.read_for_translation(source_file, source_language, config),
+            target_language,
+            target_file,
+        )
+        plural_contexts = po_handler.build_plural_contexts(
+            source_file, source_language, target_language, target_file
+        )
+        target_content = (
+            handler.read_for_translation(target_file, target_language, config)
+            if os.path.exists(target_file)
+            else {}
+        )
+    elif format_type == FileFormat.YAML:
+        # Rails plural hashes: the forms the target language needs, each holding the text it is
+        # translated from, plus a note per form (keys are dotted paths, e.g. "en.inbox.messages.few").
+        from algebras.services.placeholders.formats import yaml_format
+
+        source_content, plural_contexts = yaml_format.prepare_for_translation(
+            handler.read_for_translation(source_file, source_language, config),
+            source_language,
+            target_language,
+            profile_for_path(source_file, config),
+        )
+        plural_contexts = plural_contexts or None
+        # Rails-style files (`en:` / `ru:` root key): the target is keyed under the source root, so
+        # keys compare and are named in source terms; _write_translated_content re-roots it.
+        from algebras.utils.yaml_locale_root import align_target
+
+        target_content = align_target(
+            source_content,
+            handler.read_for_translation(target_file, target_language, config)
+            if os.path.exists(target_file)
+            else {},
+            source_language,
+            target_language,
+            config,
         )
     elif format_type in (FileFormat.CSV, FileFormat.TSV):
         # CSV needs language-specific reading
@@ -1781,6 +2129,19 @@ def _load_file_contents(
     )
 
 
+def _xliff_segment_contexts(source_raw_content) -> Optional[Dict[str, str]]:
+    """
+    Notes for the segments of multi-segment XLIFF 2.x units (the whole message as context), as
+    PluralContexts anchored to themselves so _translate_plural_aware sends them in one pass.
+    """
+    notes = segment_contexts(source_raw_content or {})
+    if not notes:
+        return None
+    from algebras.utils.ios_stringsdict_handler import PluralContexts
+
+    return PluralContexts(notes, anchors={key: key for key in notes})
+
+
 def _translate_plural_aware(
     translate_fn,
     source_content: Dict[str, Any],
@@ -1797,6 +2158,17 @@ def _translate_plural_aware(
     the remaining forms with that 'other' translation (or the one already in the target) added to
     their context, so every form of an entry uses the same wording.
     """
+    if android_plurals.has_android_plurals(source_content) and args:
+        # Android <plurals>: translate each form as its own flat key (adding the forms the
+        # target language needs), then fold the result back into the nested structure.
+        return android_plurals.translate_plurals(
+            lambda s, t, k, c: _translate_plural_aware(translate_fn, s, t, k, *args, contexts=c, **kwargs),
+            source_content,
+            target_content,
+            keys,
+            target_lang=args[0],
+            contexts=contexts,
+        )
     if not contexts:
         return translate_fn(source_content, target_content, list(keys), *args, contexts=contexts, **kwargs)
 
@@ -1810,7 +2182,9 @@ def _translate_plural_aware(
             content,
             second,
             *args,
-            contexts=anchor_plural_contexts(contexts, second, content),
+            contexts=anchor_plural_contexts(
+                contexts, second, content, source_content if isinstance(source_content, dict) else None
+            ),
             **kwargs,
         )
     return content
@@ -1824,6 +2198,44 @@ def _warn_plural_issues(target_file: str, warnings: List[str]) -> None:
     )
     for warning in warnings:
         click.echo(f"    - {warning}")
+
+
+def _reroot_yaml_target(
+    target_file: str,
+    content: Dict[str, Any],
+    source_file: str,
+    source_language: Optional[str],
+    target_language: str,
+    config,
+) -> Dict[str, Any]:
+    """
+    Rails-style YAML: content keyed under the source root (`en:`) gets the target's locale root
+    (`ru:`, the destination locale code). A target still rooted at the source locale, as older
+    versions wrote it, is rewritten that way, with a notice.
+    """
+    from algebras.utils import yaml_locale_root
+
+    try:
+        with open(source_file, "r", encoding="utf-8") as f:
+            source_data = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError):
+        return content
+    s_root = yaml_locale_root.source_root(source_data, source_language, config)
+    if s_root is None:
+        return content
+    if os.path.exists(target_file):
+        try:
+            with open(target_file, "r", encoding="utf-8") as f:
+                existing = yaml.safe_load(f)
+        except (OSError, yaml.YAMLError):
+            existing = None
+        if yaml_locale_root.misrooted(existing, s_root, target_language, config):
+            click.echo(
+                f"  {Fore.YELLOW}"
+                f"{yaml_locale_root.migration_notice(target_file, s_root, target_language, config)}"
+                f"{Fore.RESET}"
+            )
+    return yaml_locale_root.reroot_for_target(content, source_data, source_language, target_language, config)
 
 
 def _write_translated_content(
@@ -1841,6 +2253,8 @@ def _write_translated_content(
     source_raw_content: Optional[Dict[str, Any]] = None,
     target_raw_content: Optional[Dict[str, Any]] = None,
     verbose: bool = False,
+    config=None,
+    regenerate_from_scratch: bool = False,
 ):
     """
     Write translated content to file using handler.
@@ -1860,8 +2274,14 @@ def _write_translated_content(
         source_raw_content: Raw source content (for XLIFF, StringsDict)
         target_raw_content: Raw target content (for XLIFF, StringsDict)
         verbose: Verbose mode flag
+        config: Config instance (locale mapping for the root key of Rails-style YAML)
+        regenerate_from_scratch: CSV/TSV, JSON, ARB, .properties: write the file from the content
+            alone instead of keeping its layout (or, for a new file, the source's)
     """
     format_type = detect_format(target_file)
+
+    if format_type == FileFormat.YAML and source_file and target_language:
+        content = _reroot_yaml_target(target_file, content, source_file, source_language, target_language, config)
 
     # Prepare kwargs for handler.write()
     kwargs = {}
@@ -1886,6 +2306,18 @@ def _write_translated_content(
         if source_file is None:
             raise ValueError("HTML write requires source_file")
         kwargs["source_file"] = source_file
+    elif format_type in (FileFormat.XML, FileFormat.STRINGS):
+        # XML: markup and formatted="false" come from the source. Both: the source is the layout
+        # template of a new file and gives new keys their position. Writing an existing file
+        # without in-place is --regenerate-from-scratch: sorted, as before.
+        kwargs["source_file"] = source_file
+        kwargs["preserve_layout"] = not regenerate_from_scratch and not os.path.exists(target_file)
+        if format_type == FileFormat.XML:
+            kwargs["target_language"] = target_language  # tools:locale of a new file
+    elif format_type == FileFormat.TS:
+        kwargs["source_file"] = source_file  # quote style of each value ('…', "…" or `…`)
+    elif format_type == FileFormat.YAML:
+        kwargs["source_file"] = source_file  # key order of new keys; the template of a new target
     elif format_type in (FileFormat.CSV, FileFormat.TSV):
         if target_language is None:
             raise ValueError("CSV/TSV write requires target_language")
@@ -1893,10 +2325,37 @@ def _write_translated_content(
             {
                 "target_language": target_language,
                 "source_file": source_file,
+                "regenerate_from_scratch": regenerate_from_scratch,
+            }
+        )
+    elif format_type in (FileFormat.JSON, FileFormat.ARB, FileFormat.PROPERTIES):
+        # Layout preserved: an existing target changes only its changed values, a new one is built
+        # from the source file as a template (ARB: with its metadata and the target's @@locale).
+        kwargs.update(
+            {
+                "source_file": source_file,
+                "target_language": target_language,
+                "regenerate_from_scratch": regenerate_from_scratch,
+            }
+        )
+        if format_type == FileFormat.JSON:
+            kwargs["config"] = config  # a pinned i18next profile places new plural forms
+    elif format_type == FileFormat.XLSX:
+        # Multi-language workbook: the target column; a new target file starts as a copy of the source.
+        # regenerate_from_scratch: write even when only an openpyxl save is possible and it drops
+        # images/charts (see update_xlsx_cells).
+        kwargs.update(
+            {
+                "target_language": target_language,
+                "source_file": source_file,
+                "regenerate_from_scratch": regenerate_from_scratch,
             }
         )
     elif format_type == FileFormat.PO:
         kwargs["po_mark_fuzzy"] = po_mark_fuzzy
+        # New entries take flags/msgid_plural from the source; a new file gets the target's Plural-Forms.
+        kwargs["source_file"] = source_file
+        kwargs["target_language"] = target_language
 
     # Write using handler
     if use_in_place and handler.supports_in_place():

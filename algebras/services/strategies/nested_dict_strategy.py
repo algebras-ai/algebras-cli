@@ -7,6 +7,10 @@ from typing import Dict, Any, Optional, Callable
 from algebras.services.strategies.base import TranslationStrategy
 
 
+# Marks a value that is left out of the target: its placeholders were rejected, or its API batch failed.
+_LEFT_OUT = object()
+
+
 class NestedDictTranslationStrategy(TranslationStrategy):
     """Strategy for translating nested dictionaries."""
 
@@ -19,6 +23,8 @@ class NestedDictTranslationStrategy(TranslationStrategy):
         glossary_id: Optional[str] = None,
         on_batch_complete: Optional[Callable[[Dict[str, str], int], None]] = None,
         translate_text_func: Optional[Callable[[str, str, str, bool, str], str]] = None,
+        placeholder_profile=None,
+        contexts: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Recursively translate a nested dictionary.
@@ -30,6 +36,8 @@ class NestedDictTranslationStrategy(TranslationStrategy):
             ui_safe: If True, ensures translation will be no more characters than original text
             glossary_id: Glossary ID to use for translation (if None, will check config for api.glossary_id)
             on_batch_complete: Optional callback function called after each batch completes
+            contexts: Optional translator notes by dotted key path (plural forms). Those keys
+                also get the single-count plural exemption for their count placeholder.
 
         Returns:
             Translated dictionary
@@ -93,6 +101,22 @@ class NestedDictTranslationStrategy(TranslationStrategy):
             build_result(data, result)
             return result
 
+        extra_kwargs: Dict[str, Any] = {}
+        if contexts:
+            from algebras.services.placeholders import GENERIC_PROFILE
+            from algebras.services.placeholders.plurals import drop_allowed_for_key
+
+            dotted = [".".join(str(k) for k in path) for path in paths]
+            aligned = [contexts.get(key) for key in dotted]
+            if any(aligned):
+                extra_kwargs["contexts"] = aligned
+                extra_kwargs["drop_allowed"] = [
+                    drop_allowed_for_key(key, text, target_lang, placeholder_profile or GENERIC_PROFILE)
+                    if key in contexts
+                    else frozenset()
+                    for key, text in zip(dotted, string_items)
+                ]
+
         # Process batches
         result = self.batch_processor.process(
             texts=string_items,
@@ -102,12 +126,13 @@ class NestedDictTranslationStrategy(TranslationStrategy):
             glossary_id=glossary_id,
             on_batch_complete=None,  # We'll handle callback after mapping to paths
             translate_text_func=translate_text_func,
+            **({"placeholder_profile": placeholder_profile} if placeholder_profile is not None else {}),
+            **extra_kwargs,
         )
 
         # Map translations back to paths and apply normalization
         # Also handle callbacks and track failed translations
         num_batches = (len(string_items) + self.batch_size - 1) // self.batch_size
-        failed_keys_count = 0
 
         # Build set of failed indices from failed batches
         failed_indices = set()
@@ -116,17 +141,18 @@ class NestedDictTranslationStrategy(TranslationStrategy):
             batch_end_idx = min(batch_start_idx + self.batch_size, len(string_items))
             for idx in range(batch_start_idx, batch_end_idx):
                 failed_indices.add(idx)
+        # Translations rejected because their placeholders did not survive
+        failed_indices |= result.failed_indices
 
         for i, (source_text, path) in enumerate(zip(string_items, paths)):
             if i < len(result.translations):
                 raw_translation = result.translations[i]
                 path_key = tuple(path)
 
-                # Check if this translation failed
                 if i in failed_indices:
-                    # Mark as failed - will use source value in build_result
-                    translated_values[path_key] = None
-                    failed_keys_count += 1
+                    # Placeholders did not survive translation, or the API batch failed: leave
+                    # the key out of the target so 'status' reports it and the next run retries it.
+                    translated_values[path_key] = _LEFT_OUT
                 else:
                     # Apply normalization
                     normalized = self.string_normalizer.normalize(
@@ -147,7 +173,7 @@ class NestedDictTranslationStrategy(TranslationStrategy):
                     if path_key in translated_values:
                         path_str = ".".join(str(p) for p in path)
                         translation = translated_values[path_key]
-                        if translation is not None:
+                        if translation is not None and translation is not _LEFT_OUT:
                             batch_dict[path_str] = translation
 
             # Call callback if provided
@@ -179,46 +205,42 @@ class NestedDictTranslationStrategy(TranslationStrategy):
                 print(
                     f"      - Other errors: {len(result.error_stats['other'])} batches ({', '.join(map(str, result.error_stats['other']))})"
                 )
-            print(f"    Failed batches will use source language values")
+            print(f"    Keys from failed batches are left out and will be retried on the next run")
 
         # Build the result dictionary with translations
         result_dict = {}
-        failed_keys_count = 0
+        left_out_count = 0
 
         def build_result(src_data, dest_data, current_path=None):
-            nonlocal failed_keys_count
+            nonlocal left_out_count
             if current_path is None:
                 current_path = []
 
             for key, value in src_data.items():
                 path = current_path + [key]
                 if isinstance(value, dict):
-                    if key not in dest_data:
+                    created = key not in dest_data
+                    if created:
                         dest_data[key] = {}
                     build_result(value, dest_data[key], path)
+                    if created and value and not dest_data[key]:
+                        del dest_data[key]  # every value inside was left out
                 elif isinstance(value, str):
-                    path_key = tuple(path)
-                    if path_key in translated_values:
-                        translated_value = translated_values[path_key]
-                        if translated_value is None:
-                            # Failed translation - use source value
-                            dest_data[key] = value
-                            failed_keys_count += 1
-                        else:
-                            dest_data[key] = translated_value
+                    translated_value = translated_values.get(tuple(path), _LEFT_OUT)
+                    if translated_value is _LEFT_OUT:
+                        left_out_count += 1
                     else:
-                        # Not translated (shouldn't happen, but use source value as fallback)
-                        dest_data[key] = value
-                        failed_keys_count += 1
+                        dest_data[key] = translated_value
                 else:
                     dest_data[key] = value
 
         # Build the translated dictionary
         build_result(data, result_dict)
 
-        if failed_keys_count > 0:
+        if left_out_count > 0:
             print(
-                f"  ⚠ {failed_keys_count} keys were not translated and will use source language values"
+                f"  ⚠ {left_out_count} keys were left out (placeholders lost or damaged, or the API "
+                "batch failed); they will be retried on the next run"
             )
 
         return result_dict

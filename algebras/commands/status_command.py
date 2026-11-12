@@ -6,17 +6,21 @@ import os
 import click
 import requests
 from colorama import Fore
-from typing import Optional, Dict, List, Set, Tuple
+from typing import Any, Optional, Dict, List, Set, Tuple
 
 from algebras.config import Config
-from algebras.services.file_scanner import FileScanner
+from algebras.services.file_scanner import FileScanner, has_language_column
 from algebras.utils.lang_validator import (
     expand_plural_source_keys,
     extract_all_keys,
     get_key_value,
     read_language_file,
+    align_target_data,
 )
 from algebras.utils.html_handler import read_html_file
+
+# Multi-language files: one column per language, counted per language column.
+_MULTI_LANGUAGE = ('.csv', '.tsv', '.xlsx', '.xls')
 
 
 def validate_languages_with_api(languages: List[str], config_file: str = None) -> Tuple[List[str], List[str]]:
@@ -116,7 +120,7 @@ def count_translated_keys(file_path: str, language: Optional[str] = None, config
         
         # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff, .csv, .tsv) 
         # These formats return flat key-value dictionaries rather than nested structures
-        if file_path.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv')):
+        if file_path.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv', '.xlsx', '.xls')):
             total_keys = len(data)
             translated_count = 0
             for key, value in data.items():
@@ -164,9 +168,14 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
         Tuple of (current_translated_keys, outdated_keys)
     """
     try:
+        if target_file_path.lower().endswith('.xls'):
+            # .xls workbooks are translated into the .xlsx next to them
+            from algebras.utils.xlsx_handler import xlsx_output_path
+            if os.path.exists(xlsx_output_path(target_file_path)):
+                target_file_path = xlsx_output_path(target_file_path)
         if not os.path.exists(source_file_path) or not os.path.exists(target_file_path):
             return 0, 0
-        
+
         # Handle HTML files separately
         if target_file_path.endswith('.html'):
             source_data = read_html_file(source_file_path)
@@ -191,14 +200,18 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
                         current_translated += 1
         else:
             # For CSV/TSV files, use the provided language parameters
-            source_lang = source_language if target_file_path.endswith(('.csv', '.tsv')) else None
-            target_lang = target_language if target_file_path.endswith(('.csv', '.tsv')) else None
+            source_lang = source_language if target_file_path.endswith(_MULTI_LANGUAGE) else None
+            target_lang = target_language if target_file_path.endswith(_MULTI_LANGUAGE) else None
             source_data = read_language_file(source_file_path, source_lang, config)
-            source_data = expand_plural_source_keys(source_file_path, source_data, target_language)
+            source_data = expand_plural_source_keys(source_file_path, source_data, target_language, config)
             target_data = read_language_file(target_file_path, target_lang, config)
+            # Rails-style YAML: compare under each file's own root key (en.greeting ~ ru.greeting)
+            target_data = align_target_data(
+                source_file_path, source_data, target_data, source_language, target_language, config
+            )
             
             # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff, .csv, .tsv)
-            if target_file_path.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv')):
+            if target_file_path.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv', '.xlsx', '.xls')):
                 source_keys = set(source_data.keys())
                 target_keys = set(target_data.keys())
                 
@@ -259,7 +272,7 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
         # Find keys that exist in target but not in source (outdated keys)
         if target_file_path.endswith('.html'):
             outdated_keys = target_keys - source_keys
-        elif target_file_path.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv')):
+        elif target_file_path.endswith(('.po', '.xml', '.strings', '.stringsdict', '.xlf', '.xliff', '.csv', '.tsv', '.xlsx', '.xls')):
             outdated_keys = target_keys - source_keys
         else:
             # For nested formats, use leaf keys
@@ -273,11 +286,30 @@ def count_current_and_outdated_keys(source_file_path: str, target_file_path: str
 
 
 
-def _expected_key_count(source_file: str, lang: str, source_key_counts: Dict[str, int]) -> int:
-    """Source key count, plus the plural forms `lang` needs that a .stringsdict source lacks."""
-    if not source_file.endswith('.stringsdict') or not os.path.isfile(source_file):
+# Formats whose sources are expanded with the plural forms the target language needs.
+# JSON: i18next plural groups only (json_i18n.expand_i18next_plurals); other JSON is unchanged.
+_PLURAL_EXPANDED = ('.stringsdict', '.po', '.yaml', '.yml', '.json')
+
+
+def _string_leaf_count(data: Any) -> int:
+    if isinstance(data, dict):
+        return sum(_string_leaf_count(v) for v in data.values())
+    return 1 if isinstance(data, str) else 0
+
+
+def _expected_key_count(source_file: str, lang: str, source_key_counts: Dict[str, int], config: Optional[Config] = None) -> int:
+    """Source key count, plus the plural forms `lang` needs that the source lacks."""
+    if not source_file.endswith(_PLURAL_EXPANDED) or not os.path.isfile(source_file):
         return source_key_counts.get(source_file, 0)
-    return len(expand_plural_source_keys(source_file, read_language_file(source_file), lang))
+    source_data = read_language_file(source_file)
+    expanded = expand_plural_source_keys(source_file, source_data, lang, config)
+    if source_file.endswith('.json'):
+        # The source's own count, plus the plural forms added for `lang`.
+        added = _string_leaf_count(expanded) - _string_leaf_count(source_data)
+        return source_key_counts.get(source_file, 0) + added
+    if source_file.endswith(('.yaml', '.yml')):
+        return _string_leaf_count(expanded)  # nested: count strings, not top-level keys
+    return len(expanded)
 
 
 def execute(language: Optional[str] = None, config_file: str = None) -> None:
@@ -336,7 +368,10 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
         files_by_language = scanner.group_files_by_language()
         
         # Get source files
-        source_files = files_by_language.get(source_language, [])
+        source_files = list(files_by_language.get(source_language, []))
+        # Legacy mode: multi-language CSV / TSV files are their own target (one column per language).
+        multi_language_files = scanner.multi_language_files()
+        source_files.extend(f for f in multi_language_files if f not in source_files)
         if not source_files:
             click.echo(click.style(f"No source files found for language '{source_language}'.", fg='yellow'))
             return
@@ -357,7 +392,7 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
         for source_file in source_files:
             try:
                 # For CSV/TSV files, pass the source language
-                lang = source_language if source_file.endswith(('.csv', '.tsv')) else None
+                lang = source_language if source_file.endswith(_MULTI_LANGUAGE) else None
                 translated_keys, key_count = count_translated_keys(source_file, lang, config)
                 source_key_counts[source_file] = key_count
                 total_source_keys += key_count
@@ -383,7 +418,8 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                             if os.path.isfile(resolved_path):
                                 file_count += 1
             else:
-                file_count = len(lang_files)
+                lang_multi_files = [f for f in multi_language_files if has_language_column(f, lang, config)]
+                file_count = len(lang_files) + len(lang_multi_files)
             
             # Calculate file percentage
             if expected_file_counts[lang] > 0:
@@ -401,7 +437,7 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                 # First, count expected keys from ALL source files (regardless of whether destination files exist)
                 for source_file, source_config in config.get_source_files().items():
                     if os.path.isfile(source_file):
-                        expected_keys = _expected_key_count(source_file, lang, source_key_counts)
+                        expected_keys = _expected_key_count(source_file, lang, source_key_counts, config)
                         total_expected_keys += expected_keys
                 
                 # Then, count translated keys only from files that have destination files
@@ -414,8 +450,8 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                             if os.path.isfile(resolved_path):
                                 # Count current translated keys and outdated keys
                                 # For CSV/TSV files, pass language parameters
-                                source_lang = source_language if source_file.endswith(('.csv', '.tsv')) else None
-                                target_lang = lang if resolved_path.endswith(('.csv', '.tsv', '.stringsdict')) else None
+                                source_lang = source_language if source_file.endswith(_MULTI_LANGUAGE) else None
+                                target_lang = lang if resolved_path.endswith(_MULTI_LANGUAGE + _PLURAL_EXPANDED) else None
                                 current_translated_keys, outdated_keys = count_current_and_outdated_keys(
                                     source_file, resolved_path, source_lang, target_lang, config
                                 )
@@ -423,6 +459,15 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                                 total_translated_keys += current_translated_keys
                                 total_outdated_keys += outdated_keys
             else:
+                for csv_file in multi_language_files:
+                    # Every key of the file is expected in the language's column, present or not.
+                    total_expected_keys += source_key_counts.get(csv_file, 0)
+                    if csv_file in lang_multi_files:
+                        current_translated_keys, outdated_keys = count_current_and_outdated_keys(
+                            csv_file, csv_file, source_language, lang, config
+                        )
+                        total_translated_keys += current_translated_keys
+                        total_outdated_keys += outdated_keys
                 # Fallback to old filename-based matching for backward compatibility
                 for lang_file in lang_files:
                     # Find corresponding source file to get expected key count
@@ -455,13 +500,13 @@ def execute(language: Optional[str] = None, config_file: str = None) -> None:
                     
                     if potential_source_file in source_files:
                         source_file = potential_source_file
-                        expected_keys = _expected_key_count(source_file, lang, source_key_counts)
+                        expected_keys = _expected_key_count(source_file, lang, source_key_counts, config)
                         total_expected_keys += expected_keys
                         
                         # Count current translated keys and outdated keys
                         # For CSV/TSV files, pass language parameters
-                        source_lang = source_language if source_file.endswith(('.csv', '.tsv')) else None
-                        target_lang = lang if lang_file.endswith(('.csv', '.tsv', '.stringsdict')) else None
+                        source_lang = source_language if source_file.endswith(_MULTI_LANGUAGE) else None
+                        target_lang = lang if lang_file.endswith(_MULTI_LANGUAGE + _PLURAL_EXPANDED) else None
                         current_translated_keys, outdated_keys = count_current_and_outdated_keys(
                             source_file, lang_file, source_lang, target_lang, config
                         )

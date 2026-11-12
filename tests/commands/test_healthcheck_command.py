@@ -82,7 +82,8 @@ class TestHealthcheckExecute:
         
         mock_scanner = MagicMock(spec=FileScanner)
         mock_scanner.group_files_by_language.return_value = {"en": [], "fr": ["messages.fr.json"]}
-        
+        mock_scanner.multi_language_files.return_value = []
+
         with patch("algebras.commands.healthcheck_command.Config", return_value=mock_config), \
              patch("algebras.commands.healthcheck_command.FileScanner", return_value=mock_scanner), \
              patch("algebras.commands.healthcheck_command.click.echo") as mock_echo:
@@ -437,7 +438,7 @@ class TestValidateFilePair:
         mock_issue_key1 = Issue('error', 'placeholders', 'Missing placeholder', 'key1')
         mock_issue_key2 = Issue('warning', 'formatting', 'Extra space', 'key2')
         
-        def validate_side_effect(source, target, key, is_xliff=False):
+        def validate_side_effect(source, target, key, is_xliff=False, **kwargs):
             if key == "key1":
                 return [mock_issue_key1]
             elif key == "key2":
@@ -474,7 +475,7 @@ class TestValidateFilePair:
         
         mock_issue_key1 = Issue('warning', 'formatting', 'Extra space', 'key1')
         
-        def validate_side_effect(source, target, key, is_xliff=False):
+        def validate_side_effect(source, target, key, is_xliff=False, **kwargs):
             if key == "key1":
                 return [mock_issue_key1]
             return []  # key2 has no issues
@@ -505,7 +506,7 @@ class TestValidateFilePair:
         
         mock_issue_key1 = Issue('error', 'placeholders', 'Missing placeholder', 'nested.key1')
         
-        def validate_side_effect(source, target, key, is_xliff=False):
+        def validate_side_effect(source, target, key, is_xliff=False, **kwargs):
             if key == "nested.key1":
                 return [mock_issue_key1]
             return []  # nested.key2 has no issues
@@ -639,7 +640,7 @@ class TestValidateFilePair:
         
         mock_config = MagicMock(spec=Config)
         
-        def validate_side_effect(source, target, key, is_xliff=False):
+        def validate_side_effect(source, target, key, is_xliff=False, **kwargs):
             if key == "key1":
                 return [error_issue]
             elif key == "key2":

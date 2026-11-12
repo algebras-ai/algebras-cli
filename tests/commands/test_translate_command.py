@@ -684,6 +684,14 @@ class TestTranslateCommand:
             "Quiz.timer_format.__plurals__": {"one": "%1$d Minute", "other": "%1$d Minuten"}
         }
         mock_translator.set_verbose.return_value = None
+        # Android XML is translated key by key (plural forms expanded for the target language).
+        mock_translator.translate_missing_keys_batch.side_effect = (
+            lambda source, target, keys, *a, **k: {key: source[key] for key in keys}
+        )
+        mock_handler = MagicMock()
+        mock_handler.read_for_translation.return_value = {
+            "Quiz.timer_format.__plurals__": {"one": "%1$d minute", "other": "%1$d minutes"}
+        }
 
         # Mock validate_language_files to return missing plural keys
         missing_keys = {
@@ -693,7 +701,16 @@ class TestTranslateCommand:
         }
 
         # Patch all dependencies
+        # open() is mocked below, so Babel's CLDR data cannot load: stub the plural rules.
         with patch(
+            "algebras.commands.translate_command.get_handler", return_value=mock_handler
+        ), patch(
+            "algebras.utils.android_plurals.get_plural_categories", return_value=["one", "other"]
+        ), patch(
+            "algebras.utils.android_plurals.covers_single_count", return_value=True
+        ), patch(
+            "algebras.commands.translate_command.android_plurals.build_plural_contexts", return_value={}
+        ), patch(
             "algebras.commands.translate_command.Config", return_value=mock_config
         ), patch(
             "algebras.commands.translate_command.FileScanner", return_value=mock_scanner
@@ -742,7 +759,9 @@ class TestTranslateCommand:
             assert mock_validate.called, "validate_language_files should be called in default mode"
 
             # Verify translation was attempted
-            assert mock_translator.translate_file.called, "Translation should be attempted for missing keys"
+            assert mock_translator.translate_missing_keys_batch.called, "Translation should be attempted for missing keys"
+            # The target exists, so it is updated in place (its layout is kept).
+            assert mock_handler.write_in_place.called
 
     def test_default_mode_skips_complete_files_with_newer_mtime(self):
         """
@@ -894,8 +913,29 @@ class TestTranslateCommand:
         
         mock_translator.translate_file.side_effect = track_translate
 
+        # Android XML is translated key by key (plural forms expanded for the target language).
+        def track_batch(source, target, keys, *args, **kwargs):
+            translation_attempted.append(True)
+            return {key: source[key] for key in keys}
+
+        mock_translator.translate_missing_keys_batch.side_effect = track_batch
+        mock_handler = MagicMock()
+        mock_handler.read_for_translation.return_value = {
+            "Quiz.timer_format.__plurals__": {"one": "%1$d minute", "other": "%1$d minutes"},
+            "Quiz.passing_score_points_format.__plurals__": {"one": "%1$d point", "other": "%1$d points"},
+        }
+
         # Patch dependencies
+        # open() is mocked below, so Babel's CLDR data cannot load: stub the plural rules.
         with patch(
+            "algebras.commands.translate_command.get_handler", return_value=mock_handler
+        ), patch(
+            "algebras.utils.android_plurals.get_plural_categories", return_value=["one", "other"]
+        ), patch(
+            "algebras.utils.android_plurals.covers_single_count", return_value=True
+        ), patch(
+            "algebras.commands.translate_command.android_plurals.build_plural_contexts", return_value={}
+        ), patch(
             "algebras.commands.translate_command.Config", return_value=mock_config
         ), patch(
             "algebras.commands.translate_command.FileScanner", return_value=mock_scanner

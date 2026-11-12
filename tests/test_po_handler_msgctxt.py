@@ -132,8 +132,8 @@ msgstr "Esta es un mensaje largo que debería formatearse como multilínea en el
             
             # Should have the correct content
             self.assertEqual(len(content), 1)
-            self.assertIn('Hello world', content)
-            self.assertEqual(content['Hello world'], 'Hola mundo')
+            # Keyed by (msgctxt, msgid), joined with EOT as gettext does.
+            self.assertEqual(content, {'TestContext\x04Hello world': 'Hola mundo'})
             
             # Write it back
             write_po_file(temp_file, content)

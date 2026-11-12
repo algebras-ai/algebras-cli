@@ -66,6 +66,20 @@ def read_language_file(
         # For XLIFF files, extract translatable strings to get a flat dictionary
         content = read_xliff_file(file_path)
         return extract_xliff_strings(content)
+    elif file_path.endswith(".arb"):
+        # Flutter ARB: messages only, `@` metadata is not translatable
+        from algebras.utils.arb_handler import read_arb_file, extract_translatable_strings as extract_arb_strings
+
+        return extract_arb_strings(read_arb_file(file_path))
+    elif file_path.endswith(".properties"):
+        from algebras.utils.properties_handler import read_properties_file
+
+        return read_properties_file(file_path)
+    elif file_path.lower().endswith((".xlsx", ".xls")):
+        # Multi-language workbook: one language column (the first one when no language is given)
+        from algebras.utils.file_format_handlers.xlsx_handler import read_xlsx_language
+
+        return read_xlsx_language(file_path, language, config)
     elif file_path.endswith((".csv", ".tsv")):
         # For CSV/TSV files, extract a specific language column
         csv_content = read_csv_file(file_path)
@@ -86,6 +100,26 @@ def read_language_file(
             return {}
     else:
         raise ValueError(f"Unsupported file format: {file_path}")
+
+
+def align_target_data(
+    source_file: str,
+    source_data: Any,
+    target_data: Any,
+    source_language: Optional[str] = None,
+    target_language: Optional[str] = None,
+    config: Optional[Any] = None,
+) -> Any:
+    """
+    Target data with keys comparable to the source's. For a Rails-style YAML pair (`en:` / `ru:`
+    root key) the target is keyed under the source root, so `en.greeting` matches `ru.greeting`;
+    see algebras.utils.yaml_locale_root. Any other file is returned as it is.
+    """
+    if not source_file.lower().endswith((".yaml", ".yml")):
+        return target_data
+    from algebras.utils.yaml_locale_root import align_target
+
+    return align_target(source_data, target_data, source_language, target_language, config)
 
 
 def extract_all_keys(data: Dict[str, Any], prefix: str = "") -> Set[str]:
@@ -198,9 +232,27 @@ def get_key_value(data: Dict[str, Any], key: str) -> Any:
 
 
 def expand_plural_source_keys(
-    source_file: str, source_data: Dict[str, Any], target_language: Optional[str]
+    source_file: str, source_data: Dict[str, Any], target_language: Optional[str], config: Optional[Any] = None
 ) -> Dict[str, Any]:
-    """For .stringsdict sources, add the plural-form keys target_language needs."""
+    """
+    For .stringsdict, .po, YAML and i18next JSON sources, add the plural-form keys
+    target_language needs.
+    """
+    if target_language and source_file.lower().endswith(".json"):
+        from algebras.utils.json_i18n import expand_i18next_source_file
+
+        return expand_i18next_source_file(source_file, source_data, target_language, config)
+    if target_language and source_file.endswith((".yaml", ".yml")):
+        from algebras.services.placeholders.formats.yaml_format import (
+            expand_plural_source,
+            resolve_profile,
+        )
+
+        return expand_plural_source(source_data, target_language, resolve_profile(source_file))
+    if target_language and source_file.endswith(".po"):
+        from algebras.utils.po_handler import expand_plural_source
+
+        return expand_plural_source(source_file, source_data, target_language)
     if not target_language or not source_file.endswith(".stringsdict"):
         return source_data
     return expand_plural_forms(
@@ -231,16 +283,19 @@ def validate_language_files(
     """
     try:
         # For CSV/TSV files, pass language parameters to read_language_file
-        if source_file.endswith((".csv", ".tsv")):
+        if source_file.endswith((".csv", ".tsv", ".xlsx", ".xls")):
             source_data = read_language_file(source_file, source_language, config)
         else:
             source_data = read_language_file(source_file)
-        source_data = expand_plural_source_keys(source_file, source_data, target_language)
+        source_data = expand_plural_source_keys(source_file, source_data, target_language, config)
 
-        if target_file.endswith((".csv", ".tsv")):
+        if target_file.endswith((".csv", ".tsv", ".xlsx", ".xls")):
             target_data = read_language_file(target_file, target_language, config)
         else:
             target_data = read_language_file(target_file)
+        target_data = align_target_data(
+            source_file, source_data, target_data, source_language, target_language, config
+        )
 
         # Handle flat dictionary formats (.po, .xml, .strings, .stringsdict, .xlf, .xliff, .csv, .tsv)
         # These formats return flat key-value dictionaries rather than nested structures
@@ -254,6 +309,8 @@ def validate_language_files(
                 ".xliff",
                 ".csv",
                 ".tsv",
+                ".xlsx",
+                ".xls",
             )
         ):
             source_keys = set(source_data.keys())
@@ -291,7 +348,13 @@ def validate_language_files(
         return False, set()
 
 
-def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[str]]:
+def find_outdated_keys(
+    source_file: str,
+    target_file: str,
+    source_language: Optional[str] = None,
+    target_language: Optional[str] = None,
+    config: Optional[Any] = None,
+) -> Tuple[bool, Set[str]]:
     """
     Find keys that exist in both source and target files but might be outdated.
     This checks if the value is different and if the source key was modified more recently than the target.
@@ -299,6 +362,8 @@ def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[st
     Args:
         source_file: Path to the source language file
         target_file: Path to the target language file
+        source_language / target_language / config: Optional; pair Rails-style YAML root keys
+            (`en:` / `ru:`) strictly by locale. Keys are returned in source terms (`en.greeting`).
 
     Returns:
         Tuple of (has_outdated_keys, outdated_keys)
@@ -310,7 +375,10 @@ def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[st
             return False, set()
 
         source_data = read_language_file(source_file)
-        target_data = read_language_file(target_file)
+        raw_target_data = read_language_file(target_file)
+        target_data = align_target_data(
+            source_file, source_data, raw_target_data, source_language, target_language, config
+        )
 
         source_keys = extract_all_keys(source_data)
         target_keys = extract_all_keys(target_data)
@@ -324,8 +392,9 @@ def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[st
             source_value = get_key_value(source_data, key)
             target_value = get_key_value(target_data, key)
 
-            # Only consider keys with different values
-            if source_value != target_value:
+            # Only leaf string keys with different values: a parent mapping (`en`, `en.nav`)
+            # differs whenever anything under it does, but it is not a key to retranslate.
+            if isinstance(source_value, str) and source_value != target_value:
                 different_value_keys.append(key)
 
         # If there are no keys with different values, we're done
@@ -341,9 +410,17 @@ def find_outdated_keys(source_file: str, target_file: str) -> Tuple[bool, Set[st
         source_dates = get_keys_last_modifications_batch(
             source_file, different_value_keys
         )
-        target_dates = get_keys_last_modifications_batch(
-            target_file, different_value_keys
+        # A Rails target names its keys under its own root (ru.greeting for en.greeting).
+        target_names = {key: key for key in different_value_keys}
+        if target_data is not raw_target_data:
+            from algebras.utils.yaml_locale_root import locale_root, target_key
+
+            s_root, t_root = locale_root(source_data), locale_root(raw_target_data)
+            target_names = {key: target_key(key, s_root, t_root) for key in different_value_keys}
+        target_dates_by_name = get_keys_last_modifications_batch(
+            target_file, list(target_names.values())
         )
+        target_dates = {key: target_dates_by_name.get(name) for key, name in target_names.items()}
 
         # Compare the dates for each key - this is O(n) but very fast since it's just dict lookups
         for key in different_value_keys:
@@ -398,3 +475,29 @@ def map_language_code(lang_code: str) -> str:
 
     # If no separator found, return the first two characters
     return lang_code[:2].lower()
+
+
+def api_language_code(lang_code: str) -> str:
+    """
+    The language code sent to the translation API, on every path (batch and single text).
+
+    The full BCP-47 code is kept, script and region included ('uz-Cyrl', 'pt-BR', 'zh-Hant-TW'):
+    reducing it to two letters would lose the script (uz-Cyrl -> uz is Latin). Only the spelling
+    is normalized: '_' becomes '-', the language is lower case, a 4-letter script title case and
+    a region upper case ('pt_br' -> 'pt-BR', 'uz_cyrl' -> 'uz-Cyrl'). 'auto' and empty values are
+    returned unchanged.
+    """
+    if not isinstance(lang_code, str) or not lang_code or lang_code == "auto":
+        return lang_code
+    parts = [p for p in lang_code.strip().replace("_", "-").split("-") if p]
+    if not parts:
+        return lang_code
+    normalized = [parts[0].lower()]
+    for part in parts[1:]:
+        if len(part) == 4 and part.isalpha():
+            normalized.append(part.title())
+        elif (len(part) == 2 and part.isalpha()) or (len(part) == 3 and part.isdigit()):
+            normalized.append(part.upper())
+        else:
+            normalized.append(part)
+    return "-".join(normalized)

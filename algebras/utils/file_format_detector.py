@@ -20,6 +20,9 @@ class FileFormat(Enum):
     XLIFF = "xliff"
     CSV = "csv"
     TSV = "tsv"
+    ARB = "arb"
+    PROPERTIES = "properties"
+    XLSX = "xlsx"
     UNKNOWN = "unknown"
 
 
@@ -61,6 +64,14 @@ def detect_format(file_path: str) -> FileFormat:
         return FileFormat.PO
     elif file_path_lower.endswith((".html", ".htm")):
         return FileFormat.HTML
+    elif file_path_lower.endswith(".arb"):
+        return FileFormat.ARB
+    elif file_path_lower.endswith(".properties"):
+        return FileFormat.PROPERTIES
+    elif file_path_lower.endswith((".xlsx", ".xls")):
+        # .xls (Excel 97-2003) is read through xlrd when installed (else an actionable error,
+        # see xlsx_handler.XlsNotSupportedError) and written to the .xlsx next to it.
+        return FileFormat.XLSX
     else:
         return FileFormat.UNKNOWN
 
@@ -80,5 +91,6 @@ def is_flat_format(format: FileFormat) -> bool:
         FileFormat.XLIFF,
         FileFormat.CSV,
         FileFormat.TSV,
+        FileFormat.XLSX,
     }
     return format in flat_formats

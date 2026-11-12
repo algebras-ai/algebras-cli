@@ -1,71 +1,531 @@
 """
-TypeScript translation file handler
+TypeScript translation file handler.
+
+A translation module is an exported object literal:
+
+    export const en = {
+      greeting: 'Hello, {{name}}!',
+      welcome: `Welcome back, ${user.name}`,
+      nested: { items: "{count, plural, one {# item} other {# items}}" },
+    };
+
+The object literal is read with a small JavaScript literal parser (parse_ts_module), not by
+rewriting it into Python syntax: the old regex rewrite turned "true"/"null" inside values into
+"True"/"None", cut "https://…" at "//" as if it were a comment, and could not read backtick
+template literals at all.
+
+Every string value keeps its literal's span and quote style ('…', "…" or `…`), so writers can
+replace values in place with the escaping of that literal: an apostrophe in a single-quoted value
+becomes \\', and a translated backtick or "${" inside a template literal is escaped instead of
+starting a new substitution. A template literal's ${…} substitutions are kept verbatim in the value
+(they are JavaScript expressions evaluated by the app, i.e. placeholders).
 """
 
-import re
-import ast
-import json
 import os
+import re
 import threading
-from typing import Dict, Any, Optional
+from collections import Counter
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from algebras.utils.nested_structure_handler import set_nested_value
+
+KeyPath = Tuple[str, ...]
+
+QUOTES = ("'", '"', "`")
+
+
+class TSParseError(ValueError):
+    def __init__(self, message: str, offset: Optional[int] = None, text: Optional[str] = None):
+        if offset is not None and text is not None:
+            line = text.count("\n", 0, offset) + 1
+            column = offset - (text.rfind("\n", 0, offset) + 1) + 1
+            message = f"{message} (line {line}, column {column})"
+        super().__init__(message)
+        self.offset = offset
+
+
+@dataclass(frozen=True)
+class TSLiteral:
+    """A string value's literal in the file."""
+
+    start: int  # offset of the opening quote
+    end: int  # offset after the closing quote
+    quote: str  # ', " or `
+    # Template literals: the ${…} substitutions, verbatim and in order.
+    substitutions: Tuple[str, ...] = ()
+    # Lenient parsing only: the literal had unescaped quotes of its own kind inside.
+    recovered: bool = False
+
+
+@dataclass(frozen=True)
+class TSEntry:
+    """A `key: value` entry of an object literal, by offsets in the file."""
+
+    key: str
+    key_start: int
+    key_end: int
+    value_start: int
+    value_end: int
+    comma: Optional[int]  # offset of the ',' after the value, if any
+
+
+@dataclass(frozen=True)
+class TSObject:
+    """An object literal: its braces (start at '{', end after '}') and entries in file order."""
+
+    start: int
+    end: int
+    entries: Tuple[TSEntry, ...]
+
+
+@dataclass
+class TSDocument:
+    text: str
+    data: Dict[str, Any]
+    literals: Dict[KeyPath, TSLiteral] = field(default_factory=dict)
+    export_name: Optional[str] = None
+    objects: Dict[KeyPath, TSObject] = field(default_factory=dict)
+
+    @property
+    def recovered(self) -> Dict[KeyPath, TSLiteral]:
+        return {p: lit for p, lit in self.literals.items() if lit.recovered}
+
+
+# ---------------------------------------------------------------------------
+# Parsing
+# ---------------------------------------------------------------------------
+
+_EXPORT_RE = re.compile(
+    r"export\s+(?:default\s+|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]*?)?=\s*)", re.MULTILINE
+)
+_IDENT_RE = re.compile(r"[A-Za-z_$À-￿][\w$À-￿]*")
+_NUMBER_RE = re.compile(r"-?(?:0[xX][0-9a-fA-F_]+|0[oO][0-7_]+|0[bB][01_]+|(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)")
+_KEYWORDS = {"true": True, "false": False, "null": None, "undefined": None}
+_SIMPLE_ESCAPES = {"n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f", "v": "\v"}
+# What may follow the closing quote of a value (lenient parsing tells an unescaped quote inside a
+# value from the real closing quote by this).
+_AFTER_VALUE = ",}]"
+
+
+class _Parser:
+    def __init__(self, text: str, lenient: bool = False):
+        self.text = text
+        self.n = len(text)
+        self.lenient = lenient
+        self.literals: Dict[KeyPath, TSLiteral] = {}
+        self.objects: Dict[KeyPath, TSObject] = {}
+
+    def error(self, message: str, offset: int) -> TSParseError:
+        return TSParseError(message, offset, self.text)
+
+    # -- whitespace and comments -------------------------------------------
+
+    def ws(self, i: int) -> int:
+        t = self.text
+        while i < self.n:
+            c = t[i]
+            if c in " \t\r\n﻿   ":
+                i += 1
+            elif t.startswith("//", i):
+                j = t.find("\n", i)
+                i = self.n if j == -1 else j + 1
+            elif t.startswith("/*", i):
+                j = t.find("*/", i + 2)
+                if j == -1:
+                    raise self.error("Unterminated comment", i)
+                i = j + 2
+            else:
+                break
+        return i
+
+    # -- values ------------------------------------------------------------
+
+    def value(self, i: int, path: KeyPath) -> Tuple[Any, int]:
+        i = self.ws(i)
+        if i >= self.n:
+            raise self.error("Unexpected end of file", i)
+        c = self.text[i]
+        if c == "{":
+            return self.obj(i, path)
+        if c == "[":
+            return self.arr(i, path)
+        if c in ("'", '"'):
+            value, end, recovered = self.string(i, value_position=True)
+            self.literals[path] = TSLiteral(i, end, c, (), recovered)
+            return value, end
+        if c == "`":
+            value, end, subs, recovered = self.template(i, value_position=True)
+            self.literals[path] = TSLiteral(i, end, c, tuple(subs), recovered)
+            return value, end
+        m = _NUMBER_RE.match(self.text, i)
+        if m and m.end() > i and not (m.group(0) == "-"):
+            raw = m.group(0).replace("_", "")
+            try:
+                if raw.lstrip("-")[:2].lower() in ("0x", "0o", "0b"):
+                    return int(raw, 0), m.end()
+                number = float(raw)
+                return (int(number) if number.is_integer() and re.fullmatch(r"-?\d+", raw) else number), m.end()
+            except ValueError:
+                raise self.error(f"Invalid number {m.group(0)!r}", i)
+        m = _IDENT_RE.match(self.text, i)
+        if m and m.group(0) in _KEYWORDS:
+            return _KEYWORDS[m.group(0)], m.end()
+        raise self.error(f"Unsupported value starting with {self.text[i:i + 20]!r}", i)
+
+    def key(self, i: int) -> Tuple[str, int]:
+        c = self.text[i]
+        if c in ("'", '"'):
+            value, end, _ = self.string(i, value_position=False)
+            return value, end
+        if c == "`":
+            value, end, subs, _ = self.template(i, value_position=False)
+            if subs:
+                raise self.error("Computed template keys are not supported", i)
+            return value, end
+        m = _IDENT_RE.match(self.text, i)
+        if m:
+            return m.group(0), m.end()
+        m = _NUMBER_RE.match(self.text, i)
+        if m and m.end() > i:
+            return m.group(0), m.end()
+        raise self.error(f"Unsupported key starting with {self.text[i:i + 20]!r}", i)
+
+    def obj(self, i: int, path: KeyPath) -> Tuple[Dict[str, Any], int]:
+        result: Dict[str, Any] = {}
+        start = i
+        entries: List[TSEntry] = []
+        i = self.ws(i + 1)
+        while True:
+            if i >= self.n:
+                raise self.error("Unterminated object", i)
+            if self.text[i] == "}":
+                self.objects[path] = TSObject(start, i + 1, tuple(entries))
+                return result, i + 1
+            key_start = i
+            key, i = self.key(i)
+            key_end = i
+            i = self.ws(i)
+            if self.text[i : i + 1] != ":":
+                raise self.error(f"Expected ':' after key {key!r}", i)
+            value_start = self.ws(i + 1)
+            result[key], i = self.value(i + 1, path + (key,))
+            value_end = i
+            i = self.ws(i)
+            comma = None
+            if self.text[i : i + 1] == ",":
+                comma = i
+                i = self.ws(i + 1)
+            elif self.text[i : i + 1] != "}":
+                raise self.error("Expected ',' or '}'", i)
+            entries.append(TSEntry(key, key_start, key_end, value_start, value_end, comma))
+
+    def arr(self, i: int, path: KeyPath) -> Tuple[List[Any], int]:
+        result: List[Any] = []
+        i = self.ws(i + 1)
+        while True:
+            if i >= self.n:
+                raise self.error("Unterminated array", i)
+            if self.text[i] == "]":
+                return result, i + 1
+            item, i = self.value(i, path + (str(len(result)),))
+            result.append(item)
+            i = self.ws(i)
+            if self.text[i : i + 1] == ",":
+                i = self.ws(i + 1)
+            elif self.text[i : i + 1] != "]":
+                raise self.error("Expected ',' or ']'", i)
+
+    # -- strings -----------------------------------------------------------
+
+    def _closes(self, i: int, value_position: bool) -> bool:
+        """Is the quote at i the real end of the literal (lenient parsing)?"""
+        if not (self.lenient and value_position):
+            return True
+        try:
+            j = self.ws(i + 1)
+        except TSParseError:
+            return True
+        return j >= self.n or self.text[j] in _AFTER_VALUE
+
+    def escape(self, i: int) -> Tuple[str, int]:
+        """Decode the escape sequence starting at the backslash at i."""
+        t = self.text
+        if i + 1 >= self.n:
+            raise self.error("Unterminated escape", i)
+        c = t[i + 1]
+        if c in _SIMPLE_ESCAPES:
+            return _SIMPLE_ESCAPES[c], i + 2
+        if c == "0" and not t[i + 2 : i + 3].isdigit():
+            return "\0", i + 2
+        if c == "x":
+            h = t[i + 2 : i + 4]
+            if not re.fullmatch(r"[0-9a-fA-F]{2}", h):
+                raise self.error("Invalid \\x escape", i)
+            return chr(int(h, 16)), i + 4
+        if c == "u":
+            if t[i + 2 : i + 3] == "{":
+                j = t.find("}", i + 3)
+                h = t[i + 3 : j] if j != -1 else ""
+                if not re.fullmatch(r"[0-9a-fA-F]{1,6}", h):
+                    raise self.error("Invalid \\u{…} escape", i)
+                return chr(int(h, 16)), j + 1
+            h = t[i + 2 : i + 6]
+            if not re.fullmatch(r"[0-9a-fA-F]{4}", h):
+                raise self.error("Invalid \\u escape", i)
+            return chr(int(h, 16)), i + 6
+        if c == "\r":
+            return "", i + (3 if t[i + 2 : i + 3] == "\n" else 2)
+        if c in "\n  ":
+            return "", i + 2
+        return c, i + 2
+
+    def string(self, i: int, value_position: bool) -> Tuple[str, int, bool]:
+        """A '…' or "…" literal at i: (value, end, recovered)."""
+        t = self.text
+        quote = t[i]
+        out: List[str] = []
+        recovered = False
+        j = i + 1
+        while j < self.n:
+            c = t[j]
+            if c == "\\":
+                s, j = self.escape(j)
+                out.append(s)
+            elif c == quote:
+                if self._closes(j, value_position):
+                    return _join(out), j + 1, recovered
+                out.append(c)  # an unescaped quote inside the value
+                recovered = True
+                j += 1
+            elif c in "\r\n":
+                break
+            else:
+                out.append(c)
+                j += 1
+        raise self.error("Unterminated string", i)
+
+    def template(self, i: int, value_position: bool) -> Tuple[str, int, List[str], bool]:
+        """A `…` literal at i: (value with ${…} kept verbatim, end, substitutions, recovered)."""
+        t = self.text
+        out: List[str] = []
+        subs: List[str] = []
+        recovered = False
+        j = i + 1
+        while j < self.n:
+            c = t[j]
+            if c == "\\":
+                s, j = self.escape(j)
+                out.append(s)
+            elif c == "`":
+                if self._closes(j, value_position):
+                    return _join(out), j + 1, subs, recovered
+                out.append(c)
+                recovered = True
+                j += 1
+            elif c == "$" and t.startswith("${", j):
+                end = self.expression_end(j + 2)
+                subs.append(t[j:end])
+                out.append(t[j:end])
+                j = end
+            elif c == "\r":
+                # Template literals normalize CRLF and CR to LF.
+                out.append("\n")
+                j += 2 if t[j + 1 : j + 2] == "\n" else 1
+            else:
+                out.append(c)
+                j += 1
+        raise self.error("Unterminated template literal", i)
+
+    def expression_end(self, i: int) -> int:
+        """End of a ${…} substitution whose expression starts at i (after the closing brace)."""
+        t = self.text
+        depth = 1
+        start = i
+        while i < self.n:
+            c = t[i]
+            if c in ("'", '"'):
+                _, i, _ = _Parser(t).string(i, value_position=False)
+                continue
+            if c == "`":
+                _, i, _, _ = _Parser(t).template(i, value_position=False)
+                continue
+            if t.startswith("//", i) or t.startswith("/*", i):
+                i = self.ws(i)
+                continue
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+            i += 1
+        raise self.error("Unterminated ${…} substitution", start - 2)
+
+
+def _join(parts: List[str]) -> str:
+    s = "".join(parts)
+    if any("\ud800" <= ch <= "\udfff" for ch in s):
+        # 😀 escapes: combine surrogate pairs into one character.
+        s = s.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+    return s
+
+
+def _object_start(text: str) -> Tuple[int, Optional[str]]:
+    match = _EXPORT_RE.search(text)
+    if not match:
+        raise TSParseError("No valid TypeScript export found")
+    brace = text.find("{", match.end())
+    if brace == -1:
+        raise TSParseError("No opening brace found after export statement")
+    return brace, match.group(1)
+
+
+def parse_ts_module(text: str, lenient: bool = False) -> TSDocument:
+    """
+    Parse a translation module's exported object literal.
+
+    With lenient=True, a quote of a value's own kind that is not followed by ',', '}' or ']' is
+    read as part of the value (an unescaped apostrophe in 'Don't'), and the literal is marked
+    `recovered`, so a file broken that way can still be checked and fixed.
+    """
+    start, export_name = _object_start(text)
+    parser = _Parser(text, lenient)
+    data, _ = parser.obj(start, ())
+    return TSDocument(
+        text=text, data=data, literals=parser.literals, export_name=export_name, objects=parser.objects
+    )
+
+
+def read_ts_document(file_path: str, lenient: bool = False) -> TSDocument:
+    with open(file_path, "r", encoding="utf-8", newline="") as f:
+        text = f.read()
+    try:
+        return parse_ts_module(text, lenient)
+    except TSParseError as e:
+        raise TSParseError(f"Failed to parse TypeScript object in {file_path}: {e}") from e
 
 
 def read_ts_translation_file(file_path: str) -> Dict[str, Any]:
     """
-    Read a TypeScript translation file and extract the exported object.
+    Read a TypeScript translation file and return the exported object as a dict.
 
-    Args:
-        file_path: Path to the TypeScript file
-
-    Returns:
-        Dictionary containing the translation content
+    Raises ValueError if the file has no exported object literal or it cannot be parsed.
     """
-    with open(file_path, "r", encoding="utf-8") as f:
-        content = f.read()
+    return read_ts_document(file_path).data
 
-    # Find the export statement
-    # Look for patterns like: export const en = { ... }
-    export_pattern = r"export\s+const\s+(\w+)\s*=\s*"
-    match = re.search(export_pattern, content, re.MULTILINE)
 
-    if not match:
-        raise ValueError(f"No valid TypeScript export found in {file_path}")
+# ---------------------------------------------------------------------------
+# Encoding string literals
+# ---------------------------------------------------------------------------
 
-    export_name = match.group(1)
-    start_pos = match.end()
 
-    # Find the opening brace
-    content_from_start = content[start_pos:]
-    brace_pos = content_from_start.find("{")
-    if brace_pos == -1:
-        raise ValueError(
-            f"No opening brace found after export statement in {file_path}"
-        )
+def template_substitutions(value: str) -> List[Tuple[int, int]]:
+    """Spans of balanced ${…} in a value (string and template literals inside are skipped)."""
+    spans: List[Tuple[int, int]] = []
+    i = 0
+    while True:
+        i = value.find("${", i)
+        if i == -1:
+            return spans
+        try:
+            end = _Parser(value).expression_end(i + 2)
+        except TSParseError:
+            return spans
+        spans.append((i, end))
+        i = end
 
-    # Extract the object content by counting braces
-    object_start = start_pos + brace_pos
-    object_content = _extract_balanced_braces(content, object_start)
 
-    if not object_content:
-        raise ValueError(f"Could not extract balanced object content from {file_path}")
+def encode_ts_string(value: str, quote: str = '"', substitutions: Optional[Sequence[str]] = None) -> str:
+    """
+    The string literal for `value` in the given quote style.
 
-    # Convert the JavaScript object to Python dict
-    # This is a simplified approach - for complex objects, you might want to use a proper JS parser
-    try:
-        # Replace JavaScript object syntax with Python dict syntax
-        python_content = _js_object_to_python_dict(object_content)
+    For a template literal (quote "`"), `substitutions` lists the ${…} that are real substitutions
+    (normally the ones of the source value's literal); every other "${" in the value, e.g. one a
+    translator wrote, is escaped as "\\${". With substitutions=None, every balanced ${…} in the
+    value is a substitution.
+    """
+    if quote not in QUOTES:
+        raise ValueError(f"Unknown quote {quote!r}")
+    if quote != "`":
+        out = []
+        for ch in value:
+            if ch == "\\":
+                out.append("\\\\")
+            elif ch == quote:
+                out.append("\\" + quote)
+            elif ch == "\n":
+                out.append("\\n")
+            elif ch == "\r":
+                out.append("\\r")
+            elif ch == "\t":
+                out.append("\\t")
+            elif ch in "  ":
+                out.append(f"\\u{ord(ch):04x}")
+            elif ord(ch) < 0x20:
+                out.append(f"\\x{ord(ch):02x}")
+            else:
+                out.append(ch)
+        return quote + "".join(out) + quote
 
-        # Safely evaluate the Python dict
-        translation_dict = ast.literal_eval(python_content)
-        return translation_dict
-    except (ValueError, SyntaxError) as e:
-        raise ValueError(f"Failed to parse TypeScript object in {file_path}: {str(e)}")
+    spans = template_substitutions(value)
+    if substitutions is not None:
+        allowed = Counter(substitutions)
+        kept = []
+        for s, e in spans:
+            if allowed[value[s:e]] > 0:
+                allowed[value[s:e]] -= 1
+                kept.append((s, e))
+        spans = kept
+    out = []
+    i = 0
+    for s, e in spans + [(len(value), len(value))]:
+        for j in range(i, s):
+            ch = value[j]
+            if ch == "\\":
+                out.append("\\\\")
+            elif ch == "`":
+                out.append("\\`")
+            elif ch == "$" and value[j + 1 : j + 2] == "{":
+                out.append("\\$")
+            elif ch == "\r":
+                out.append("\\r")
+            else:
+                out.append(ch)
+        out.append(value[s:e])
+        i = e
+    return "`" + "".join(out) + "`"
+
+
+def _choose_quote(
+    target: Optional[TSLiteral], source: Optional[TSLiteral]
+) -> Tuple[str, Optional[Tuple[str, ...]]]:
+    """
+    Quote style and template substitutions for a value written to the target: the target
+    literal's style, else the source's, else double quotes. A source template literal with
+    substitutions always stays a template literal, so its ${…} are evaluated, not shown as text.
+    """
+    if source is not None and source.quote == "`" and source.substitutions:
+        return "`", source.substitutions
+    if target is not None:
+        if target.quote == "`":
+            return "`", source.substitutions if source is not None else target.substitutions
+        return target.quote, None
+    if source is not None:
+        return source.quote, source.substitutions if source.quote == "`" else None
+    return '"', None
+
+
+# ---------------------------------------------------------------------------
+# Writing
+# ---------------------------------------------------------------------------
 
 
 def write_ts_translation_file(
-    file_path: str, content: Dict[str, Any], export_name: str = None
+    file_path: str,
+    content: Dict[str, Any],
+    export_name: str = None,
+    quotes: Optional[Dict[KeyPath, Tuple[str, Optional[Tuple[str, ...]]]]] = None,
 ) -> None:
     """
     Write a dictionary to a TypeScript translation file.
@@ -74,62 +534,36 @@ def write_ts_translation_file(
         file_path: Path to the TypeScript file
         content: Dictionary to write
         export_name: Name of the exported constant (defaults to language code from filename)
+        quotes: Optional {key path: (quote, template substitutions)} per string value;
+            double quotes otherwise
     """
     if export_name is None:
-        # Extract export name from filename (e.g., en.ts -> en)
-        import os
+        export_name = os.path.basename(file_path).split(".")[0]
 
-        basename = os.path.basename(file_path)
-        export_name = basename.split(".")[0]
-
-    # Convert Python dict to TypeScript object
-    ts_object = _python_dict_to_ts_object(content, indent=2)
-
-    # Create the TypeScript export
-    ts_content = f"export const {export_name} = {ts_object};\n"
-
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(ts_content)
+    ts_object = _python_dict_to_ts_object(content, indent=0, quotes=quotes)
+    _write_checked(file_path, f"export const {export_name} = {ts_object};\n")
 
 
-def _js_object_to_python_dict(js_content: str) -> str:
+def _write_checked(file_path: str, text: str) -> None:
+    """Write the module only if it parses back; a broken file is never written."""
+    parse_ts_module(text)
+    with open(file_path, "w", encoding="utf-8", newline="") as f:
+        f.write(text)
+
+
+def _python_dict_to_ts_object(
+    obj: Any,
+    indent: int = 0,
+    quotes: Optional[Dict[KeyPath, Tuple[str, Optional[Tuple[str, ...]]]]] = None,
+    _path: KeyPath = (),
+) -> str:
     """
-    Convert JavaScript object syntax to Python dict syntax.
-
-    Args:
-        js_content: JavaScript object string
-
-    Returns:
-        Python dict string
-    """
-    # Remove comments (single-line and multi-line)
-    js_content = re.sub(r"//.*?$", "", js_content, flags=re.MULTILINE)
-    js_content = re.sub(r"/\*.*?\*/", "", js_content, flags=re.DOTALL)
-
-    # Replace unquoted keys with quoted keys
-    # Pattern to match unquoted object keys
-    js_content = re.sub(
-        r"(\n\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:", r'\1"\2":', js_content
-    )
-
-    # Replace JavaScript boolean/null values with Python equivalents
-    js_content = js_content.replace("true", "True")
-    js_content = js_content.replace("false", "False")
-    js_content = js_content.replace("null", "None")
-
-    return js_content
-
-
-def _python_dict_to_ts_object(obj: Any, indent: int = 0) -> str:
-    """
-    Convert Python dictionary to TypeScript object syntax.
+    Convert a Python value to TypeScript literal syntax.
 
     Args:
         obj: Python object to convert
         indent: Current indentation level
-
-    Returns:
-        TypeScript object string
+        quotes: Optional {key path: (quote, template substitutions)} for string values
     """
     spaces = "  " * indent
     inner_spaces = "  " * (indent + 1)
@@ -137,107 +571,98 @@ def _python_dict_to_ts_object(obj: Any, indent: int = 0) -> str:
     if isinstance(obj, dict):
         if not obj:
             return "{}"
-
         lines = ["{"]
         for key, value in obj.items():
-            ts_value = _python_dict_to_ts_object(value, indent + 1)
-            # Check if key needs to be quoted for TypeScript
-            formatted_key = _format_ts_key(key)
-            lines.append(f"{inner_spaces}{formatted_key}: {ts_value},")
+            ts_value = _python_dict_to_ts_object(value, indent + 1, quotes, _path + (str(key),))
+            lines.append(f"{inner_spaces}{_format_ts_key(str(key))}: {ts_value},")
         lines.append(f"{spaces}}}")
         return "\n".join(lines)
 
-    elif isinstance(obj, list):
+    if isinstance(obj, list):
         if not obj:
             return "[]"
-
         lines = ["["]
-        for item in obj:
-            ts_value = _python_dict_to_ts_object(item, indent + 1)
+        for index, item in enumerate(obj):
+            ts_value = _python_dict_to_ts_object(item, indent + 1, quotes, _path + (str(index),))
             lines.append(f"{inner_spaces}{ts_value},")
         lines.append(f"{spaces}]")
         return "\n".join(lines)
 
-    elif isinstance(obj, str):
-        # Escape quotes and handle multiline strings
-        escaped = obj.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-        return f'"{escaped}"'
+    if isinstance(obj, str):
+        quote, substitutions = (quotes or {}).get(_path, ('"', None))
+        if quote == "`" and substitutions is None:
+            substitutions = ()
+        return encode_ts_string(obj, quote, substitutions)
 
-    elif isinstance(obj, bool):
+    if isinstance(obj, bool):
         return "true" if obj else "false"
 
-    elif obj is None:
+    if obj is None:
         return "null"
 
-    else:
-        # For numbers and other types
-        return str(obj)
+    return str(obj)
 
 
 def _format_ts_key(key: str) -> str:
-    """
-    Format a key for TypeScript object syntax, adding quotes if necessary.
-
-    Args:
-        key: The object key
-
-    Returns:
-        Formatted key, quoted if necessary
-    """
-    # Check if the key is a valid JavaScript identifier
-    # Valid identifiers: start with letter, $, or _, followed by letters, digits, $, or _
+    """Format a key for TypeScript object syntax, adding quotes if necessary."""
     if re.match(r"^[a-zA-Z_$][a-zA-Z0-9_$]*$", key):
         return key
-    else:
-        # Key contains special characters, needs to be quoted
-        escaped = key.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
+    escaped = key.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
-def _extract_balanced_braces(content: str, start_pos: int) -> str:
-    """
-    Extract content between balanced braces starting from start_pos.
+def _resolve_path(key: str, literals: Dict[KeyPath, Any]) -> Optional[KeyPath]:
+    """The literal a dotted translation key refers to ("a.b" -> ("a", "b"), or a key with a dot)."""
+    split = tuple(key.split("."))
+    if split in literals:
+        return split
+    if (key,) in literals:
+        return (key,)
+    return None
 
-    Args:
-        content: Full content string
-        start_pos: Position of the opening brace
 
-    Returns:
-        Content between balanced braces including the braces
-    """
-    if start_pos >= len(content) or content[start_pos] != "{":
-        return ""
-
-    brace_count = 0
-    in_string = False
-    escape_next = False
-    string_delimiter = None
-
-    for i, char in enumerate(content[start_pos:], start_pos):
-        if escape_next:
-            escape_next = False
-            continue
-
-        if char == "\\":
-            escape_next = True
-            continue
-
-        if not in_string:
-            if char in ['"', "'", "`"]:
-                in_string = True
-                string_delimiter = char
-            elif char == "{":
-                brace_count += 1
-            elif char == "}":
-                brace_count -= 1
-                if brace_count == 0:
-                    return content[start_pos : i + 1]
+def replace_literals(
+    text: str,
+    literals: Dict[KeyPath, TSLiteral],
+    values: Dict[KeyPath, str],
+    source_literals: Optional[Dict[KeyPath, TSLiteral]] = None,
+) -> str:
+    """Replace only the given values' literals in `text`, each escaped for its quote style."""
+    source_literals = source_literals or {}
+    for path in sorted(values, key=lambda p: literals[p].start, reverse=True):
+        literal = literals[path]
+        if source_literals:
+            quote, subs = _choose_quote(literal, source_literals.get(path))
         else:
-            if char == string_delimiter:
-                in_string = False
-                string_delimiter = None
+            quote, subs = literal.quote, None
+        text = text[: literal.start] + encode_ts_string(values[path], quote, subs) + text[literal.end :]
+    return text
 
-    return ""  # Unbalanced braces
+
+def _literals_of(file_path: Optional[str]) -> Dict[KeyPath, TSLiteral]:
+    if not file_path or not os.path.exists(file_path):
+        return {}
+    try:
+        return read_ts_document(file_path).literals
+    except (OSError, ValueError):
+        return {}
+
+
+def _quote_map(
+    target_literals: Dict[KeyPath, TSLiteral], source_literals: Dict[KeyPath, TSLiteral]
+) -> Dict[KeyPath, Tuple[str, Optional[Tuple[str, ...]]]]:
+    return {
+        path: _choose_quote(target_literals.get(path), source_literals.get(path))
+        for path in set(target_literals) | set(source_literals)
+    }
+
+
+def write_ts_translation_file_keeping_quotes(
+    file_path: str, content: Dict[str, Any], source_file: Optional[str] = None, export_name: Optional[str] = None
+) -> None:
+    """write_ts_translation_file with each value in the quote style of the existing target or the source."""
+    quotes = _quote_map(_literals_of(file_path), _literals_of(source_file))
+    write_ts_translation_file(file_path, content, export_name, quotes)
 
 
 def write_ts_translation_file_in_place(
@@ -245,55 +670,102 @@ def write_ts_translation_file_in_place(
     translations: Dict[str, str],
     export_name: Optional[str] = None,
     lock: Optional[threading.Lock] = None,
+    source_file: Optional[str] = None,
 ) -> None:
     """
-    Incrementally update a TypeScript translation file with new translations.
-    Updates existing keys and adds new keys if they don't exist.
-    Supports both flat keys and nested keys (dot notation).
+    Update a TypeScript translation file with new translations (dotted keys for nested values).
+
+    The file keeps its layout (algebras.utils.ts_layout): only changed literals are replaced, each
+    in its quote style; keys the file lacks are inserted at their source position; comments, key
+    order, blank lines, indentation and line endings stay. A file that does not exist yet is made
+    from the source module as a template, with untranslated values left out. Template literal
+    substitutions follow the source file: a translated "${" or backtick is escaped, never a new
+    substitution. The written file always parses back.
 
     Args:
         file_path: Path to the TypeScript file
         translations: Dictionary of key -> translation to update/add
         export_name: Name of the exported constant (defaults to language code from filename)
         lock: Optional lock for thread-safe file access
+        source_file: The source language module (template, key order and quote style)
     """
     if lock:
         lock.acquire()
     try:
-        # Read existing file or create new structure
+        base_text = None
         if os.path.exists(file_path):
-            try:
-                existing_content = read_ts_translation_file(file_path)
-            except Exception:
-                # If reading fails, start with empty dict
-                existing_content = {}
-        else:
-            existing_content = {}
-
-        # Determine export name
-        if export_name is None:
-            basename = os.path.basename(file_path)
-            export_name = basename.split(".")[0]
-
-        # Merge translations: update existing keys and add new keys
-        # Handle both flat keys and nested keys (dot notation)
-        for key, value in translations.items():
-            if "." in key:
-                # Nested key (dot notation) - create nested structure
-                key_parts = key.split(".")
-                set_nested_value(existing_content, key_parts, value)
-            else:
-                # Flat key - update or add directly
-                existing_content[key] = value
-
-        # Convert any dicts with only numeric keys to lists before writing
-        existing_content = convert_numeric_dicts_to_lists(existing_content)
-
-        # Write back to file
-        write_ts_translation_file(file_path, existing_content, export_name)
+            with open(file_path, "r", encoding="utf-8", newline="") as f:
+                base_text = f.read()
+        write_ts_translations(file_path, translations, export_name, source_file=source_file, base_text=base_text)
     finally:
         if lock:
             lock.release()
+
+
+def _read_text(file_path: Optional[str]) -> Optional[str]:
+    if not file_path or not os.path.exists(file_path):
+        return None
+    try:
+        with open(file_path, "r", encoding="utf-8", newline="") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def write_ts_translations(
+    file_path: str,
+    translations: Dict[str, Any],
+    export_name: Optional[str] = None,
+    source_file: Optional[str] = None,
+    base_text: Optional[str] = None,
+    regenerate: bool = False,
+) -> None:
+    """
+    Write `translations` into `base_text` (the target as it was; None: the target is new) and
+    save the result as `file_path`.
+
+    The layout is kept (see write_ts_translation_file_in_place). With regenerate=True, or if the
+    module cannot be edited as text (unparseable target, a value where the source has an object),
+    the merged content is written from scratch instead, keeping each value's quote style.
+    """
+    if export_name is None:
+        export_name = os.path.basename(file_path).split(".")[0]
+    source_text = _read_text(source_file)
+    if not regenerate:
+        from algebras.utils.ts_layout import LayoutError, render_ts_update
+
+        try:
+            _write_checked(file_path, render_ts_update(base_text, source_text, translations, export_name))
+            return
+        except (LayoutError, TSParseError):
+            pass  # written from scratch below
+
+    doc: Optional[TSDocument] = None
+    if base_text is not None:
+        try:
+            doc = parse_ts_module(base_text)
+        except TSParseError:
+            doc = None  # unreadable: written again from scratch
+    existing_content = doc.data if doc is not None else {}
+    if doc is not None and doc.export_name:
+        export_name = doc.export_name
+
+    for key, value in translations.items():
+        if "." in key and (key,) not in (doc.literals if doc else {}):
+            set_nested_value(existing_content, key.split("."), value)
+        else:
+            existing_content[key] = value
+
+    existing_content = convert_numeric_dicts_to_lists(existing_content)
+
+    source_literals: Dict[KeyPath, TSLiteral] = {}
+    if source_text is not None:
+        try:
+            source_literals = parse_ts_module(source_text).literals
+        except TSParseError:
+            pass
+    quotes = _quote_map(doc.literals if doc is not None else {}, source_literals)
+    write_ts_translation_file(file_path, existing_content, export_name, quotes)
 
 
 def convert_numeric_dicts_to_lists(obj: Any) -> Any:
@@ -308,28 +780,17 @@ def convert_numeric_dicts_to_lists(obj: Any) -> Any:
         Converted object with numeric-key dicts converted to lists
     """
     if isinstance(obj, dict):
-        # First, recursively process all values to convert nested structures
         processed_dict = {k: convert_numeric_dicts_to_lists(v) for k, v in obj.items()}
-
-        # Then check if all keys are numeric (after processing)
         if processed_dict:
-            all_numeric = all(
-                isinstance(k, str) and k.isdigit() for k in processed_dict.keys()
-            )
-
+            all_numeric = all(isinstance(k, str) and k.isdigit() for k in processed_dict.keys())
             if all_numeric:
-                # Convert to list
                 max_index = max(int(k) for k in processed_dict.keys())
                 arr = [None] * (max_index + 1)
                 for k, v in processed_dict.items():
                     arr[int(k)] = v
                 return arr
-
-        # Return processed dict (not all keys were numeric)
         return processed_dict
     elif isinstance(obj, list):
-        # Recursively process list items
         return [convert_numeric_dicts_to_lists(item) for item in obj]
     else:
-        # Primitive value, return as is
         return obj

@@ -1,0 +1,170 @@
+"""
+Placeholder syntaxes.
+
+Each syntax has a strict pattern (a valid placeholder) and, where useful, a lenient pattern that
+also matches damaged variants (lookalike letters, fullwidth signs, stray spaces) so the checker
+can find and repair them.
+"""
+
+import re
+from dataclasses import dataclass
+from typing import Callable, Dict, Optional, Pattern
+
+# Kinds whose relative order must stay the same when they are not positional
+# (printf-style "%s ... %d" fills arguments by position in the string).
+ORDERED_KINDS = frozenset({"printf"})
+
+
+@dataclass(frozen=True)
+class Syntax:
+    name: str
+    kind: str
+    pattern: Pattern[str]
+    lenient: Optional[Pattern[str]] = None
+    # Optional format-specific check run by verify() when the profile uses this syntax:
+    # (source placeholders, target placeholders, problems so far) -> problems. It may add problems
+    # (e.g. XLIFF pairing/nesting) or refine existing ones (missing + extra -> attribute changed).
+    check: Optional[Callable] = None
+    # Optional codec for literal text, for syntaxes that escape the text around their placeholders
+    # (MessageFormat writes an apostrophe as ''). encode(masked) returns the masked text to send to
+    # the model; decode(translated, masked) returns the model's output, still masked, with that
+    # escaping restored. Both only see tokens and literal text, never placeholder bytes.
+    encode: Optional[Callable] = None
+    decode: Optional[Callable] = None
+
+
+_PRINTF_FLAGS = r"[-+0#,]*"
+# Letters a model writes in place of a conversion letter: Cyrillic and Greek (transliteration or
+# lookalikes) and fullwidth Latin. Other scripts are not included: "50%オフ" (Japanese, "50% off")
+# or "%ı" are ordinary text, not a damaged specifier.
+_LOOKALIKE_LETTER = r"[\u0370-\u03ff\u0400-\u052f\uff21-\uff3a\uff41-\uff5a]"
+_PRINTF_LENGTH = r"(?:hh|h|ll|l|q|L|z|t|j)?"
+
+# Java Formatter, C and Objective-C/Swift printf in one pattern. The space and "'" flags are left
+# out on purpose: "50% off" would otherwise match "% o".
+PRINTF = Syntax(
+    name="printf",
+    kind="printf",
+    pattern=re.compile(
+        r"%%"
+        r"|%(?:\d+\$)?[tT][a-zA-Z]"
+        r"|%(?:\d+\$)?" + _PRINTF_FLAGS + r"\d*(?:\.\d+)?" + _PRINTF_LENGTH
+        + r"[@diuUoOxXfFeEgGaAcCsSpbBhHn]"
+        # "%#@" only starts a .stringsdict variable reference (%#@name@), never a printf specifier.
+        + r"(?<!#@)"
+    ),
+    # Any letter (Cyrillic, Greek, fullwidth ...) after a printf prefix that has a position or a
+    # length modifier, or a fullwidth percent sign. Kept narrow so normal words are not matched.
+    lenient=re.compile(
+        r"[%％]\s?(?:[0-9０-９]+\s?[$＄]\s?)" + _PRINTF_FLAGS + r"\d*(?:\.\d+)?" + _PRINTF_LENGTH + r"[^\W\d_]"
+        r"|％(?:\d+\$)?" + _PRINTF_FLAGS + r"\d*(?:\.\d+)?" + _PRINTF_LENGTH + r"[^\W\d_@]"
+        r"|[%％]\s?(?:[0-9０-９]+\s?[$＄]\s?)?[＠@]"
+        r"|%\d*(?:\.\d+)?" + _PRINTF_LENGTH + _LOOKALIKE_LETTER
+    ),
+)
+
+# %#@name@ references in .stringsdict NSStringLocalizedFormatKey.
+OBJC_VARIABLE = Syntax(
+    name="objc_variable",
+    kind="objc_variable",
+    pattern=re.compile(r"%(?:\d+\$)?#@[A-Za-z_][A-Za-z0-9_]*@"),
+    # A translated or transliterated variable name ("%#@элементы@") or fullwidth signs.
+    lenient=re.compile(r"[%％](?:[0-9０-９]+[$＄])?#[@＠][^@＠\s]+[@＠]"),
+)
+
+PYTHON_PERCENT = Syntax(
+    name="python_percent",
+    kind="named",
+    pattern=re.compile(r"%\([^)\s]+\)[-+ 0#]*\d*(?:\.\d+)?[diouxXeEfFgGcrsa]"),
+    lenient=re.compile(r"%\([^)]+\)\s?[^\W\d_]"),
+)
+
+RUBY = Syntax(
+    name="ruby",
+    kind="named",
+    # %<name>s: the name is an identifier (any script, so a transliterated "%<цена>.2f" is still
+    # found and reported), which keeps "50%</b> off" from being read as a reference.
+    pattern=re.compile(r"%\{[^{}\s]+\}|%<[^\W\d]\w*>[-+ 0#]*\d*(?:\.\d+)?[a-zA-Z]"),
+    lenient=re.compile(r"[%％]\s?\{\s*[^{}]+?\s*\}"),
+)
+
+I18NEXT = Syntax(
+    name="i18next",
+    kind="named",
+    pattern=re.compile(r"\{\{-?\s*[^{}]+?\s*\}\}|\$t\([^()]*\)"),
+    lenient=re.compile(r"\{\{\s*[^{}]+?\s*\}\}"),
+)
+
+JS_TEMPLATE = Syntax(
+    name="js_template",
+    kind="named",
+    # One whole token, nested braces included (up to three levels): ${fmt({n: count})}.
+    pattern=re.compile(r"\$\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})+\}"),
+)
+
+ICU_SIMPLE = Syntax(
+    name="icu_simple",
+    kind="named",
+    pattern=re.compile(
+        r"\{\s*(?:\d+|[A-Za-z_][A-Za-z0-9_.]*)\s*(?:,\s*(?:number|date|time)\s*(?:,[^{}]*)?)?\}"
+    ),
+    # A single word in braces (e.g. a translated name "{имя}"). ICU plural/select branch text
+    # ("{# items}") has spaces or "#" and is not matched.
+    lenient=re.compile(r"\{\s*[^\W\d][\w.]*\s*\}"),
+)
+
+SYMFONY = Syntax(
+    name="symfony",
+    kind="named",
+    pattern=re.compile(r"%[A-Za-z_][A-Za-z0-9_.]*%"),
+    # A translated or transliterated name ("%счёт%"), fullwidth signs or a stray space inside.
+    lenient=re.compile(r"[%％]\s?[^\W\d][\w.]*\s?[%％]"),
+)
+
+QT = Syntax(
+    name="qt",
+    kind="named",
+    pattern=re.compile(r"%(?:L)?[1-9][0-9]?(?![0-9$])"),
+)
+
+CHROME = Syntax(
+    name="chrome",
+    kind="named",
+    pattern=re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*\$|\$[1-9]"),
+    # A translated or transliterated name ("$ПОЛЬЗОВАТЕЛЬ$"), fullwidth "＄", non-ASCII digits.
+    lenient=re.compile(r"[$＄]\s?[^\W\d]\w*\s?[$＄]|[$＄][^\x00-\x7f\D]|＄[1-9]"),
+)
+
+# Opening, closing and self-closing markup tags (HTML, <b>, <xliff:g>, <x/>, <ph/> ...).
+# The tag is one token; the text between an open and a close tag stays translatable.
+XML_TAG = Syntax(
+    name="xml_tag",
+    kind="tag",
+    pattern=re.compile(r"</?[A-Za-z][A-Za-z0-9_.:-]*(?:\s+[^<>]*?)?/?>"),
+)
+
+SYNTAXES: Dict[str, Syntax] = {
+    s.name: s
+    for s in (
+        PRINTF,
+        OBJC_VARIABLE,
+        PYTHON_PERCENT,
+        RUBY,
+        I18NEXT,
+        JS_TEMPLATE,
+        ICU_SIMPLE,
+        SYMFONY,
+        QT,
+        CHROME,
+        XML_TAG,
+    )
+}
+
+
+def get_syntax(name: str) -> Syntax:
+    try:
+        return SYNTAXES[name]
+    except KeyError:
+        raise ValueError(
+            f"Unknown placeholder syntax '{name}'. Known: {', '.join(sorted(SYNTAXES))}"
+        )

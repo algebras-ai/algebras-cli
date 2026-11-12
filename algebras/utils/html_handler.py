@@ -144,7 +144,7 @@ def write_html_file(file_path: str, original_file_path: str, translations: Dict[
             element["placeholder"] = original_to_translation[placeholder_text]
     
     # Write the translated HTML file with enhanced formatting
-    with open(file_path, "w", encoding="utf-8") as f:
+    with open(file_path, "w", encoding="utf-8", newline="") as f:
         # Normalize and write HTML with consistent formatting
         normalized_html = normalize_html_formatting(soup, original_file_path)
         f.write(normalized_html)

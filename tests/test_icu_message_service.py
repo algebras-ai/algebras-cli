@@ -44,19 +44,19 @@ def test_icu_service_detect_prepare_rebuild_roundtrip():
     assert "other {" in rebuilt
 
 
-def test_icu_service_validation_failure_keeps_raw_with_warning(capsys):
+def test_icu_service_quotes_stray_braces_in_translated_literals(capsys):
     service = ICUMessageService()
     message = "{gender, select, male {He} female {She} other {They}}"
     flattened, mapping = service.preprocess_texts([message])
 
-    # Invalid rebuild payload: unbalanced brace in translated literal.
+    # A brace the model added is literal text: it is quoted, so the message stays valid.
     rebuilt = service.postprocess_translations(mapping, ["He}", "She", "They"])
     captured = capsys.readouterr()
 
     assert len(flattened) == 3
-    assert "ICU validation failed" in captured.out
-    # Raw translated output is kept even when invalid.
-    assert rebuilt[0].startswith("{gender, select,")
+    assert "ICU validation failed" not in captured.out
+    assert rebuilt[0] == "{gender, select, male {He'}'} female {She} other {They}}"
+    assert service.validate(rebuilt[0])
 
 
 def test_batch_processor_rebuilds_icu_messages():

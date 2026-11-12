@@ -140,7 +140,12 @@ class FileScanner:
         Returns:
             Dictionary mapping language codes to lists of file paths
         """
-        from algebras.utils.path_utils import resolve_destination_path
+        from algebras.utils.path_utils import (
+            match_android_qualifier,
+            resolve_destination_path,
+            warn_legacy_android_dir,
+            warn_legacy_android_folder,
+        )
         
         # Make sure we have valid languages list (no False values)
         languages = [lang for lang in self.config.get_languages() if lang]
@@ -172,6 +177,7 @@ class FileScanner:
                     if destination_pattern:
                         for lang in languages:
                             if lang != source_language:
+                                warn_legacy_android_folder(destination_pattern, lang, self.config)
                                 resolved_path = resolve_destination_path(destination_pattern, lang, self.config)
                                 # Normalize the resolved path for consistent path separators
                                 normalized_resolved_path = os.path.normpath(resolved_path)
@@ -212,6 +218,14 @@ class FileScanner:
                             # Otherwise, check if the extracted value is itself a language code
                             if lang_code is None:
                                 lang_code = destination_value if destination_value in languages else None
+                            
+                            if lang_code is not None and destination_value == lang_code:
+                                # A raw-code folder such as values-uz-Cyrl, which Android ignores
+                                warn_legacy_android_dir(os.path.dirname(file_path), lang_code)
+                            
+                            # Android qualifiers: values-b+uz+Cyrl -> uz-Cyrl, values-pt-rBR -> pt-BR
+                            if lang_code is None:
+                                lang_code = match_android_qualifier(destination_value, languages)
                             
                             if lang_code and lang_code in languages:
                                 result[lang_code].append(file_path)
@@ -278,3 +292,35 @@ class FileScanner:
                         break
         
         return result 
+    def multi_language_files(self) -> List[str]:
+        """
+        Legacy mode (no `source_files`): CSV / TSV files with a column for the source language.
+        They hold every language, so each is both the source and the target file, and the
+        filename-based grouping of group_files_by_language (one file per language) does not pair
+        them. Empty with `source_files`, which pairs them through their destination_path.
+        """
+        if self.source_files:
+            return []
+        source_language = self.config.get_source_language()
+        assigned = {f for files in self.group_files_by_language().values() for f in files}
+        return [
+            f
+            for f in self.find_localization_files()
+            if f.endswith((".csv", ".tsv"))
+            and f not in assigned
+            and has_language_column(f, source_language, self.config)
+        ]
+
+
+def has_language_column(file_path: str, language: str, config: Optional[Config] = None) -> bool:
+    """True if a CSV / TSV translation file (not a glossary) has a column for `language`."""
+    from algebras.utils.csv_handler import _find_matching_column, is_glossary_csv, read_csv_file
+
+    try:
+        if is_glossary_csv(file_path):
+            return False
+        columns = read_csv_file(file_path).get("languages", [])
+    except Exception:
+        return False
+    code = config.get_destination_locale_code(language) if config is not None else language
+    return _find_matching_column(columns, code) is not None

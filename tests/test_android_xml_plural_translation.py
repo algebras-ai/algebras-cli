@@ -164,7 +164,7 @@ class TestAndroidXMLPluralTranslation:
         from algebras.services.batch_processor import BatchResult
         mock_batch_processor = MagicMock()
         
-        def mock_process(texts, source_lang, target_lang, ui_safe=False, glossary_id="", on_batch_complete=None, translate_text_func=None):
+        def mock_process(texts, source_lang, target_lang, ui_safe=False, glossary_id="", on_batch_complete=None, translate_text_func=None, **kwargs):
             translations = []
             for text in texts:
                 # Simulate German translations
@@ -244,7 +244,7 @@ class TestAndroidXMLPluralTranslation:
         from algebras.services.batch_processor import BatchResult
         mock_batch_processor = MagicMock()
         
-        def mock_process(texts, source_lang, target_lang, ui_safe=False, glossary_id="", on_batch_complete=None, translate_text_func=None):
+        def mock_process(texts, source_lang, target_lang, ui_safe=False, glossary_id="", on_batch_complete=None, translate_text_func=None, **kwargs):
             translations = []
             translation_map = {
                 "%1$d minute": "%1$d Minute",
@@ -412,7 +412,7 @@ class TestAndroidXMLPluralTranslation:
         from algebras.services.batch_processor import BatchResult
         mock_batch_processor = MagicMock()
         
-        def mock_process(texts, source_lang, target_lang, ui_safe=False, glossary_id="", on_batch_complete=None, translate_text_func=None):
+        def mock_process(texts, source_lang, target_lang, ui_safe=False, glossary_id="", on_batch_complete=None, translate_text_func=None, **kwargs):
             translations = []
             translation_map = {
                 "%1$d minute": "%1$d Minute",
@@ -625,7 +625,7 @@ class TestAndroidXMLPluralTranslation:
         from algebras.services.batch_processor import BatchResult
         mock_batch_processor = MagicMock()
         
-        def mock_process(texts, source_lang, target_lang, ui_safe=False, glossary_id="", on_batch_complete=None, translate_text_func=None):
+        def mock_process(texts, source_lang, target_lang, ui_safe=False, glossary_id="", on_batch_complete=None, translate_text_func=None, **kwargs):
             translations = []
             translation_map = {
                 "Start Quiz": "Quiz starten",

@@ -311,6 +311,12 @@ algebras translate --language fr
 # Force translation even if files are up to date
 algebras translate --force
 
+# Retranslate only specific keys (repeat --force; a key may contain commas)
+algebras translate --force login.title --force "Hello, %(name)s, welcome"
+
+# The comma-separated form still works (a value that is itself a key is never split)
+algebras translate --force "login.title,nav.home"
+
 # Only translate missing keys
 algebras translate --only-missing
 
@@ -332,6 +338,21 @@ algebras translate --regenerate-from-scratch
 # Performance tuning
 algebras translate --batch-size 10 --max-parallel-batches 3
 ```
+
+`translate` and `update` translate every file even when one of them fails (an unreadable or
+invalid source file is reported with the reason; add `--verbose` for the traceback). The run
+ends with a summary line such as `12 files OK, 1 files failed, 3 keys left out`, and exits with:
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Everything was translated. |
+| `1` | Errors: a file failed (or none of its keys could be translated), or the run could not proceed. |
+| `2` | Completed, but some keys were left out (placeholders rejected or API batches failed). They are retried on the next run. |
+
+Language codes are sent to the API in full BCP-47 form (`uz-Cyrl`, `pt-BR`). If the platform
+answers that a code is not supported, the CLI says so once per language and leaves those keys
+out. Map it to a supported code with the locale mapping (see [Locale Code Mapping](#locale-code-mapping)):
+`languages: [en, {pt: pt-BR}]` translates with `pt` and still writes the `pt-BR` files. Or ask support.
 
 ### Use Custom Configuration Files
 
@@ -426,6 +447,33 @@ algebras healthcheck --language fr --verbose
 ```
 
 **Note:** The healthcheck command validates translation quality by checking formatting, placeholders, and tags. It returns exit code 0 if no errors are found, or 1 if errors are detected (useful for CI/CD pipelines).
+
+### Check and fix placeholders
+
+Placeholders (`%s`, `%1$d`, `%@`, `{name}`, `{{name}}`, `<b>` …) are protected during translation: the
+model only sees opaque tokens, and a translation that loses or changes one is retried once, then left
+untranslated instead of being written damaged. To check files that were translated earlier:
+
+```bash
+# Report lost, extra or damaged placeholders (exit code 1 if any)
+algebras placeholders
+
+# Only some languages
+algebras placeholders -l uz -l ru
+
+# Preview the automatic fixes (e.g. "%1$с" → "%1$s", "{{ имя }}" → "{{name}}")
+algebras placeholders --fix --dry-run
+
+# Apply them; retranslate what cannot be fixed automatically
+algebras placeholders --fix --retranslate
+
+# JSON report for CI
+algebras placeholders --format json
+```
+
+Exit codes: 0 = no issues (or all fixed), 1 = issues found, 2 = issues left after `--fix`.
+To choose which placeholder syntaxes apply to a file, add `placeholders` to its entry in `source_files`,
+e.g. `"placeholders": ["printf", "xml_tag"]`.
 
 ### Check the status of your translations
 

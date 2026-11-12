@@ -1,18 +1,29 @@
+import os
 import queue
 import threading
 from typing import Dict, Optional
 
-from algebras.utils.ts_handler import write_ts_translation_file_in_place
+from algebras.utils.ts_handler import write_ts_translations
 
 
 class IncrementalFileWriter:
     """
     Thread-safe incremental file writer that processes write operations sequentially
     using a queue to ensure file consistency.
+
+    TypeScript: the target as it was when the writer was created is the base of every write, and
+    each batch writes all translations so far into it (algebras.utils.ts_layout). The file after
+    the last batch is the same as writing every translation at once, whatever the batch order: new
+    keys at their source position, a new target built from the source module as a template.
     """
 
     def __init__(
-        self, file_path: str, file_type: str, export_name: Optional[str] = None
+        self,
+        file_path: str,
+        file_type: str,
+        export_name: Optional[str] = None,
+        source_file: Optional[str] = None,
+        regenerate: bool = False,
     ):
         """
         Initialize incremental file writer.
@@ -21,10 +32,20 @@ class IncrementalFileWriter:
             file_path: Path to the file to write
             file_type: Type of file ('ts', 'json', etc.)
             export_name: Export name for TypeScript files
+            source_file: Source language file (TypeScript: template, key order, quote style)
+            regenerate: Write the file from scratch instead of keeping its layout
+                (--regenerate-from-scratch)
         """
         self.file_path = file_path
         self.file_type = file_type
         self.export_name = export_name
+        self.source_file = source_file
+        self.regenerate = regenerate
+        self.base_text: Optional[str] = None
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8", newline="") as f:
+                self.base_text = f.read()
+        self.translations: Dict[str, str] = {}
         self.queue = queue.Queue()
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
@@ -58,6 +79,18 @@ class IncrementalFileWriter:
                 f"Error writing to file {self.file_path}: {self.error_message}"
             )
 
+    def _write_ts(self, translations: Dict[str, str]) -> None:
+        with self.lock:
+            self.translations.update(translations)
+            write_ts_translations(
+                self.file_path,
+                dict(self.translations),
+                self.export_name,
+                source_file=self.source_file,
+                base_text=self.base_text,
+                regenerate=self.regenerate,
+            )
+
     def _writer_loop(self):
         """Process write queue sequentially."""
         while True:
@@ -72,12 +105,7 @@ class IncrementalFileWriter:
                     # Write batch results to file
                     try:
                         if self.file_type == "ts":
-                            write_ts_translation_file_in_place(
-                                self.file_path,
-                                translations,
-                                self.export_name,
-                                self.lock,
-                            )
+                            self._write_ts(translations)
                         # Add support for other file types here if needed
                         else:
                             print(

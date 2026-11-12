@@ -411,7 +411,8 @@ def test_translate_en_to_ru_writes_all_russian_forms(ios_project, monkeypatch):
     )
 
     written = read_ios_stringsdict_file(target)["items_count"]["count"]
-    assert written["one"] == "RU[one] One item"
+    # Russian "one" also covers 21, 31 … so it is translated from "%d items", not "One item".
+    assert written["one"] == "RU[one] %d items"
     assert written["few"] == "RU[few] %d items"
     assert written["many"] == "RU[many] %d items"
     assert written["other"] == "RU[other] %d items"

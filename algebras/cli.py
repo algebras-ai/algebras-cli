@@ -12,7 +12,7 @@ from algebras.commands import init_command, add_command
 from algebras.commands import translate_command, update_command
 from algebras.commands import review_command, status_command
 from algebras.commands import configure_command, glossary_push_command
-from algebras.commands import healthcheck_command
+from algebras.commands import healthcheck_command, placeholders_command
 
 # Initialize colorama
 init()
@@ -53,14 +53,37 @@ def add(ctx, languages):
     add_command.execute(list(languages), config_file)
 
 
-@cli.command("translate")
+_EXIT_CODES_HELP = """
+    \b
+    Exit codes:
+      0  everything translated
+      1  errors: a file failed, or the run could not proceed
+      2  completed, but some keys were left out (placeholders rejected
+         or API batches failed); they are retried on the next run
+"""
+
+
+def _force_arg(force):
+    """--force values as translate_command.execute takes them."""
+    if not force:
+        return None
+    if "__all__" in force:
+        return "__all__"
+    # One value keeps the original string form ("k1,k2" is split on commas unless it is a key).
+    return force[0] if len(force) == 1 else list(force)
+
+
+@cli.command("translate", epilog=_EXIT_CODES_HELP)
 @click.option("--language", "-l", help="Translate only the specified language.")
 @click.option(
     "--force",
     default=None,
     is_flag=False,
     flag_value="__all__",
-    help='Force translation even if files are up to date. Optionally pass comma-separated key names to force only specific keys (e.g. --force "key1,key2").',
+    multiple=True,
+    help='Force translation even if files are up to date. Pass a key to force only that key; repeat '
+    'the option for several keys (--force key1 --force "key, with commas"). The comma form '
+    '--force "key1,key2" still works; a value that is itself a key is never split.',
 )
 @click.option("--only-missing", is_flag=True, help="Only translate keys that are missing in the target files.")
 @click.option("--ui-safe", is_flag=True, help="Ensure translations will not exceed the original text length.")
@@ -76,10 +99,11 @@ def add(ctx, languages):
 def translate(ctx, language, force, only_missing, ui_safe, verbose, batch_size, max_parallel_batches, glossary_id, prompt_file, regenerate_from_scratch, sync_batch, no_cache):
     """Translate your application."""
     config_file = ctx.obj.get('config_file') if ctx.obj else None
-    translate_command.execute(language, force, only_missing, ui_safe=ui_safe, verbose=verbose, batch_size=batch_size, max_parallel_batches=max_parallel_batches, glossary_id=glossary_id, prompt_file=prompt_file, regenerate_from_scratch=regenerate_from_scratch, sync_batch=sync_batch, no_cache=no_cache, config_file=config_file)
+    exit_code = translate_command.execute(language, _force_arg(force), only_missing, ui_safe=ui_safe, verbose=verbose, batch_size=batch_size, max_parallel_batches=max_parallel_batches, glossary_id=glossary_id, prompt_file=prompt_file, regenerate_from_scratch=regenerate_from_scratch, sync_batch=sync_batch, no_cache=no_cache, config_file=config_file)
+    sys.exit(exit_code if isinstance(exit_code, int) else 0)
 
 
-@cli.command("update")
+@cli.command("update", epilog=_EXIT_CODES_HELP)
 @click.option("--language", "-l", help="Update only the specified language.")
 @click.option("--full", is_flag=True, help="Translate the entire file, not just missing keys.")
 @click.option("--only-missing", is_flag=True, help="Only translate keys that are missing in the target files.")
@@ -93,7 +117,8 @@ def update(ctx, language, full, only_missing, ui_safe, verbose, glossary_id):
     # If neither flag is provided, only_missing defaults to True (current behavior)
     only_missing_value = only_missing if only_missing else not full
     config_file = ctx.obj.get('config_file') if ctx.obj else None
-    update_command.execute(language, only_missing_value, skip_git_validation=only_missing, ui_safe=ui_safe, verbose=verbose, glossary_id=glossary_id, config_file=config_file)
+    exit_code = update_command.execute(language, only_missing_value, skip_git_validation=only_missing, ui_safe=ui_safe, verbose=verbose, glossary_id=glossary_id, config_file=config_file)
+    sys.exit(exit_code if isinstance(exit_code, int) else 0)
 
 
 @cli.command("ci")
@@ -135,6 +160,27 @@ def healthcheck(ctx, language, format, verbose):
     """Check translation quality and validate formatting, placeholders, and tags."""
     config_file = ctx.obj.get('config_file') if ctx.obj else None
     exit_code = healthcheck_command.execute(language=language, output_format=format, verbose=verbose, config_file=config_file)
+    sys.exit(exit_code)
+
+
+@cli.command("placeholders")
+@click.option("--language", "-l", "languages", multiple=True, help="Check only this language (repeatable).")
+@click.option("--fix", is_flag=True, help="Repair damaged placeholders (e.g. %1$с → %1$s) without calling the API.")
+@click.option("--retranslate", is_flag=True, help="With --fix: retranslate values that could not be repaired.")
+@click.option("--dry-run", is_flag=True, help="With --fix: show the changes without writing them.")
+@click.option("--format", "output_format", type=click.Choice(['console', 'json'], case_sensitive=False), default='console', help="Output format (console or json).")
+@click.pass_context
+def placeholders(ctx, languages, fix, retranslate, dry_run, output_format):
+    """Check that translations keep every placeholder (%s, %1$d, {name}, <b> …) and fix them."""
+    config_file = ctx.obj.get('config_file') if ctx.obj else None
+    exit_code = placeholders_command.execute(
+        languages=list(languages) or None,
+        fix=fix,
+        retranslate=retranslate,
+        dry_run=dry_run,
+        output_format=output_format,
+        config_file=config_file,
+    )
     sys.exit(exit_code)
 
 

@@ -13,13 +13,33 @@ import concurrent.futures
 from algebras.config import Config
 from algebras.services.file_scanner import FileScanner
 from algebras.commands import translate_command
+from algebras.services.batch_processor import BatchProcessor
+from algebras.utils.run_stats import RunStats, EXIT_ERROR, EXIT_OK
 from algebras.utils.lang_validator import validate_language_files, find_outdated_keys
+from algebras.utils.path_utils import android_qualifier
 from algebras.utils.git_utils import (
     is_git_available,
     is_git_repository,
     compare_key_modifications,
     get_key_commit_info
 )
+
+
+def _matching_android_source(lang_file: str, source_files: List[str], source_language: str) -> Optional[str]:
+    """The source file for an Android values-<qualifier>/*.xml target, if there is one."""
+    if not lang_file.endswith(".xml"):
+        return None
+    parts = os.path.normpath(lang_file).split(os.sep)
+    folders = [i for i, part in enumerate(parts[:-1]) if part.startswith("values-") and len(part) > 7]
+    if not folders:
+        return None
+    index = folders[-1]
+    by_path = {os.path.normpath(f): f for f in source_files}
+    for folder in ("values", f"values-{android_qualifier(source_language)}", f"values-{source_language}"):
+        candidate = os.sep.join(parts[:index] + [folder] + parts[index + 1:])
+        if candidate in by_path:
+            return by_path[candidate]
+    return None
 
 
 def find_matching_source_file(lang_file: str, source_files: List[str], lang: str, source_language: str) -> Optional[str]:
@@ -38,6 +58,12 @@ def find_matching_source_file(lang_file: str, source_files: List[str], lang: str
     source_file = None
     lang_basename = os.path.basename(lang_file)
     lang_dirname = os.path.dirname(lang_file)
+
+    # Android resources: res/values-ru/strings.xml, values-pt-rBR, values-b+uz+Cyrl -> the
+    # source's res/values/strings.xml (or values-<source qualifier>).
+    android_source = _matching_android_source(lang_file, source_files, source_language)
+    if android_source:
+        return android_source
     
     # iOS-style locale directories, e.g. "en.lproj/Localizable.stringsdict" /
     # "fr.lproj/Localizable.stringsdict" - the language marker is a directory
@@ -97,7 +123,15 @@ def find_matching_source_file(lang_file: str, source_files: List[str], lang: str
 
 def _plural_target(source_file: str, lang: str) -> Optional[str]:
     # Other formats use target_language to pick CSV columns, so only pass it where plurals need it.
-    return lang if source_file.endswith(".stringsdict") else None
+    # JSON: i18next plural groups get the forms `lang` needs (json_i18n.expand_i18next_plurals).
+    return lang if source_file.endswith((".stringsdict", ".json")) else None
+
+
+def _yaml_pair_kwargs(source_file: str, source_language: str, lang: str, config) -> Dict:
+    # Rails-style YAML (`en:` / `ru:` root key): the languages and locale mapping pair the roots.
+    if not source_file.lower().endswith((".yaml", ".yml")):
+        return {}
+    return {"source_language": source_language, "target_language": lang, "config": config}
 
 
 def identify_translation_issues(
@@ -108,7 +142,8 @@ def identify_translation_issues(
     check_missing_keys: bool = True, 
     check_git_outdated_keys: bool = True,
     concurrent_processing: bool = False,
-    verbose: bool = False
+    verbose: bool = False,
+    config=None,
 ) -> Tuple[Dict[str, List[Tuple[str, str]]], Dict[str, List[Tuple[str, Set[str], str]]], Dict[str, List[Tuple[str, Set[str], str]]]]:
     """
     Identify all translation issues across specified languages.
@@ -122,6 +157,7 @@ def identify_translation_issues(
         check_git_outdated_keys: Whether to check for outdated keys using git
         concurrent_processing: Whether to use concurrent processing
         verbose: Whether to show detailed logs
+        config: Config (locale mapping for Rails-style YAML root keys)
         
     Returns:
         Tuple containing dictionaries of:
@@ -187,14 +223,21 @@ def identify_translation_issues(
             if check_missing_keys:
                 # #endregion
                 is_valid, missing_keys = validate_language_files(
-                    src_file, tgt_file, target_language=_plural_target(src_file, lang)
+                    src_file,
+                    tgt_file,
+                    **{
+                        "target_language": _plural_target(src_file, lang),
+                        **_yaml_pair_kwargs(src_file, source_language, lang, config),
+                    },
                 )
                 if not is_valid:
                     results["missing_keys"] = missing_keys
             
             # Check for outdated keys using git history
             if check_git_outdated_keys and git_available and is_git_repository(os.path.dirname(src_file)):
-                has_outdated_keys, outdated_keys = find_outdated_keys(src_file, tgt_file)
+                has_outdated_keys, outdated_keys = find_outdated_keys(
+                    src_file, tgt_file, **_yaml_pair_kwargs(src_file, source_language, lang, config)
+                )
                 if has_outdated_keys:
                     results["outdated_keys"] = outdated_keys
             
@@ -283,7 +326,12 @@ def identify_translation_issues(
                         if verbose:
                             click.echo(f"{Fore.BLUE}Validating language file for missing keys...\x1b[0m")
                         is_valid, missing_keys = validate_language_files(
-                            source_file, lang_file, target_language=_plural_target(source_file, lang)
+                            source_file,
+                            lang_file,
+                            **{
+                                "target_language": _plural_target(source_file, lang),
+                                **_yaml_pair_kwargs(source_file, source_language, lang, config),
+                            },
                         )
                         if not is_valid:
                             if verbose:
@@ -296,7 +344,9 @@ def identify_translation_issues(
                     if check_git_outdated_keys and git_available and is_git_repository(os.path.dirname(source_file)):
                         if verbose:
                             click.echo(f"{Fore.BLUE}Checking for outdated keys using git history...\x1b[0m")
-                        has_outdated_keys, outdated_keys = find_outdated_keys(source_file, lang_file)
+                        has_outdated_keys, outdated_keys = find_outdated_keys(
+                            source_file, lang_file, **_yaml_pair_kwargs(source_file, source_language, lang, config)
+                        )
                         if has_outdated_keys:
                             if verbose:
                                 click.echo(f"{Fore.YELLOW}Found {len(outdated_keys)} outdated keys based on git history\x1b[0m")
@@ -311,9 +361,12 @@ def identify_translation_issues(
     return outdated_by_language, missing_keys_by_language, outdated_keys_by_language
 
 
-def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_validation: bool = False, ui_safe: bool = False, verbose: bool = False, glossary_id: Optional[str] = None, config_file: Optional[str] = None) -> None:
+def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_validation: bool = False, ui_safe: bool = False, verbose: bool = False, glossary_id: Optional[str] = None, config_file: Optional[str] = None) -> int:
     """
     Update your translations.
+
+    Returns the exit code, as `translate` does: 0 everything translated, 1 errors (a file
+    failed, or the run could not proceed), 2 completed but some keys were left out.
 
     Args:
         language: Language to update (if None, update all languages)
@@ -328,7 +381,7 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
     
     if not config.exists():
         click.echo(f"{Fore.RED}No Algebras configuration found. Run 'algebras init' first.\x1b[0m")
-        return
+        return EXIT_ERROR
     
     # Load configuration
     config.load()
@@ -340,6 +393,10 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
         click.echo(f"{Fore.RED}🚨 ⚠️  WARNING: Your configuration uses the deprecated 'path_rules' format! ⚠️ 🚨{Fore.RESET}")
         click.echo(f"{Fore.RED}🔴 Please update to the new 'source_files' format.{Fore.RESET}")
         click.echo(f"{Fore.RED}📖 See documentation: https://github.com/algebras-ai/algebras-cli{Fore.RESET}")
+
+    # One outcome for the whole update: every translate pass below adds to it.
+    stats = RunStats(verbose)
+    BatchProcessor.reset_reported_languages()
     
     # Get languages
     all_languages = config.get_languages()
@@ -350,7 +407,7 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
     if language:
         if language not in all_languages:
             click.echo(f"{Fore.RED}Language '{language}' is not configured in your project.\x1b[0m")
-            return
+            return EXIT_ERROR
         languages = [language]
         if verbose:
             click.echo(f"{Fore.BLUE}Selected language: {language}\x1b[0m")
@@ -363,7 +420,7 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
     
     if not languages:
         click.echo(f"{Fore.YELLOW}No target languages configured. Add languages with 'algebras add <language>'.\x1b[0m")
-        return
+        return EXIT_OK
     
     # Get source language
     source_language = config.get_source_language()
@@ -398,7 +455,7 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
             
         if not source_files:
             click.echo(f"{Fore.YELLOW}No source files found for language '{source_language}'.\x1b[0m")
-            return
+            return EXIT_OK
         
         # Use the shared function to identify translation issues
         outdated_by_language, missing_keys_by_language, outdated_keys_by_language = identify_translation_issues(
@@ -409,7 +466,8 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
             check_missing_keys=True,
             check_git_outdated_keys=git_validation,
             concurrent_processing=False,  # Keep sequential for backward compatibility
-            verbose=verbose
+            verbose=verbose,
+            config=config,
         )
         
         # Count outdated and missing keys files
@@ -419,7 +477,7 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
         
         if total_outdated == 0 and total_missing_keys == 0 and total_outdated_keys == 0:
             click.echo(f"{Fore.GREEN}All translations are up to date and complete.\x1b[0m")
-            return
+            return EXIT_OK
         
         # Print summary
         if total_outdated > 0:
@@ -470,6 +528,8 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                     ui_safe=ui_safe,
                     verbose=verbose,
                     glossary_id=glossary_id,
+                    config_file=config_file,
+                    run_stats=stats,
                 )
 
             # Files already handled above (outdated by modification time) have
@@ -496,6 +556,8 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                         ui_safe=ui_safe,
                         verbose=verbose,
                         glossary_id=glossary_id,
+                        config_file=config_file,
+                        run_stats=stats,
                     )
 
             # For files with outdated keys detected via git history (source value
@@ -524,17 +586,23 @@ def execute(language: Optional[str] = None, only_missing: bool = True, skip_git_
                         ui_safe=ui_safe,
                         verbose=verbose,
                         glossary_id=glossary_id,
+                        config_file=config_file,
+                        run_stats=stats,
                     )
 
         click.echo(f"\n{Fore.GREEN}Update completed.\x1b[0m")
         click.echo(f"To check the status of your translations, run: {Fore.BLUE}algebras status\x1b[0m")
     
     except Exception as e:
+        # The update could not proceed: exit code 1.
+        stats.fatal = True
         click.echo(f"{Fore.RED}Error: {str(e)}\x1b[0m")
         if verbose:
             import traceback
             click.echo(f"{Fore.RED}Traceback:\x1b[0m")
             click.echo(traceback.format_exc())
+
+    return stats.print_summary()
 
 def execute_ci(language: Optional[str] = None, verbose: bool = False, only_missing: bool = False, config_file: Optional[str] = None) -> int:
     """
@@ -629,7 +697,8 @@ def execute_ci(language: Optional[str] = None, verbose: bool = False, only_missi
             check_missing_keys=True,
             check_git_outdated_keys=not only_missing,
             concurrent_processing=True,  # Use concurrent processing for CI
-            verbose=verbose
+            verbose=verbose,
+            config=config,
         )
         
         # Count missing and outdated keys files
