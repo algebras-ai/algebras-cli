@@ -185,6 +185,8 @@ def find_source_file(target_file: str, source_files: List[str],
         (f"-{target_language}.", f"-{source_language}."),
         (f"_{target_language}.", f"_{source_language}."),
         (f"/{target_language}/", f"/{source_language}/"),
+        # Windows: scanned paths use backslashes (locales\ru\common.json)
+        (f"{os.sep}{target_language}{os.sep}", f"{os.sep}{source_language}{os.sep}"),
     ]
     
     for target_pattern, source_pattern in patterns:

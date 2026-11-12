@@ -3,6 +3,7 @@ Legacy mode (no `source_files`): a multi-language CSV / TSV is its own source an
 'algebras placeholders', healthcheck and status pair it with itself for every language column.
 """
 
+import os
 import json
 
 import pytest
@@ -31,8 +32,9 @@ def legacy_project(tmp_path, monkeypatch):
 
 def test_csv_is_paired_with_itself(legacy_project):
     files = FileScanner(config=legacy_project).group_files_by_language()
-    csv = "locales/translations.csv"
-    assert list(healthcheck_command.iter_file_pairs(legacy_project, "en", "ru", files)) == [(csv, csv)]
+    csv = os.path.normpath("locales/translations.csv")  # scanned paths are OS paths
+    pairs = [tuple(map(os.path.normpath, p)) for p in healthcheck_command.iter_file_pairs(legacy_project, "en", "ru", files)]
+    assert pairs == [(csv, csv)]
     assert list(healthcheck_command.iter_file_pairs(legacy_project, "en", "de", files)) == []  # no column
 
 

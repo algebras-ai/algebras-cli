@@ -186,7 +186,7 @@ def _write_formatted_xml(tree: ET.ElementTree, file_path: str) -> None:
     _indent_xml(tree.getroot())
     
     # Write to file with DOCTYPE
-    with open(file_path, 'w', encoding='utf-8') as f:
+    with open(file_path, 'w', encoding='utf-8', newline="") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
         f.write('<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n')
         

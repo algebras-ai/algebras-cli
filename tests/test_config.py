@@ -79,7 +79,7 @@ class TestConfig:
         m = mock_open()
         with patch("builtins.open", m):
             config.save()
-            m.assert_called_once_with(config.config_path, "w", encoding="utf-8")
+            m.assert_called_once_with(config.config_path, "w", encoding="utf-8", newline="")
             handle = m()
             # Check that yaml.dump was called with the data
             # This is a simplified check since we can't easily verify the exact YAML content

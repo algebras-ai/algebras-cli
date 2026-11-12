@@ -75,7 +75,7 @@ def recording_writer():
     written = {}
 
     def writer(target_file, fixes, language, config):
-        written.setdefault(target_file, {}).update(fixes)
+        written.setdefault(os.path.normpath(target_file), {}).update(fixes)
 
     register_fix_writer([".xml", ".json"], writer)
     yield written
@@ -121,11 +121,11 @@ def test_clean_project_exits_0(project, capsys):
 def test_fix_writes_only_repairable_values(project, recording_writer, capsys):
     code = placeholders_command.execute(fix=True)
     assert code == 2  # "lost" cannot be repaired without retranslation
-    xml_fixes = recording_writer[os.path.join("res", "values-uz", "generic_strings.xml")]
+    xml_fixes = recording_writer[os.path.normpath("res/values-uz/generic_strings.xml")]
     assert xml_fixes[("PhoneRegistration.code_disclaimer",)] == "Код %1$s рақамига юборилди. %2$d сониядан сўнг"
     assert xml_fixes[("Quiz.points.__plurals__", "one")] == "%1$d очко"
     assert len(xml_fixes) == 4
-    json_fixes = recording_writer[os.path.join("loc", "uz", "common.json")]
+    json_fixes = recording_writer[os.path.normpath("loc/uz/common.json")]
     assert json_fixes == {("hello",): "Салом {{name}}"}
     out = capsys.readouterr().out
     assert "5 fixed" in out and "1 unresolved" in out

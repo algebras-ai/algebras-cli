@@ -36,7 +36,7 @@ class YAMLHandler(FileFormatHandler):
         """Write YAML file from scratch (yaml.dump: keys sorted, comments dropped)"""
         # Convert numeric-key dicts to lists to preserve arrays
         content = convert_numeric_dicts_to_lists(content)
-        with open(file_path, "w", encoding="utf-8") as f:
+        with open(file_path, "w", encoding="utf-8", newline="") as f:
             yaml.dump(
                 content,
                 f,

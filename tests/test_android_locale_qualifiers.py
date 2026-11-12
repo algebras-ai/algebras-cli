@@ -3,6 +3,7 @@ Android resource folders need Android qualifiers, not raw BCP-47 codes: Android 
 values-uz-Cyrl and values-pt-BR, but reads values-b+uz+Cyrl and values-pt-rBR.
 """
 
+import os
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -121,9 +122,11 @@ def test_config_mapping_takes_precedence(tmp_path):
 
 
 def test_determine_target_path_uses_android_qualifier():
-    assert determine_target_path("res/values/strings.xml", "en", "pt-BR") == "res/values-pt-rBR/strings.xml"
-    assert determine_target_path("res/values-en/strings.xml", "en", "uz-Cyrl") == "res/values-b+uz+Cyrl/strings.xml"
-    assert determine_target_path("res/values/strings.xml", "en", "ru") == "res/values-ru/strings.xml"
+    # determine_target_path builds an OS path (backslashes on Windows)
+    norm = os.path.normpath
+    assert norm(determine_target_path("res/values/strings.xml", "en", "pt-BR")) == norm("res/values-pt-rBR/strings.xml")
+    assert norm(determine_target_path("res/values-en/strings.xml", "en", "uz-Cyrl")) == norm("res/values-b+uz+Cyrl/strings.xml")
+    assert norm(determine_target_path("res/values/strings.xml", "en", "ru")) == norm("res/values-ru/strings.xml")
 
 
 SOURCE = """<?xml version="1.0" encoding="utf-8"?>

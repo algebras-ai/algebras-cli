@@ -404,7 +404,7 @@ def _write_text(file_path: str, text: str) -> None:
     dir_path = os.path.dirname(file_path)
     if dir_path:
         os.makedirs(dir_path, exist_ok=True)
-    with open(file_path, "w", encoding="utf-8") as f:
+    with open(file_path, "w", encoding="utf-8", newline="") as f:
         f.write(text)
 
 

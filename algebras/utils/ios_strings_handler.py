@@ -76,7 +76,7 @@ def write_ios_strings_file(file_path: str, content: Dict[str, Any]) -> None:
     # Join lines and write to file
     ios_content = '\n'.join(lines) + '\n'
     
-    with open(file_path, 'w', encoding='utf-8') as f:
+    with open(file_path, 'w', encoding='utf-8', newline="") as f:
         f.write(ios_content)
 
 

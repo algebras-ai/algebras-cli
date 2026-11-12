@@ -4,6 +4,7 @@ Chrome messages.json), translation end to end with a transliterating model, i18n
 and 'algebras placeholders' check / --fix / --dry-run.
 """
 
+import os
 import json
 from unittest.mock import MagicMock, patch
 
@@ -201,7 +202,7 @@ def _project(tmp_path, monkeypatch, languages=("en", "ru", "de")):
     source_files = {}
     for name, data in FIXTURES.items():
         path = _write_json(_source_path(tmp_path, name), data)
-        rel = str(path.relative_to(tmp_path))
+        rel = path.relative_to(tmp_path).as_posix()  # config paths use "/" on every OS
         source_files[rel] = {"destination_path": rel.replace("/en/", "/%algebras_locale_code%/")}
     (tmp_path / ".algebras.config").write_text(
         json.dumps({"languages": list(languages), "source_files": source_files, "api": {"provider": "algebras-ai"}}),
@@ -366,7 +367,7 @@ def test_check_reports_exact_codes(ru_project, capsys):
     code, report = _report(capsys)
     assert code == 1
     problems = {
-        (i["source_file"].split("/")[-1], i["key"]): sorted(p["code"] for p in i["problems"])
+        (os.path.basename(i["source_file"]), i["key"]): sorted(p["code"] for p in i["problems"])
         for i in report["issues"]
     }
     assert problems == {

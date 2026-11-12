@@ -54,7 +54,7 @@ def write_arb_file(file_path: str, content: Dict[str, Any]) -> None:
     # Ensure the directory exists
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     
-    with open(file_path, 'w', encoding='utf-8') as f:
+    with open(file_path, 'w', encoding='utf-8', newline="") as f:
         json.dump(content, f, ensure_ascii=False, indent=2, sort_keys=True)
 
 
@@ -220,7 +220,7 @@ def write_arb_content(file_path: str, content: Dict[str, Any]) -> None:
     directory = os.path.dirname(file_path)
     if directory:
         os.makedirs(directory, exist_ok=True)
-    with open(file_path, "w", encoding="utf-8") as f:
+    with open(file_path, "w", encoding="utf-8", newline="") as f:
         json.dump(content, f, ensure_ascii=False, indent=2)
         f.write("\n")
 

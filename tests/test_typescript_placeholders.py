@@ -279,7 +279,9 @@ def test_translated_module_parses_and_keeps_placeholders(project, mode):
     assert welcome.quote == "`"
     assert welcome.substitutions == ("${user.name}", "${plan}")  # evaluated, byte-identical
     # The model's "${" is literal text in the template literal, not a new substitution.
-    text = target.read_text(encoding="utf-8")
+    # Raw text: the parser's offsets count every character, including \r on Windows.
+    with open(target, encoding="utf-8", newline="") as f:
+        text = f.read()
     assert text[welcome.start : welcome.end].endswith("c'est \\`top\\` \\${ok`")
     assert doc.data["welcome"].endswith("c'est `top` ${ok")
     assert doc.data["welcome"].startswith("Re`bonjour`, ${user.name}!")

@@ -772,7 +772,7 @@ def write_android_xml_file_in_place(
             if et_match.group(2) in namespace_prefix_map:
                 et_to_original[et_match.group(1)] = namespace_prefix_map[et_match.group(2)]
 
-    with open(file_path, 'w', encoding='utf-8') as f:
+    with open(file_path, 'w', encoding='utf-8', newline="") as f:
         lines = file_content.split('\n')
         for i, line in enumerate(lines):
             # Restore the original attributes of the <resources> tag (namespace declarations)

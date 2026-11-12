@@ -48,7 +48,7 @@ class Config:
     
     def save(self) -> None:
         """Save the configuration file."""
-        with open(self.config_path, "w", encoding="utf-8") as f:
+        with open(self.config_path, "w", encoding="utf-8", newline="") as f:
             yaml.dump(self.data, f, default_flow_style=False, sort_keys=False)
     
     def detect_languages_from_files(self, verbose: bool = False) -> List[str]:

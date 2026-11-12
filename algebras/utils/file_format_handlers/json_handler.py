@@ -76,7 +76,7 @@ class JSONHandler(FileFormatHandler):
         directory = os.path.dirname(file_path)
         if directory:
             os.makedirs(directory, exist_ok=True)
-        with open(file_path, "w", encoding="utf-8") as f:
+        with open(file_path, "w", encoding="utf-8", newline="") as f:
             json.dump(content, f, ensure_ascii=False, indent=2)
 
     def supports_in_place(self) -> bool:
