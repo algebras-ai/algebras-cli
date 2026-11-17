@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 from colorama import Fore
 
 from algebras.config import Config
-from algebras.services.retry_handler import RetryHandler
+from algebras.services.retry_handler import TRANSIENT_STATUS_CODES, RetryHandler
 
 # How long to keep polling a batch translation job before giving up. Mirrors
 # the 300s timeout the platform's own synchronous batch endpoint used to
@@ -519,7 +519,6 @@ class AlgebrasAIClient:
 
             try:
                 response = requests.get(status_url, headers=headers)
-                consecutive_network_errors = 0
             except requests.exceptions.RequestException as e:
                 consecutive_network_errors += 1
                 if consecutive_network_errors > 5:
@@ -528,6 +527,18 @@ class AlgebrasAIClient:
                     )
                 time.sleep(interval)
                 continue
+
+            if response.status_code in TRANSIENT_STATUS_CODES:
+                # Gateway error on a read-only GET: count it like a network error.
+                consecutive_network_errors += 1
+                if consecutive_network_errors > 5:
+                    raise Exception(
+                        f"Error polling batch translation job {job_id}: "
+                        f"{response.status_code} - {response.text}"
+                    )
+                time.sleep(interval)
+                continue
+            consecutive_network_errors = 0
 
             if response.status_code != 200:
                 raise Exception(
